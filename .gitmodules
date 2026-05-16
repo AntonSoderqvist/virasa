@@ -1,0 +1,8 @@
+[submodule "vendor/quill"]
+	path = vendor/quill
+	url = https://github.com/odygrd/quill.git
+	ignore = dirty
+[submodule "vendor/SDL"]
+	path = vendor/SDL
+	url = https://github.com/libsdl-org/SDL.git
+	ignore = dirty

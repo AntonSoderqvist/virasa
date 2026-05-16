@@ -1,0 +1,84 @@
+---
+Language: Cpp
+Standard: c++20
+
+# Indentation
+UseTab: Always
+TabWidth: 6
+IndentWidth: 6
+ContinuationIndentWidth: 6
+IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
+NamespaceIndentation: None
+
+# Braces — Allman
+BreakBeforeBraces: Allman
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+# Functions
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: true
+
+# Classes
+AccessModifierOffset: 0
+IndentAccessModifiers: false
+
+# Line width
+ColumnLimit: 100
+
+# Alignment
+AlignAfterOpenBracket: DontAlign
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Includes
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"vithree/'
+    Priority: 1
+  - Regex: '^<SDL3/'
+    Priority: 2
+  - Regex: '^<vulkan/'
+    Priority: 3
+  - Regex: '^<quill/'
+    Priority: 4
+  - Regex: '^<'
+    Priority: 5
+  - Regex: '.*'
+    Priority: 6
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesInAngles: Never
+
+# Other
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: All
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+ReflowComments: true
