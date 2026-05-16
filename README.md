@@ -22,7 +22,7 @@ Will be setting up the window creation, initial rendering, and some command pars
 
 ## License
 
-Apache 2.0
+[Apache 2.0](LICENSE)
 
 ## Notes
 
