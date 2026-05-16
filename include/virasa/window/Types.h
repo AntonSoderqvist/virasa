@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #ifndef VIRASA_WINDOW_TYPES_H
 #define VIRASA_WINDOW_TYPES_H
 
@@ -16,7 +19,7 @@ namespace virasa
  */
 struct Size2D
 {
-public:
+	public:
 	/// @brief Width in pixels.
 	uint32_t width = 0;
 
@@ -33,12 +36,12 @@ public:
  */
 enum class ErrorCode : uint8_t
 {
-	None                = 0, ///< Operation completed successfully.
-	SdlInitFailed,           ///< SDL_Init() failed.
-	WindowCreateFailed,      ///< SDL_CreateWindow() failed.
-	SurfaceCreateFailed,     ///< SDL_Vulkan_CreateSurface() failed.
-	AlreadyInitialized,      ///< Initialize() called on an already-initialized Platform.
-	NotInitialized,          ///< Operation attempted on an uninitialized Platform.
+	None = 0,		   ///< Operation completed successfully.
+	SdlInitFailed,	   ///< SDL_Init() failed.
+	WindowCreateFailed,  ///< SDL_CreateWindow() failed.
+	SurfaceCreateFailed, ///< SDL_Vulkan_CreateSurface() failed.
+	AlreadyInitialized,  ///< Initialize() called on an already-initialized Platform.
+	NotInitialized,	   ///< Operation attempted on an uninitialized Platform.
 };
 
 /**
@@ -58,14 +61,21 @@ inline std::ostream& operator<<(std::ostream& os, ErrorCode code)
 {
 	switch (code)
 	{
-		case ErrorCode::None:               return os << "None";
-		case ErrorCode::SdlInitFailed:      return os << "SdlInitFailed";
-		case ErrorCode::WindowCreateFailed: return os << "WindowCreateFailed";
-		case ErrorCode::SurfaceCreateFailed:return os << "SurfaceCreateFailed";
-		case ErrorCode::AlreadyInitialized: return os << "AlreadyInitialized";
-		case ErrorCode::NotInitialized:     return os << "NotInitialized";
+		case ErrorCode::None:
+			return os << "None";
+		case ErrorCode::SdlInitFailed:
+			return os << "SdlInitFailed";
+		case ErrorCode::WindowCreateFailed:
+			return os << "WindowCreateFailed";
+		case ErrorCode::SurfaceCreateFailed:
+			return os << "SurfaceCreateFailed";
+		case ErrorCode::AlreadyInitialized:
+			return os << "AlreadyInitialized";
+		case ErrorCode::NotInitialized:
+			return os << "NotInitialized";
 		default:
-			return os << "ErrorCode(" << static_cast<unsigned>(static_cast<uint8_t>(code)) << ")";
+			return os << "ErrorCode(" << static_cast<unsigned>(static_cast<uint8_t>(code))
+				    << ")";
 	}
 }
 

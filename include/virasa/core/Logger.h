@@ -37,7 +37,7 @@ enum class LogLevel : uint8_t
  */
 struct LogConfig
 {
-	public:
+public:
 	/// Minimum level for the console sink.
 	LogLevel consoleLevel = LogLevel::Info;
 	/// Minimum level for the file sink.

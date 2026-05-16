@@ -75,11 +75,15 @@ void InitializeImpl(LogConfig config)
 	if (!config.enableColors)
 		colours.set_default_colours();
 
-	auto consoleSink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>("console_sink",
+	std::vector<std::shared_ptr<quill::Sink>> sinks;
+
+	auto consoleSink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>(
+		"console_sink",
 		colours,
 		config.enableColors ? quill::ConsoleSink::ColourMode::Automatic
-					  : quill::ConsoleSink::ColourMode::Never);
+		                    : quill::ConsoleSink::ColourMode::Never);
 	consoleSink->set_log_level(ToQuillLevel(config.consoleLevel));
+	sinks.push_back(consoleSink);
 
 	// Build the file sink if a path was supplied.
 	if (config.logFilePath != nullptr)
@@ -90,7 +94,11 @@ void InitializeImpl(LogConfig config)
 		auto fileSink = quill::Frontend::create_or_get_sink<quill::FileSink>(
 			config.logFilePath, fileSinkConfig);
 		fileSink->set_log_level(ToQuillLevel(config.fileLevel));
+		sinks.push_back(fileSink);
 	}
+
+	// Store the sinks so GetLogger can attach them to new loggers.
+	g_sinks = std::move(sinks);
 
 	g_initialized = true;
 }

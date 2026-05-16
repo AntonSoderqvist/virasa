@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #ifndef VIRASA_WINDOW_EVENTS_H
 #define VIRASA_WINDOW_EVENTS_H
 
@@ -14,7 +17,7 @@ namespace virasa
  */
 enum class EventType : uint8_t
 {
-	None             = 0,
+	None = 0,
 	Quit,
 	WindowResized,
 	WindowMinimized,
@@ -39,14 +42,70 @@ enum class EventType : uint8_t
  */
 enum class KeyCode : uint16_t
 {
-	Unknown  = 0,
-	A, B, C, D, E, F, G, H, I, J, K, L, M,
-	N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-	Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
-	Escape, Enter, Tab, Space, Backspace,
-	Left, Right, Up, Down,
-	LShift, RShift, LCtrl, RCtrl, LAlt, RAlt,
-	F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+	Unknown = 0,
+	A,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
+	Num0,
+	Num1,
+	Num2,
+	Num3,
+	Num4,
+	Num5,
+	Num6,
+	Num7,
+	Num8,
+	Num9,
+	Escape,
+	Enter,
+	Tab,
+	Space,
+	Backspace,
+	Left,
+	Right,
+	Up,
+	Down,
+	LShift,
+	RShift,
+	LCtrl,
+	RCtrl,
+	LAlt,
+	RAlt,
+	F1,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
 	Count
 };
 
@@ -58,7 +117,7 @@ enum class KeyCode : uint16_t
  */
 enum class MouseButton : uint8_t
 {
-	Left   = 0,
+	Left = 0,
 	Middle,
 	Right,
 	X1,
@@ -73,16 +132,14 @@ enum class MouseButton : uint8_t
  */
 struct TextInputData
 {
-public:
+	public:
 	/// UTF-8 encoded text, NUL-terminated at index length.
-	char    utf8[32];
+	char utf8[32];
 	/// Number of payload bytes in utf8, excluding the NUL terminator.
 	uint8_t length;
 
 	/// @brief Default-constructs a TextInputData with an empty buffer.
-	TextInputData() noexcept
-		: utf8{}, length(0)
-	{}
+	TextInputData() noexcept : utf8{}, length(0) {}
 };
 
 /**
@@ -97,11 +154,11 @@ public:
  */
 struct Event
 {
-public:
+	public:
 	/// The kind of event.
 	EventType type;
 	/// Event time in nanoseconds as provided by the platform layer.
-	uint64_t  timestamp;
+	uint64_t timestamp;
 
 	/// Per-event-type payload storage.
 	union
@@ -110,15 +167,15 @@ public:
 		struct
 		{
 			KeyCode key;
-			bool    repeat;
+			bool repeat;
 		} keyboard;
 
 		/// Valid when type is MouseButtonDown or MouseButtonUp.
 		struct
 		{
 			MouseButton button;
-			int32_t     x;
-			int32_t     y;
+			int32_t x;
+			int32_t y;
 		} mouseButton;
 
 		/// Valid when type is MouseMoved.
@@ -150,10 +207,10 @@ public:
 
 	/// @brief Default-constructs an Event with type None and timestamp 0.
 	Event() noexcept
-		: type(EventType::None)
-		, timestamp(0)
-		, mouseMove{0, 0, 0, 0}  // zero-init the largest union member
-	{}
+	    : type(EventType::None), timestamp(0),
+		mouseMove{0, 0, 0, 0} // zero-init the largest union member
+	{
+	}
 };
 
 } // namespace virasa
