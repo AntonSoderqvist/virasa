@@ -25,10 +25,24 @@ set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
 
+# Vulkan
+find_package(Vulkan REQUIRED)
+
 # --- Engine Modules ---
 add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/window)
-#add_subdirectory(src/editor)
+
+# --- Tests ---
+if(VIRASA_BUILD_TESTS)
+    enable_testing()
+    # GoogleTest
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    add_subdirectory(vendor/googletest EXCLUDE_FROM_ALL)
+    add_subdirectory(tests/virasa/core)
+    #add_subdirectory(tests/virasa/window)
+    #add_subdirectory(tests/virasa/editor)
+endif()
 
 # --- Editor executable ---
 add_executable(virasa_editor src/virasa/editor/main.cpp)

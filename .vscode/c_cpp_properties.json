@@ -7,6 +7,8 @@
                 "${workspaceFolder}/include",
                 "${workspaceFolder}/vendor/quill/include",
                 "${workspaceFolder}/vendor/SDL/include",
+                "${workspaceFolder}/vendor/googletest/googletest/include",
+                "${workspaceFolder}/vendor/googletest/googlemock/include"
             ],
             "defines": [],
             "cStandard": "c17",
