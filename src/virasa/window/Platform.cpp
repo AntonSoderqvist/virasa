@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #include "virasa/window/Platform.h"
 
 #include <cassert>
@@ -19,7 +22,7 @@ Platform::~Platform()
 // Initialize / Shutdown
 // ---------------------------------------------------------------------------
 
-ErrorCode Platform::Initialize()
+ErrorCode Platform::Initialize(const char* window_title, uint32_t pixel_width, uint32_t pixel_height)
 {
 	if (_initialized)
 	{
@@ -31,7 +34,8 @@ ErrorCode Platform::Initialize()
 		return ErrorCode::SdlInitFailed;
 	}
 
-	_window = SDL_CreateWindow("virasa", 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+	_window = SDL_CreateWindow(window_title, static_cast<int>(pixel_width), static_cast<int>(pixel_height),
+		SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
 	if (!_window)
 	{
@@ -39,8 +43,8 @@ ErrorCode Platform::Initialize()
 		return ErrorCode::WindowCreateFailed;
 	}
 
-	_windowSize.width = 1280;
-	_windowSize.height = 720;
+	_windowSize.width = pixel_width;
+	_windowSize.height = pixel_height;
 	_initialized = true;
 
 	// Failure to enable text input does not cause Initialize to fail.

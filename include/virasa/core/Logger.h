@@ -69,7 +69,7 @@ class Logger final
 	 * @param config Configuration to apply. Defaults to a default-constructed
 	 *               LogConfig (Info console, Trace file, no file, colors on).
 	 */
-	static void Initialize(LogConfig config = LogConfig{});
+	static void Initialize(const LogConfig& config = LogConfig{});
 
 	/**
 	 * @brief Flush all pending messages and tear down the logging system.

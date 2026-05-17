@@ -132,7 +132,7 @@ enum class MouseButton : uint8_t
  */
 struct TextInputData
 {
-	public:
+public:
 	/// UTF-8 encoded text, NUL-terminated at index length.
 	char utf8[32];
 	/// Number of payload bytes in utf8, excluding the NUL terminator.
@@ -154,52 +154,105 @@ struct TextInputData
  */
 struct Event
 {
-	public:
+public:
 	/// The kind of event.
 	EventType type;
 	/// Event time in nanoseconds as provided by the platform layer.
 	uint64_t timestamp;
 
+	/**
+	 * @brief Keyboard key event payload.
+	 *
+	 * Valid when type is KeyDown or KeyUp.
+	 */
+	struct KeyboardPayload
+	{
+	public:
+		/// The key that was pressed or released.
+		KeyCode key;
+		/// True if this is a key-repeat event.
+		bool repeat;
+	};
+
+	/**
+	 * @brief Mouse button event payload.
+	 *
+	 * Valid when type is MouseButtonDown or MouseButtonUp.
+	 */
+	struct MouseButtonPayload
+	{
+	public:
+		/// The button that was pressed or released.
+		MouseButton button;
+		/// Cursor X position in pixels at the time of the event.
+		int32_t x;
+		/// Cursor Y position in pixels at the time of the event.
+		int32_t y;
+	};
+
+	/**
+	 * @brief Mouse movement event payload.
+	 *
+	 * Valid when type is MouseMoved.
+	 */
+	struct MouseMovePayload
+	{
+	public:
+		/// Absolute cursor X position in pixels.
+		int32_t x;
+		/// Absolute cursor Y position in pixels.
+		int32_t y;
+		/// Relative X movement since the last event.
+		int32_t deltaX;
+		/// Relative Y movement since the last event.
+		int32_t deltaY;
+	};
+
+	/**
+	 * @brief Mouse wheel event payload.
+	 *
+	 * Valid when type is MouseWheel.
+	 */
+	struct MouseWheelPayload
+	{
+	public:
+		/// Horizontal scroll amount.
+		float scrollX;
+		/// Vertical scroll amount.
+		float scrollY;
+	};
+
+	/**
+	 * @brief Window resize event payload.
+	 *
+	 * Valid when type is WindowResized.
+	 */
+	struct ResizePayload
+	{
+	public:
+		/// New window width in pixels.
+		uint32_t width;
+		/// New window height in pixels.
+		uint32_t height;
+	};
+
 	/// Per-event-type payload storage.
 	union
 	{
 		/// Valid when type is KeyDown or KeyUp.
-		struct
-		{
-			KeyCode key;
-			bool repeat;
-		} keyboard;
+		KeyboardPayload keyboard;
 
 		/// Valid when type is MouseButtonDown or MouseButtonUp.
-		struct
-		{
-			MouseButton button;
-			int32_t x;
-			int32_t y;
-		} mouseButton;
+		MouseButtonPayload mouseButton;
 
 		/// Valid when type is MouseMoved.
-		struct
-		{
-			int32_t x;
-			int32_t y;
-			int32_t deltaX;
-			int32_t deltaY;
-		} mouseMove;
+		MouseMovePayload mouseMove;
 
 		/// Valid when type is MouseWheel.
-		struct
-		{
-			float scrollX;
-			float scrollY;
-		} mouseWheel;
+		MouseWheelPayload mouseWheel;
 
 		/// Valid when type is WindowResized.
-		struct
-		{
-			uint32_t width;
-			uint32_t height;
-		} resize;
+		ResizePayload resize;
 
 		/// Valid when type is TextInput.
 		TextInputData textInput;

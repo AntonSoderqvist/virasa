@@ -81,6 +81,7 @@ void InitializeImpl(LogConfig config)
 
 	auto consoleSink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>("console_sink", consoleSinkConfig);
 	consoleSink->set_log_level_filter(ToQuillLevel(config.consoleLevel));
+	sinks.push_back(consoleSink);
 
 	// Build the file sink if a path was supplied.
 	if (config.logFilePath != nullptr)
@@ -123,7 +124,7 @@ void ShutdownImpl()
 // Logger static method definitions
 // ---------------------------------------------------------------------------
 
-void Logger::Initialize(LogConfig config)
+void Logger::Initialize(const LogConfig& config)
 {
 	std::lock_guard<std::mutex> lock(g_mutex);
 	InitializeImpl(config);

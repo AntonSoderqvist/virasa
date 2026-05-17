@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #ifndef VIRASA_WINDOW_INPUTSTATE_H
 #define VIRASA_WINDOW_INPUTSTATE_H
 

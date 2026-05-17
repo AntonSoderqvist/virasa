@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #ifndef VIRASA_WINDOW_PLATFORM_H
 #define VIRASA_WINDOW_PLATFORM_H
 
@@ -46,7 +49,7 @@ class Platform final
 	 * @return ErrorCode::SdlInitFailed if SDL video subsystem startup failed.
 	 * @return ErrorCode::WindowCreateFailed if window creation failed.
 	 */
-	[[nodiscard]] ErrorCode Initialize();
+	[[nodiscard]] ErrorCode Initialize(const char* window_title, uint32_t pixel_width, uint32_t pixel_height);
 
 	/**
 	 * @brief Transition from initialized to uninitialized state.

@@ -1,5 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Anton Soderqvist
+
 #include <quill/LogMacros.h>
 #include <quill/Logger.h>
+
+#include <span>
 
 #include "virasa/core/Logger.h"
 #include "virasa/window/Events.h"
@@ -12,7 +17,7 @@ int main(int argc, char** argv)
 	LOG_INFO(logger, "Entry point reached.");
 
 	virasa::window::Platform platform;
-	virasa::ErrorCode initResult = platform.Initialize();
+	virasa::ErrorCode initResult = platform.Initialize("Virasa", 800, 800);
 	if (initResult != virasa::ErrorCode::None)
 	{
 		LOG_ERROR(logger,
@@ -34,6 +39,4 @@ int main(int argc, char** argv)
 			}
 		}
 	}
-
-	return 0;
 }
