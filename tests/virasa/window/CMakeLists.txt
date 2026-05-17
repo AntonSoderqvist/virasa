@@ -1,5 +1,6 @@
 add_executable(virasa_window_tests
     test_Events.cpp
+    test_Types.cpp
 )
 
 target_link_libraries(virasa_window_tests
