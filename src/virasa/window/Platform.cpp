@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <mutex>
 
 namespace virasa::window
 {
@@ -109,7 +110,27 @@ ErrorCode Platform::CreateSurface(VkInstance instance, VkSurfaceKHR* out_surface
 
 const char* const* Platform::GetRequiredVulkanExtensions(uint32_t* out_count)
 {
-	return SDL_Vulkan_GetInstanceExtensions(out_count);
+	// Cache the result on first call so this is safe to call from multiple
+	// threads concurrently and before Platform::Initialize().
+	static std::once_flag s_flag;
+	static const char* const* s_exts = nullptr;
+	static uint32_t s_count = 0;
+
+	std::call_once(s_flag, [] {
+		const bool needs_init = (SDL_WasInit(SDL_INIT_VIDEO) == 0);
+		if (needs_init)
+			SDL_InitSubSystem(SDL_INIT_VIDEO);
+
+		s_exts = SDL_Vulkan_GetInstanceExtensions(&s_count);
+
+		if (needs_init)
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+	});
+
+	if (out_count != nullptr)
+		*out_count = s_count;
+
+	return s_exts;
 }
 
 // ---------------------------------------------------------------------------

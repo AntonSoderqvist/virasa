@@ -1,6 +1,7 @@
 add_executable(virasa_window_tests
     test_Events.cpp
     test_InputState.cpp
+    test_Platform.cpp
     test_Types.cpp
 )
 
@@ -8,7 +9,8 @@ target_link_libraries(virasa_window_tests
     PRIVATE
         virasa_window_lib
         GTest::gtest_main
-)
+        Vulkan::Vulkan
+    )
 
 #virasa_set_warnings(virasa_window_tests)
 
