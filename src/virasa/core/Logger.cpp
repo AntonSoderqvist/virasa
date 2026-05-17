@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Anton Soderqvist
 
-#include "virasa/core/logger.h"
+#include "virasa/core/Logger.h"
 
 #include <atomic>
 #include <cassert>
@@ -56,6 +56,7 @@ namespace
 std::mutex g_mutex;
 bool g_initialized = false;
 std::unordered_map<std::string, quill::Logger*> g_loggerCache;
+std::vector<std::shared_ptr<quill::Sink>> g_sinks;
 
 /// Internal implementation — must be called with g_mutex held.
 void InitializeImpl(LogConfig config)
@@ -71,19 +72,15 @@ void InitializeImpl(LogConfig config)
 	}
 
 	// Build the console sink.
-	quill::ConsoleColours colours;
-	if (!config.enableColors)
-		colours.set_default_colours();
+	quill::ConsoleSinkConfig consoleSinkConfig;
+	consoleSinkConfig.set_colour_mode(config.enableColors
+		? quill::ConsoleSinkConfig::ColourMode::Automatic
+		: quill::ConsoleSinkConfig::ColourMode::Never);
 
 	std::vector<std::shared_ptr<quill::Sink>> sinks;
 
-	auto consoleSink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>(
-		"console_sink",
-		colours,
-		config.enableColors ? quill::ConsoleSink::ColourMode::Automatic
-		                    : quill::ConsoleSink::ColourMode::Never);
-	consoleSink->set_log_level(ToQuillLevel(config.consoleLevel));
-	sinks.push_back(consoleSink);
+	auto consoleSink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>("console_sink", consoleSinkConfig);
+	consoleSink->set_log_level_filter(ToQuillLevel(config.consoleLevel));
 
 	// Build the file sink if a path was supplied.
 	if (config.logFilePath != nullptr)
@@ -93,7 +90,7 @@ void InitializeImpl(LogConfig config)
 
 		auto fileSink = quill::Frontend::create_or_get_sink<quill::FileSink>(
 			config.logFilePath, fileSinkConfig);
-		fileSink->set_log_level(ToQuillLevel(config.fileLevel));
+		fileSink->set_log_level_filter(ToQuillLevel(config.fileLevel));
 		sinks.push_back(fileSink);
 	}
 
@@ -110,10 +107,12 @@ void ShutdownImpl()
 		return;
 
 	// Flush synchronously.
-	quill::Frontend::flush();
+	for (auto* logger : quill::Frontend::get_all_loggers())
+		logger->flush_log();
 
 	// Clear the logger cache.
 	g_loggerCache.clear();
+	g_sinks.clear();
 
 	g_initialized = false;
 }
@@ -152,7 +151,7 @@ quill::Logger* Logger::GetLogger(const char* module_name)
 		return it->second;
 
 	// Create a new logger and cache it.
-	quill::Logger* logger = quill::Frontend::create_or_get_logger(module_name);
+	quill::Logger* logger = quill::Frontend::create_or_get_logger(module_name, g_sinks);
 	g_loggerCache.emplace(module_name, logger);
 	return logger;
 }
@@ -162,7 +161,8 @@ void Logger::Flush()
 	std::lock_guard<std::mutex> lock(g_mutex);
 	if (!g_initialized)
 		return;
-	quill::Frontend::flush();
+	for (auto* logger : quill::Frontend::get_all_loggers())
+		logger->flush_log();
 }
 
 bool Logger::IsInitialized()

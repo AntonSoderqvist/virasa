@@ -72,10 +72,10 @@ void InputState::Update(std::span<const Event> events)
 			}
 			case EventType::MouseMoved:
 			{
-				_mouseX = ev.mouseMoved.x;
-				_mouseY = ev.mouseMoved.y;
-				_mouseDeltaX += ev.mouseMoved.deltaX;
-				_mouseDeltaY += ev.mouseMoved.deltaY;
+				_mouseX = ev.mouseMove.x;
+				_mouseY = ev.mouseMove.y;
+				_mouseDeltaX += ev.mouseMove.deltaX;
+				_mouseDeltaY += ev.mouseMove.deltaY;
 				break;
 			}
 			case EventType::MouseWheel:
