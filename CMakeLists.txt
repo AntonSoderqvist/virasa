@@ -40,7 +40,7 @@ if(VIRASA_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     add_subdirectory(vendor/googletest EXCLUDE_FROM_ALL)
     add_subdirectory(tests/virasa/core)
-    #add_subdirectory(tests/virasa/window)
+    add_subdirectory(tests/virasa/window)
     #add_subdirectory(tests/virasa/editor)
 endif()
 
