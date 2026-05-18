@@ -2,6 +2,7 @@ add_executable(virasa_renderer_tests
     test_Types.cpp
     core/test_Instance.cpp
     core/test_Surface.cpp
+    core/test_Device.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

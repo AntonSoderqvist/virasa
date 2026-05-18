@@ -1,0 +1,11 @@
+[  0%] Built target quill
+[  0%] Built target virasa_core_lib
+[ 92%] Built target SDL3-static
+[ 92%] Built target virasa_window_lib
+[ 93%] Built target virasa_renderer_lib
+[ 93%] Built target virasa_editor
+[ 94%] Built target gtest
+[ 94%] Built target gtest_main
+[ 95%] Built target virasa_core_tests
+[ 97%] Built target virasa_window_tests
+[100%] Built target virasa_renderer_tests

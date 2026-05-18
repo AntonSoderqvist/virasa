@@ -1,0 +1,95 @@
+[ RUN      ] Device.test_device_default_constructed_state
+[       OK ] Device.test_device_default_constructed_state (0 ms)
+[ RUN      ] Device.test_device_is_raii_movable_non_copyable_handle_owner
+[       OK ] Device.test_device_is_raii_movable_non_copyable_handle_owner (79 ms)
+[ RUN      ] Device.test_device_initialize_selects_and_creates
+[       OK ] Device.test_device_initialize_selects_and_creates (74 ms)
+[ RUN      ] Device.test_device_hard_requirements_for_physical_device_selection
+00:15:16.485419910 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.485508057 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.485516553 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.485516653 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.485523556 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.485523606 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+00:15:16.559324575 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.559324766 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.559330957 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.559331078 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.559335837 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.559335947 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[       OK ] Device.test_device_hard_requirements_for_physical_device_selection (69 ms)
+[ RUN      ] Device.test_device_scoring_algorithm
+00:15:16.624394499 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.624394839 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.624401853 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.624402053 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.624409146 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.624409187 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_queue_family_selection_algorithm
+00:15:16.692535852 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.692536072 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.692542274 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.692542334 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.692546552 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.692546612 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_logical_device_creation_uses_unique_queue_families
+00:15:16.759683021 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.759683497 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.759690080 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.759690140 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.759694518 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.759694558 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_logical_device_creation_uses_required_and_optional_features
+00:15:16.808817430 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.808817910 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.808824362 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.808824422 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.808828701 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.808828731 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_queue_handle_retrieval
+00:15:16.852974590 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.852974865 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.852981729 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.852981799 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.852986558 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.852986598 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_initialize_does_not_partially_modify_on_failure
+00:15:16.898958528 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.898958839 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.898964650 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.898964720 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.898968998 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.898969038 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[       OK ] Device.test_device_initialize_does_not_partially_modify_on_failure (44 ms)
+[ RUN      ] Device.test_get_handle_returns_owned_vk_device_or_null
+00:15:16.942036474 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.942036765 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.942042506 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.942042566 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.942046874 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.942046924 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[       OK ] Device.test_get_handle_returns_owned_vk_device_or_null (42 ms)
+[ RUN      ] Device.test_device_observers_return_cached_state
+00:15:16.986105679 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.986105910 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:16.986111400 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.986111520 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:16.986115738 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:16.986115849 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_is_initialized_reflects_owned_handle
+00:15:17.033258017 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.033258437 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:17.033263787 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.033263917 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:17.033267935 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.033267965 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[       OK ] Device.test_is_initialized_reflects_owned_handle (44 ms)
+[ RUN      ] Device.test_wait_idle_blocks_on_device
+00:15:17.078321926 [57119] Device.cpp:150               LOG_INFO      renderer       'NVIDIA GeForce RTX 3080 Ti': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.078322277 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'NVIDIA GeForce RTX 3080 Ti' does not meet hard requirements; skipping.
+00:15:17.078327497 [57119] Device.cpp:150               LOG_INFO      renderer       'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.078327557 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)' does not meet hard requirements; skipping.
+00:15:17.078331595 [57119] Device.cpp:150               LOG_INFO      renderer       'llvmpipe (LLVM 20.1.2, 256 bits)': rejected \xE2\x80\x94 incomplete queue families (graphicsFound=true, presentFound=false).
+00:15:17.078331615 [57119] Device.cpp:294               LOG_INFO      renderer     Physical device 'llvmpipe (LLVM 20.1.2, 256 bits)' does not meet hard requirements; skipping.
+[ RUN      ] Device.test_device_methods_are_not_thread_safe_per_instance
+[       OK ] Device.test_device_methods_are_not_thread_safe_per_instance (0 ms)
