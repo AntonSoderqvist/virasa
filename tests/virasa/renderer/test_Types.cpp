@@ -34,7 +34,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::InstanceCreateFailed),
 		static_cast<uint8_t>(RenderError::SurfaceCreateFailed));
 
-	// All six values are distinct.
+	// Version 3 adds NoSuitableDevice and DeviceCreateFailed after SurfaceCreateFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::SurfaceCreateFailed),
+		static_cast<uint8_t>(RenderError::NoSuitableDevice));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::NoSuitableDevice),
+		static_cast<uint8_t>(RenderError::DeviceCreateFailed));
+
+	// All eight values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -42,10 +48,12 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::VulkanNotAvailable),
 		static_cast<uint8_t>(RenderError::InstanceCreateFailed),
 		static_cast<uint8_t>(RenderError::SurfaceCreateFailed),
+		static_cast<uint8_t>(RenderError::NoSuitableDevice),
+		static_cast<uint8_t>(RenderError::DeviceCreateFailed),
 	};
-	for (std::size_t i = 0; i < 6; ++i)
+	for (std::size_t i = 0; i < 8; ++i)
 	{
-		for (std::size_t j = i + 1; j < 6; ++j)
+		for (std::size_t j = i + 1; j < 8; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -63,6 +71,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_NE(RenderError::VulkanNotAvailable, RenderError::None);
 	EXPECT_NE(RenderError::InstanceCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::SurfaceCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::NoSuitableDevice, RenderError::None);
+	EXPECT_NE(RenderError::DeviceCreateFailed, RenderError::None);
 
 	// Callers check against None to determine success.
 	auto isSuccess = [](RenderError e) { return e == RenderError::None; };
@@ -72,6 +82,79 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::VulkanNotAvailable));
 	EXPECT_FALSE(isSuccess(RenderError::InstanceCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::SurfaceCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::NoSuitableDevice));
+	EXPECT_FALSE(isSuccess(RenderError::DeviceCreateFailed));
+}
+
+// ---------------------------------------------------------------------------
+// QueueFamilies struct tests
+// ---------------------------------------------------------------------------
+
+TEST(Types, test_queue_families_holds_queue_family_indices)
+{
+	// Default construction.
+	QueueFamilies qf;
+
+	// Index fields default to 0.
+	EXPECT_EQ(qf.graphicsFamily, uint32_t{0});
+	EXPECT_EQ(qf.presentFamily, uint32_t{0});
+	EXPECT_EQ(qf.transferFamily, uint32_t{0});
+
+	// Found-flags default to false.
+	EXPECT_FALSE(qf.graphicsFound);
+	EXPECT_FALSE(qf.presentFound);
+	EXPECT_FALSE(qf.dedicatedTransfer);
+
+	// IsComplete() returns false when neither flag is set.
+	EXPECT_FALSE(qf.IsComplete());
+
+	// IsSameFamily() compares graphicsFamily == presentFamily regardless of flags.
+	// Both are 0 by default, so IsSameFamily() is true on a default-constructed value.
+	EXPECT_TRUE(qf.IsSameFamily());
+
+	// Set graphics only — IsComplete() still false.
+	qf.graphicsFamily = 1u;
+	qf.graphicsFound = true;
+	EXPECT_FALSE(qf.IsComplete());
+
+	// Set present — IsComplete() now true.
+	qf.presentFamily = 2u;
+	qf.presentFound = true;
+	EXPECT_TRUE(qf.IsComplete());
+
+	// Different families → IsSameFamily() false.
+	EXPECT_FALSE(qf.IsSameFamily());
+
+	// Make them the same → IsSameFamily() true.
+	qf.presentFamily = 1u;
+	EXPECT_TRUE(qf.IsSameFamily());
+
+	// dedicatedTransfer flag and transferFamily.
+	qf.transferFamily = 3u;
+	qf.dedicatedTransfer = true;
+	EXPECT_TRUE(qf.dedicatedTransfer);
+	EXPECT_EQ(qf.transferFamily, uint32_t{3});
+
+	// IsComplete() does not consult dedicatedTransfer.
+	EXPECT_TRUE(qf.IsComplete());
+
+	// Copyable.
+	QueueFamilies copy = qf;
+	EXPECT_EQ(copy.graphicsFamily, qf.graphicsFamily);
+	EXPECT_EQ(copy.presentFamily, qf.presentFamily);
+	EXPECT_EQ(copy.transferFamily, qf.transferFamily);
+	EXPECT_EQ(copy.graphicsFound, qf.graphicsFound);
+	EXPECT_EQ(copy.presentFound, qf.presentFound);
+	EXPECT_EQ(copy.dedicatedTransfer, qf.dedicatedTransfer);
+
+	// Movable.
+	QueueFamilies moved = std::move(copy);
+	EXPECT_EQ(moved.graphicsFamily, uint32_t{1});
+	EXPECT_EQ(moved.presentFamily, uint32_t{1});
+	EXPECT_EQ(moved.transferFamily, uint32_t{3});
+	EXPECT_TRUE(moved.graphicsFound);
+	EXPECT_TRUE(moved.presentFound);
+	EXPECT_TRUE(moved.dedicatedTransfer);
 }
 
 // ---------------------------------------------------------------------------
