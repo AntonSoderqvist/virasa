@@ -1,12 +1,14 @@
 add_executable(virasa_renderer_tests
     test_Types.cpp
     core/test_Instance.cpp
+    core/test_Surface.cpp
 )
 
 target_link_libraries(virasa_renderer_tests
     PRIVATE
         virasa_renderer_lib
         virasa_core_lib
+        virasa_window_lib
         GTest::gtest_main
 )
 

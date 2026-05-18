@@ -1,5 +1,6 @@
 add_library(virasa_renderer_lib STATIC
     core/Instance.cpp
+    core/Surface.cpp
 )
 
 target_include_directories(virasa_renderer_lib
@@ -12,4 +13,5 @@ target_link_libraries(virasa_renderer_lib
         Vulkan::Vulkan
     PRIVATE
         virasa_core_lib
+        virasa_window_lib
 )

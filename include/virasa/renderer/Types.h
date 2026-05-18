@@ -18,7 +18,8 @@ enum class RenderError : uint8_t
 	AlreadyInitialized,
 	NotInitialized,
 	VulkanNotAvailable,
-	InstanceCreateFailed
+	InstanceCreateFailed,
+	SurfaceCreateFailed
 };
 
 /**
@@ -50,6 +51,12 @@ struct RendererConfig
 
 	/// @brief Number of strings in the requiredInstanceExtensions array.
 	uint32_t requiredInstanceExtensionCount = 0;
+
+	/**
+	 * @brief When true, prefer VK_PRESENT_MODE_MAILBOX_KHR over VK_PRESENT_MODE_FIFO_KHR
+	 *        if both are supported. Advisory only — falls back to FIFO when mailbox is unavailable.
+	 */
+	bool preferMailbox = false;
 };
 
 } // namespace virasa
