@@ -31,6 +31,7 @@ find_package(Vulkan REQUIRED)
 # --- Engine Modules ---
 add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/window)
+add_subdirectory(src/virasa/renderer)
 
 # --- Tests ---
 if(VIRASA_BUILD_TESTS)
@@ -41,7 +42,7 @@ if(VIRASA_BUILD_TESTS)
     add_subdirectory(vendor/googletest EXCLUDE_FROM_ALL)
     add_subdirectory(tests/virasa/core)
     add_subdirectory(tests/virasa/window)
-    #add_subdirectory(tests/virasa/editor)
+    add_subdirectory(tests/virasa/renderer)
 endif()
 
 # --- Editor executable ---
@@ -51,4 +52,5 @@ target_link_libraries(virasa_editor
     PRIVATE
         virasa_core_lib
         virasa_window_lib
+        virasa_renderer_lib
 )
