@@ -4,7 +4,7 @@ virasa is (soon) a vi-like 3d editor built with [calchestra](https://github.com/
 
 ## Status
 
-Early days on this project, as of May 17 2026, this is a blank slate.
+Early days on this project, as of May 19 2026, virasa can render a triangle (nice).
 
 ## Goals
 
