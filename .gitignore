@@ -4,6 +4,7 @@
 build/
 .tmp/
 .notes/
+Testing/
 
 build_out.txt
 test_out.txt
