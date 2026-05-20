@@ -4,6 +4,8 @@ add_executable(virasa_renderer_tests
     core/test_Surface.cpp
     core/test_Device.cpp
     core/test_Swapchain.cpp
+    resources/test_ShaderModule.cpp
+    resources/test_Pipeline.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

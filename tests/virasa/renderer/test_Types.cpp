@@ -46,7 +46,18 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::SwapchainCreateFailed),
 		static_cast<uint8_t>(RenderError::ImageViewCreateFailed));
 
-	// All ten values are distinct.
+	// Version 5 adds ShaderLoadFailed, ShaderCreateFailed, PipelineLayoutCreateFailed,
+	// and PipelineCreateFailed after ImageViewCreateFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::ImageViewCreateFailed),
+		static_cast<uint8_t>(RenderError::ShaderLoadFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::ShaderLoadFailed),
+		static_cast<uint8_t>(RenderError::ShaderCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::ShaderCreateFailed),
+		static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed),
+		static_cast<uint8_t>(RenderError::PipelineCreateFailed));
+
+	// All fourteen values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -58,10 +69,14 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::DeviceCreateFailed),
 		static_cast<uint8_t>(RenderError::SwapchainCreateFailed),
 		static_cast<uint8_t>(RenderError::ImageViewCreateFailed),
+		static_cast<uint8_t>(RenderError::ShaderLoadFailed),
+		static_cast<uint8_t>(RenderError::ShaderCreateFailed),
+		static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed),
+		static_cast<uint8_t>(RenderError::PipelineCreateFailed),
 	};
-	for (std::size_t i = 0; i < 10; ++i)
+	for (std::size_t i = 0; i < 14; ++i)
 	{
-		for (std::size_t j = i + 1; j < 10; ++j)
+		for (std::size_t j = i + 1; j < 14; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -83,6 +98,10 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_NE(RenderError::DeviceCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::SwapchainCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::ImageViewCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::ShaderLoadFailed, RenderError::None);
+	EXPECT_NE(RenderError::ShaderCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::PipelineLayoutCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::PipelineCreateFailed, RenderError::None);
 
 	// Callers check against None to determine success.
 	auto isSuccess = [](RenderError e) { return e == RenderError::None; };
@@ -96,6 +115,10 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::DeviceCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::SwapchainCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::ImageViewCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::ShaderLoadFailed));
+	EXPECT_FALSE(isSuccess(RenderError::ShaderCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::PipelineLayoutCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::PipelineCreateFailed));
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +299,113 @@ TEST(Types, test_swapchain_status_enum_values_in_declared_order)
 	EXPECT_EQ(SwapchainStatus::Success, static_cast<SwapchainStatus>(0));
 	EXPECT_NE(SwapchainStatus::Recreated, SwapchainStatus::Success);
 	EXPECT_NE(SwapchainStatus::Error, SwapchainStatus::Success);
+}
+
+// ---------------------------------------------------------------------------
+// VertexAttribute struct tests
+// ---------------------------------------------------------------------------
+
+TEST(Types, test_vertex_attribute_describes_one_shader_input)
+{
+	// Default construction.
+	VertexAttribute attr;
+
+	// location defaults to 0.
+	EXPECT_EQ(attr.location, uint32_t{0});
+
+	// format defaults to VK_FORMAT_UNDEFINED.
+	EXPECT_EQ(attr.format, VK_FORMAT_UNDEFINED);
+
+	// offset defaults to 0.
+	EXPECT_EQ(attr.offset, uint32_t{0});
+
+	// Members are publicly assignable.
+	attr.location = 2u;
+	attr.format = VK_FORMAT_R32G32B32_SFLOAT;
+	attr.offset = 12u;
+
+	EXPECT_EQ(attr.location, uint32_t{2});
+	EXPECT_EQ(attr.format, VK_FORMAT_R32G32B32_SFLOAT);
+	EXPECT_EQ(attr.offset, uint32_t{12});
+
+	// Copyable.
+	VertexAttribute copy = attr;
+	EXPECT_EQ(copy.location, attr.location);
+	EXPECT_EQ(copy.format, attr.format);
+	EXPECT_EQ(copy.offset, attr.offset);
+
+	// Movable.
+	VertexAttribute moved = std::move(copy);
+	EXPECT_EQ(moved.location, uint32_t{2});
+	EXPECT_EQ(moved.format, VK_FORMAT_R32G32B32_SFLOAT);
+	EXPECT_EQ(moved.offset, uint32_t{12});
+
+	// Trivially destructible — verified at compile time.
+	static_assert(std::is_trivially_destructible_v<VertexAttribute>,
+		"VertexAttribute must be trivially destructible");
+}
+
+// ---------------------------------------------------------------------------
+// VertexLayout struct tests
+// ---------------------------------------------------------------------------
+
+TEST(Types, test_vertex_layout_describes_vertex_input_state)
+{
+	// Default construction.
+	VertexLayout layout;
+
+	// stride defaults to 0.
+	EXPECT_EQ(layout.stride, uint32_t{0});
+
+	// inputRate defaults to VK_VERTEX_INPUT_RATE_VERTEX.
+	EXPECT_EQ(layout.inputRate, VK_VERTEX_INPUT_RATE_VERTEX);
+
+	// attributes defaults to an empty span.
+	EXPECT_TRUE(layout.attributes.empty());
+	EXPECT_EQ(layout.attributes.size(), std::size_t{0});
+
+	// A stride-0 + empty attributes span is the "no vertex input" convention.
+	EXPECT_EQ(layout.stride, uint32_t{0});
+
+	// Members are publicly assignable.
+	VertexAttribute attrs[2];
+	attrs[0].location = 0u;
+	attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	attrs[0].offset = 0u;
+	attrs[1].location = 1u;
+	attrs[1].format = VK_FORMAT_R32G32_SFLOAT;
+	attrs[1].offset = 12u;
+
+	layout.stride = 20u;
+	layout.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+	layout.attributes = std::span<const VertexAttribute>{attrs, 2};
+
+	EXPECT_EQ(layout.stride, uint32_t{20});
+	EXPECT_EQ(layout.inputRate, VK_VERTEX_INPUT_RATE_INSTANCE);
+	EXPECT_EQ(layout.attributes.size(), std::size_t{2});
+	EXPECT_EQ(layout.attributes[0].location, uint32_t{0});
+	EXPECT_EQ(layout.attributes[0].format, VK_FORMAT_R32G32B32_SFLOAT);
+	EXPECT_EQ(layout.attributes[0].offset, uint32_t{0});
+	EXPECT_EQ(layout.attributes[1].location, uint32_t{1});
+	EXPECT_EQ(layout.attributes[1].format, VK_FORMAT_R32G32_SFLOAT);
+	EXPECT_EQ(layout.attributes[1].offset, uint32_t{12});
+
+	// Copyable — the span itself is copied (non-owning view).
+	VertexLayout copy = layout;
+	EXPECT_EQ(copy.stride, layout.stride);
+	EXPECT_EQ(copy.inputRate, layout.inputRate);
+	EXPECT_EQ(copy.attributes.data(), layout.attributes.data());
+	EXPECT_EQ(copy.attributes.size(), layout.attributes.size());
+
+	// Movable.
+	VertexLayout moved = std::move(copy);
+	EXPECT_EQ(moved.stride, uint32_t{20});
+	EXPECT_EQ(moved.inputRate, VK_VERTEX_INPUT_RATE_INSTANCE);
+	EXPECT_EQ(moved.attributes.size(), std::size_t{2});
+
+	// Trivially destructible — verified at compile time.
+	static_assert(std::is_trivially_destructible_v<VertexLayout>,
+		"VertexLayout must be trivially destructible");
 }
 
 TEST(Types, test_renderer_config_targets_vulkan_1_3)

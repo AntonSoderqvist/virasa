@@ -2,6 +2,7 @@
 #define VIRASA_RENDERER_TYPES_H
 
 #include <cstdint>
+#include <span>
 #include "vulkan/vulkan.h"
 
 namespace virasa
@@ -28,7 +29,15 @@ enum class RenderError : uint8_t
 	/// @brief vkCreateSwapchainKHR returned a VkResult other than VK_SUCCESS.
 	SwapchainCreateFailed,
 	/// @brief vkCreateImageView returned a VkResult other than VK_SUCCESS.
-	ImageViewCreateFailed
+	ImageViewCreateFailed,
+	/// @brief A shader source file could not be loaded from disk.
+	ShaderLoadFailed,
+	/// @brief vkCreateShaderModule returned a VkResult other than VK_SUCCESS.
+	ShaderCreateFailed,
+	/// @brief vkCreatePipelineLayout returned a VkResult other than VK_SUCCESS.
+	PipelineLayoutCreateFailed,
+	/// @brief vkCreateGraphicsPipelines returned a VkResult other than VK_SUCCESS, or required inputs were missing.
+	PipelineCreateFailed
 };
 
 /**
@@ -135,6 +144,45 @@ public:
 
 	/// @brief True if a dedicated transfer queue family (no graphics) was found.
 	bool dedicatedTransfer = false;
+};
+
+/**
+ * @brief Describes one vertex attribute consumed by a vertex shader.
+ *
+ * VertexAttribute is a trivially destructible value type intended to be
+ * constructed in arrays describing the layout of a vertex buffer.
+ */
+struct VertexAttribute
+{
+public:
+	/// @brief Shader location index this attribute binds to (layout(location = N)).
+	uint32_t location = 0;
+
+	/// @brief Data format of the attribute (e.g. VK_FORMAT_R32G32B32_SFLOAT).
+	VkFormat format = VK_FORMAT_UNDEFINED;
+
+	/// @brief Byte offset of this attribute from the start of a vertex record.
+	uint32_t offset = 0;
+};
+
+/**
+ * @brief Describes the vertex input layout for a single binding consumed by a pipeline.
+ *
+ * VertexLayout is a non-owning descriptor; the caller must keep the storage
+ * referenced by the attributes span alive for the duration of any call that
+ * receives the VertexLayout.
+ */
+struct VertexLayout
+{
+public:
+	/// @brief Size in bytes of one vertex record in the bound buffer.
+	uint32_t stride = 0;
+
+	/// @brief Selects per-vertex versus per-instance stepping.
+	VkVertexInputRate inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+	/// @brief Non-owning span of VertexAttribute records describing individual attributes.
+	std::span<const VertexAttribute> attributes;
 };
 
 } // namespace virasa

@@ -3,6 +3,8 @@ add_library(virasa_renderer_lib STATIC
     core/Surface.cpp
     core/Device.cpp
     core/Swapchain.cpp
+    resources/ShaderModule.cpp
+    resources/Pipeline.cpp
 )
 
 target_include_directories(virasa_renderer_lib
