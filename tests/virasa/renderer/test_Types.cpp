@@ -40,7 +40,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::NoSuitableDevice),
 		static_cast<uint8_t>(RenderError::DeviceCreateFailed));
 
-	// All eight values are distinct.
+	// Version 4 adds SwapchainCreateFailed and ImageViewCreateFailed after DeviceCreateFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::DeviceCreateFailed),
+		static_cast<uint8_t>(RenderError::SwapchainCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::SwapchainCreateFailed),
+		static_cast<uint8_t>(RenderError::ImageViewCreateFailed));
+
+	// All ten values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -50,10 +56,12 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::SurfaceCreateFailed),
 		static_cast<uint8_t>(RenderError::NoSuitableDevice),
 		static_cast<uint8_t>(RenderError::DeviceCreateFailed),
+		static_cast<uint8_t>(RenderError::SwapchainCreateFailed),
+		static_cast<uint8_t>(RenderError::ImageViewCreateFailed),
 	};
-	for (std::size_t i = 0; i < 8; ++i)
+	for (std::size_t i = 0; i < 10; ++i)
 	{
-		for (std::size_t j = i + 1; j < 8; ++j)
+		for (std::size_t j = i + 1; j < 10; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -73,6 +81,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_NE(RenderError::SurfaceCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::NoSuitableDevice, RenderError::None);
 	EXPECT_NE(RenderError::DeviceCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::SwapchainCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::ImageViewCreateFailed, RenderError::None);
 
 	// Callers check against None to determine success.
 	auto isSuccess = [](RenderError e) { return e == RenderError::None; };
@@ -84,6 +94,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::SurfaceCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::NoSuitableDevice));
 	EXPECT_FALSE(isSuccess(RenderError::DeviceCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::SwapchainCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::ImageViewCreateFailed));
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +197,10 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	// preferMailbox defaults to false.
 	EXPECT_FALSE(config.preferMailbox);
 
+	// swapchainImageUsage defaults to COLOR_ATTACHMENT | TRANSFER_DST.
+	EXPECT_EQ(config.swapchainImageUsage,
+		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT});
+
 	// Members are publicly assignable.
 	const char* extName = "VK_KHR_surface";
 	const char* const exts[] = {extName};
@@ -195,6 +211,8 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	config.requiredInstanceExtensions = exts;
 	config.requiredInstanceExtensionCount = 1u;
 	config.preferMailbox = true;
+	config.swapchainImageUsage =
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	EXPECT_STREQ(config.applicationName, "MyApp");
 	EXPECT_EQ(config.applicationVersion, uint32_t{1});
@@ -202,6 +220,8 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(config.requiredInstanceExtensions, exts);
 	EXPECT_EQ(config.requiredInstanceExtensionCount, uint32_t{1});
 	EXPECT_TRUE(config.preferMailbox);
+	EXPECT_EQ(config.swapchainImageUsage,
+		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
 
 	// Copyable: copy-construct and verify members are equal.
 	RendererConfig copy = config;
@@ -211,6 +231,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(copy.requiredInstanceExtensions, config.requiredInstanceExtensions);
 	EXPECT_EQ(copy.requiredInstanceExtensionCount, config.requiredInstanceExtensionCount);
 	EXPECT_EQ(copy.preferMailbox, config.preferMailbox);
+	EXPECT_EQ(copy.swapchainImageUsage, config.swapchainImageUsage);
 
 	// Movable: move-construct and verify members transferred.
 	RendererConfig moved = std::move(copy);
@@ -220,6 +241,41 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(moved.requiredInstanceExtensions, exts);
 	EXPECT_EQ(moved.requiredInstanceExtensionCount, uint32_t{1});
 	EXPECT_TRUE(moved.preferMailbox);
+	EXPECT_EQ(moved.swapchainImageUsage,
+		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+}
+
+// ---------------------------------------------------------------------------
+// SwapchainStatus enum tests
+// ---------------------------------------------------------------------------
+
+TEST(Types, test_swapchain_status_enum_values_in_declared_order)
+{
+	// Underlying type is uint8_t.
+	static_assert(std::is_same_v<std::underlying_type_t<SwapchainStatus>, uint8_t>,
+		"SwapchainStatus underlying type must be uint8_t");
+
+	// Success is explicitly 0.
+	EXPECT_EQ(static_cast<uint8_t>(SwapchainStatus::Success), uint8_t{0});
+
+	// Values appear in declared order.
+	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Success),
+		static_cast<uint8_t>(SwapchainStatus::Recreated));
+	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Recreated),
+		static_cast<uint8_t>(SwapchainStatus::Error));
+
+	// All three values are distinct.
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
+		static_cast<uint8_t>(SwapchainStatus::Recreated));
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
+		static_cast<uint8_t>(SwapchainStatus::Error));
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Recreated),
+		static_cast<uint8_t>(SwapchainStatus::Error));
+
+	// Success == 0 is the only value indicating a clean operation.
+	EXPECT_EQ(SwapchainStatus::Success, static_cast<SwapchainStatus>(0));
+	EXPECT_NE(SwapchainStatus::Recreated, SwapchainStatus::Success);
+	EXPECT_NE(SwapchainStatus::Error, SwapchainStatus::Success);
 }
 
 TEST(Types, test_renderer_config_targets_vulkan_1_3)
@@ -260,6 +316,7 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	(void)config.requiredInstanceExtensions;
 	(void)config.requiredInstanceExtensionCount;
 	(void)config.preferMailbox;
+	(void)config.swapchainImageUsage;
 	// If the struct had an apiVersion member the test author would have caught
 	// it during contract review; the absence of such a member is the assertion.
 	EXPECT_TRUE(true); // structural assertion satisfied at compile time above.

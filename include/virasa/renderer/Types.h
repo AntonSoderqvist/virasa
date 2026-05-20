@@ -2,6 +2,7 @@
 #define VIRASA_RENDERER_TYPES_H
 
 #include <cstdint>
+#include "vulkan/vulkan.h"
 
 namespace virasa
 {
@@ -23,7 +24,26 @@ enum class RenderError : uint8_t
 	/// @brief No VkPhysicalDevice met the caller's hard requirements for selection.
 	NoSuitableDevice,
 	/// @brief vkCreateDevice returned a VkResult other than VK_SUCCESS.
-	DeviceCreateFailed
+	DeviceCreateFailed,
+	/// @brief vkCreateSwapchainKHR returned a VkResult other than VK_SUCCESS.
+	SwapchainCreateFailed,
+	/// @brief vkCreateImageView returned a VkResult other than VK_SUCCESS.
+	ImageViewCreateFailed
+};
+
+/**
+ * @brief Status of a swapchain acquire or present operation.
+ *
+ * SwapchainStatus is an enum class with underlying type uint8_t.
+ * Success is the unique "no action needed" value. Recreated indicates the
+ * swapchain is out-of-date and should be recreated before the next frame.
+ * Error indicates an unrecoverable failure.
+ */
+enum class SwapchainStatus : uint8_t
+{
+	Success = 0,
+	Recreated,
+	Error
 };
 
 /**
@@ -61,6 +81,14 @@ struct RendererConfig
 	 *        if both are supported. Advisory only — falls back to FIFO when mailbox is unavailable.
 	 */
 	bool preferMailbox = false;
+
+	/**
+	 * @brief VkImageUsageFlags passed to VkSwapchainCreateInfoKHR::imageUsage.
+	 *
+	 * Must include VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT. Callers may add additional
+	 * flags (e.g. VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_USAGE_STORAGE_BIT).
+	 */
+	VkImageUsageFlags swapchainImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 };
 
 /**

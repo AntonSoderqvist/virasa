@@ -3,6 +3,7 @@ add_executable(virasa_renderer_tests
     core/test_Instance.cpp
     core/test_Surface.cpp
     core/test_Device.cpp
+    core/test_Swapchain.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

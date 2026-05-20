@@ -2,6 +2,7 @@ add_library(virasa_renderer_lib STATIC
     core/Instance.cpp
     core/Surface.cpp
     core/Device.cpp
+    core/Swapchain.cpp
 )
 
 target_include_directories(virasa_renderer_lib
