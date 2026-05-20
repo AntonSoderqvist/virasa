@@ -1,5 +1,7 @@
 #include <cstdint>
 #include <cstring>
+#include <sstream>
+#include <string>
 #include <gtest/gtest.h>
 
 #include "virasa/renderer/Types.h"
@@ -57,7 +59,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed),
 		static_cast<uint8_t>(RenderError::PipelineCreateFailed));
 
-	// All fourteen values are distinct.
+	// Version 6 adds CommandPoolCreateFailed and FenceCreateFailed after PipelineCreateFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::PipelineCreateFailed),
+		static_cast<uint8_t>(RenderError::CommandPoolCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::CommandPoolCreateFailed),
+		static_cast<uint8_t>(RenderError::FenceCreateFailed));
+
+	// All sixteen values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -73,10 +81,12 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::ShaderCreateFailed),
 		static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed),
 		static_cast<uint8_t>(RenderError::PipelineCreateFailed),
+		static_cast<uint8_t>(RenderError::CommandPoolCreateFailed),
+		static_cast<uint8_t>(RenderError::FenceCreateFailed),
 	};
-	for (std::size_t i = 0; i < 14; ++i)
+	for (std::size_t i = 0; i < 16; ++i)
 	{
-		for (std::size_t j = i + 1; j < 14; ++j)
+		for (std::size_t j = i + 1; j < 16; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -102,6 +112,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_NE(RenderError::ShaderCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::PipelineLayoutCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::PipelineCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::CommandPoolCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::FenceCreateFailed, RenderError::None);
 
 	// Callers check against None to determine success.
 	auto isSuccess = [](RenderError e) { return e == RenderError::None; };
@@ -119,6 +131,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::ShaderCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::PipelineLayoutCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::PipelineCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::CommandPoolCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::FenceCreateFailed));
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +238,9 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(config.swapchainImageUsage,
 		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT});
 
+	// maxFramesInFlight defaults to 2 (version-6 addition).
+	EXPECT_EQ(config.maxFramesInFlight, uint32_t{2});
+
 	// Members are publicly assignable.
 	const char* extName = "VK_KHR_surface";
 	const char* const exts[] = {extName};
@@ -236,6 +253,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	config.preferMailbox = true;
 	config.swapchainImageUsage =
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	config.maxFramesInFlight = 3u;
 
 	EXPECT_STREQ(config.applicationName, "MyApp");
 	EXPECT_EQ(config.applicationVersion, uint32_t{1});
@@ -245,6 +263,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_TRUE(config.preferMailbox);
 	EXPECT_EQ(config.swapchainImageUsage,
 		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+	EXPECT_EQ(config.maxFramesInFlight, uint32_t{3});
 
 	// Copyable: copy-construct and verify members are equal.
 	RendererConfig copy = config;
@@ -255,6 +274,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(copy.requiredInstanceExtensionCount, config.requiredInstanceExtensionCount);
 	EXPECT_EQ(copy.preferMailbox, config.preferMailbox);
 	EXPECT_EQ(copy.swapchainImageUsage, config.swapchainImageUsage);
+	EXPECT_EQ(copy.maxFramesInFlight, config.maxFramesInFlight);
 
 	// Movable: move-construct and verify members transferred.
 	RendererConfig moved = std::move(copy);
@@ -266,6 +286,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_TRUE(moved.preferMailbox);
 	EXPECT_EQ(moved.swapchainImageUsage,
 		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+	EXPECT_EQ(moved.maxFramesInFlight, uint32_t{3});
 }
 
 // ---------------------------------------------------------------------------
@@ -287,18 +308,29 @@ TEST(Types, test_swapchain_status_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Recreated),
 		static_cast<uint8_t>(SwapchainStatus::Error));
 
-	// All three values are distinct.
+	// Version 6 adds NotReady after Error.
+	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Error),
+		static_cast<uint8_t>(SwapchainStatus::NotReady));
+
+	// All four values are distinct.
 	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
 		static_cast<uint8_t>(SwapchainStatus::Recreated));
 	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
 		static_cast<uint8_t>(SwapchainStatus::Error));
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
+		static_cast<uint8_t>(SwapchainStatus::NotReady));
 	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Recreated),
 		static_cast<uint8_t>(SwapchainStatus::Error));
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Recreated),
+		static_cast<uint8_t>(SwapchainStatus::NotReady));
+	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Error),
+		static_cast<uint8_t>(SwapchainStatus::NotReady));
 
 	// Success == 0 is the only value indicating a clean operation.
 	EXPECT_EQ(SwapchainStatus::Success, static_cast<SwapchainStatus>(0));
 	EXPECT_NE(SwapchainStatus::Recreated, SwapchainStatus::Success);
 	EXPECT_NE(SwapchainStatus::Error, SwapchainStatus::Success);
+	EXPECT_NE(SwapchainStatus::NotReady, SwapchainStatus::Success);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +440,52 @@ TEST(Types, test_vertex_layout_describes_vertex_input_state)
 		"VertexLayout must be trivially destructible");
 }
 
+// ---------------------------------------------------------------------------
+// operator<< for RenderError tests
+// ---------------------------------------------------------------------------
+
+TEST(Types, test_render_error_has_ostream_insertion_operator)
+{
+	// Each named value writes its identifier as a plain string.
+	auto toString = [](RenderError e) -> std::string
+	{
+		std::ostringstream oss;
+		oss << e;
+		return oss.str();
+	};
+
+	EXPECT_EQ(toString(RenderError::None), "None");
+	EXPECT_EQ(toString(RenderError::AlreadyInitialized), "AlreadyInitialized");
+	EXPECT_EQ(toString(RenderError::NotInitialized), "NotInitialized");
+	EXPECT_EQ(toString(RenderError::VulkanNotAvailable), "VulkanNotAvailable");
+	EXPECT_EQ(toString(RenderError::InstanceCreateFailed), "InstanceCreateFailed");
+	EXPECT_EQ(toString(RenderError::SurfaceCreateFailed), "SurfaceCreateFailed");
+	EXPECT_EQ(toString(RenderError::NoSuitableDevice), "NoSuitableDevice");
+	EXPECT_EQ(toString(RenderError::DeviceCreateFailed), "DeviceCreateFailed");
+	EXPECT_EQ(toString(RenderError::SwapchainCreateFailed), "SwapchainCreateFailed");
+	EXPECT_EQ(toString(RenderError::ImageViewCreateFailed), "ImageViewCreateFailed");
+	EXPECT_EQ(toString(RenderError::ShaderLoadFailed), "ShaderLoadFailed");
+	EXPECT_EQ(toString(RenderError::ShaderCreateFailed), "ShaderCreateFailed");
+	EXPECT_EQ(toString(RenderError::PipelineLayoutCreateFailed), "PipelineLayoutCreateFailed");
+	EXPECT_EQ(toString(RenderError::PipelineCreateFailed), "PipelineCreateFailed");
+	EXPECT_EQ(toString(RenderError::CommandPoolCreateFailed), "CommandPoolCreateFailed");
+	EXPECT_EQ(toString(RenderError::FenceCreateFailed), "FenceCreateFailed");
+
+	// An out-of-range value writes "RenderError(N)" where N is the decimal integer.
+	auto outOfRange = static_cast<RenderError>(uint8_t{200});
+	EXPECT_EQ(toString(outOfRange), "RenderError(200)");
+
+	// The operator returns the same ostream reference (supports chaining).
+	std::ostringstream oss;
+	std::ostream& ref = (oss << RenderError::None);
+	EXPECT_EQ(&ref, &oss);
+
+	// Chaining: two values written in sequence.
+	std::ostringstream oss2;
+	oss2 << RenderError::None << "|" << RenderError::AlreadyInitialized;
+	EXPECT_EQ(oss2.str(), "None|AlreadyInitialized");
+}
+
 TEST(Types, test_renderer_config_targets_vulkan_1_3)
 {
 	// The contract pins the Vulkan API version to 1.3 as a compile-time
@@ -447,6 +525,7 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	(void)config.requiredInstanceExtensionCount;
 	(void)config.preferMailbox;
 	(void)config.swapchainImageUsage;
+	(void)config.maxFramesInFlight;
 	// If the struct had an apiVersion member the test author would have caught
 	// it during contract review; the absence of such a member is the assertion.
 	EXPECT_TRUE(true); // structural assertion satisfied at compile time above.

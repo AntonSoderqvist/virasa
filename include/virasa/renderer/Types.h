@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <span>
+#include <ostream>
 #include "vulkan/vulkan.h"
 
 namespace virasa
@@ -37,8 +38,47 @@ enum class RenderError : uint8_t
 	/// @brief vkCreatePipelineLayout returned a VkResult other than VK_SUCCESS.
 	PipelineLayoutCreateFailed,
 	/// @brief vkCreateGraphicsPipelines returned a VkResult other than VK_SUCCESS, or required inputs were missing.
-	PipelineCreateFailed
+	PipelineCreateFailed,
+	/// @brief vkCreateCommandPool or vkAllocateCommandBuffers returned a VkResult other than VK_SUCCESS.
+	CommandPoolCreateFailed,
+	/// @brief vkCreateSemaphore or vkCreateFence returned a VkResult other than VK_SUCCESS during per-frame sync object creation.
+	FenceCreateFailed
 };
+
+/**
+ * @brief Writes the name of a RenderError value to an output stream.
+ *
+ * For declared values, writes the identifier string (e.g. "None", "InstanceCreateFailed").
+ * For unknown values, writes "RenderError(N)" where N is the decimal underlying value.
+ *
+ * @param os    The output stream to write to.
+ * @param error The RenderError value to write.
+ * @return The same ostream reference, to support chaining.
+ */
+inline std::ostream& operator<<(std::ostream& os, RenderError error)
+{
+	switch (error)
+	{
+		case RenderError::None:                    return os << "None";
+		case RenderError::AlreadyInitialized:      return os << "AlreadyInitialized";
+		case RenderError::NotInitialized:          return os << "NotInitialized";
+		case RenderError::VulkanNotAvailable:      return os << "VulkanNotAvailable";
+		case RenderError::InstanceCreateFailed:    return os << "InstanceCreateFailed";
+		case RenderError::SurfaceCreateFailed:     return os << "SurfaceCreateFailed";
+		case RenderError::NoSuitableDevice:        return os << "NoSuitableDevice";
+		case RenderError::DeviceCreateFailed:      return os << "DeviceCreateFailed";
+		case RenderError::SwapchainCreateFailed:   return os << "SwapchainCreateFailed";
+		case RenderError::ImageViewCreateFailed:   return os << "ImageViewCreateFailed";
+		case RenderError::ShaderLoadFailed:        return os << "ShaderLoadFailed";
+		case RenderError::ShaderCreateFailed:      return os << "ShaderCreateFailed";
+		case RenderError::PipelineLayoutCreateFailed: return os << "PipelineLayoutCreateFailed";
+		case RenderError::PipelineCreateFailed:    return os << "PipelineCreateFailed";
+		case RenderError::CommandPoolCreateFailed: return os << "CommandPoolCreateFailed";
+		case RenderError::FenceCreateFailed:       return os << "FenceCreateFailed";
+		default:
+			return os << "RenderError(" << static_cast<uint32_t>(static_cast<uint8_t>(error)) << ")";
+	}
+}
 
 /**
  * @brief Status of a swapchain acquire or present operation.
@@ -52,7 +92,8 @@ enum class SwapchainStatus : uint8_t
 {
 	Success = 0,
 	Recreated,
-	Error
+	Error,
+	NotReady
 };
 
 /**
@@ -98,6 +139,14 @@ struct RendererConfig
 	 * flags (e.g. VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_USAGE_STORAGE_BIT).
 	 */
 	VkImageUsageFlags swapchainImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+	/**
+	 * @brief Number of frames that may be recorded and submitted concurrently.
+	 *
+	 * Determines the count of per-frame synchronization objects and per-frame command buffers.
+	 * Common values are 2 (double-buffering) and 3 (triple-buffering). Must not be 0.
+	 */
+	uint32_t maxFramesInFlight = 2;
 };
 
 /**
