@@ -33,6 +33,9 @@ add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/window)
 add_subdirectory(src/virasa/renderer)
 
+# --- Shaders ---
+add_subdirectory(shaders)
+
 # --- Tests ---
 if(VIRASA_BUILD_TESTS)
     enable_testing()
