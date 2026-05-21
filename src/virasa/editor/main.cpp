@@ -509,5 +509,8 @@ int main(int argc, char** argv)
 		// Recreated is handled inside Context; we simply continue.
 	}
 
+	// Wait for all GPU work to finish before destroying pipeline and buffers.
+	context.GetDevice().WaitIdle();
+
 	return 0;
 }

@@ -358,6 +358,7 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	const bool enableBufferDeviceAddress = (features12.bufferDeviceAddress == VK_TRUE);
 	const bool enableDescriptorIndexing = (features12.descriptorIndexing == VK_TRUE);
 	const bool enableSamplerAnisotropy = (features2.features.samplerAnisotropy == VK_TRUE);
+	const bool enableGeometryShader = (features2.features.geometryShader == VK_TRUE);
 
 	LOG_INFO(logger,
 		"Optional feature bufferDeviceAddress: {}.",
@@ -368,6 +369,9 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	LOG_INFO(logger,
 		"Optional feature samplerAnisotropy: {}.",
 		enableSamplerAnisotropy ? "enabled" : "skipped");
+	LOG_INFO(logger,
+		"Optional feature geometryShader: {}.",
+		enableGeometryShader ? "enabled" : "skipped");
 
 	// Build unique queue family set.
 	const QueueFamilies& qf = best->queueFamilies;
@@ -407,6 +411,7 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	VkPhysicalDeviceFeatures2 enabledFeatures2{};
 	enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 	enabledFeatures2.features.samplerAnisotropy = enableSamplerAnisotropy ? VK_TRUE : VK_FALSE;
+	enabledFeatures2.features.geometryShader = enableGeometryShader ? VK_TRUE : VK_FALSE;
 	enabledFeatures2.pNext = &enabledFeatures12;
 	enabledFeatures12.pNext = &enabledFeatures13;
 
