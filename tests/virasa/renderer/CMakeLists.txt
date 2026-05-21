@@ -7,6 +7,7 @@ add_executable(virasa_renderer_tests
     core/test_Context.cpp
     resources/test_ShaderModule.cpp
     resources/test_Pipeline.cpp
+    resources/test_Image.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

@@ -65,7 +65,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::CommandPoolCreateFailed),
 		static_cast<uint8_t>(RenderError::FenceCreateFailed));
 
-	// All sixteen values are distinct.
+	// Version 7 adds ImageCreateFailed and MemoryAllocFailed after FenceCreateFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::FenceCreateFailed),
+		static_cast<uint8_t>(RenderError::ImageCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::ImageCreateFailed),
+		static_cast<uint8_t>(RenderError::MemoryAllocFailed));
+
+	// All eighteen values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -83,10 +89,12 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::PipelineCreateFailed),
 		static_cast<uint8_t>(RenderError::CommandPoolCreateFailed),
 		static_cast<uint8_t>(RenderError::FenceCreateFailed),
+		static_cast<uint8_t>(RenderError::ImageCreateFailed),
+		static_cast<uint8_t>(RenderError::MemoryAllocFailed),
 	};
-	for (std::size_t i = 0; i < 16; ++i)
+	for (std::size_t i = 0; i < 18; ++i)
 	{
-		for (std::size_t j = i + 1; j < 16; ++j)
+		for (std::size_t j = i + 1; j < 18; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -133,6 +141,12 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::PipelineCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::CommandPoolCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::FenceCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::ImageCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::MemoryAllocFailed));
+
+	// Every non-None value is not equal to None (version-7 additions).
+	EXPECT_NE(RenderError::ImageCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::MemoryAllocFailed, RenderError::None);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +255,9 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	// maxFramesInFlight defaults to 2 (version-6 addition).
 	EXPECT_EQ(config.maxFramesInFlight, uint32_t{2});
 
+	// depthFormat defaults to VK_FORMAT_D32_SFLOAT (version-7 addition).
+	EXPECT_EQ(config.depthFormat, VK_FORMAT_D32_SFLOAT);
+
 	// Members are publicly assignable.
 	const char* extName = "VK_KHR_surface";
 	const char* const exts[] = {extName};
@@ -254,6 +271,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	config.swapchainImageUsage =
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	config.maxFramesInFlight = 3u;
+	config.depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
 
 	EXPECT_STREQ(config.applicationName, "MyApp");
 	EXPECT_EQ(config.applicationVersion, uint32_t{1});
@@ -264,6 +282,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(config.swapchainImageUsage,
 		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
 	EXPECT_EQ(config.maxFramesInFlight, uint32_t{3});
+	EXPECT_EQ(config.depthFormat, VK_FORMAT_D24_UNORM_S8_UINT);
 
 	// Copyable: copy-construct and verify members are equal.
 	RendererConfig copy = config;
@@ -275,6 +294,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(copy.preferMailbox, config.preferMailbox);
 	EXPECT_EQ(copy.swapchainImageUsage, config.swapchainImageUsage);
 	EXPECT_EQ(copy.maxFramesInFlight, config.maxFramesInFlight);
+	EXPECT_EQ(copy.depthFormat, config.depthFormat);
 
 	// Movable: move-construct and verify members transferred.
 	RendererConfig moved = std::move(copy);
@@ -287,6 +307,7 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 	EXPECT_EQ(moved.swapchainImageUsage,
 		VkImageUsageFlags{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
 	EXPECT_EQ(moved.maxFramesInFlight, uint32_t{3});
+	EXPECT_EQ(moved.depthFormat, VK_FORMAT_D24_UNORM_S8_UINT);
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +491,8 @@ TEST(Types, test_render_error_has_ostream_insertion_operator)
 	EXPECT_EQ(toString(RenderError::PipelineCreateFailed), "PipelineCreateFailed");
 	EXPECT_EQ(toString(RenderError::CommandPoolCreateFailed), "CommandPoolCreateFailed");
 	EXPECT_EQ(toString(RenderError::FenceCreateFailed), "FenceCreateFailed");
+	EXPECT_EQ(toString(RenderError::ImageCreateFailed), "ImageCreateFailed");
+	EXPECT_EQ(toString(RenderError::MemoryAllocFailed), "MemoryAllocFailed");
 
 	// An out-of-range value writes "RenderError(N)" where N is the decimal integer.
 	auto outOfRange = static_cast<RenderError>(uint8_t{200});
@@ -526,6 +549,7 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	(void)config.preferMailbox;
 	(void)config.swapchainImageUsage;
 	(void)config.maxFramesInFlight;
+	(void)config.depthFormat;
 	// If the struct had an apiVersion member the test author would have caught
 	// it during contract review; the absence of such a member is the assertion.
 	EXPECT_TRUE(true); // structural assertion satisfied at compile time above.

@@ -42,7 +42,11 @@ enum class RenderError : uint8_t
 	/// @brief vkCreateCommandPool or vkAllocateCommandBuffers returned a VkResult other than VK_SUCCESS.
 	CommandPoolCreateFailed,
 	/// @brief vkCreateSemaphore or vkCreateFence returned a VkResult other than VK_SUCCESS during per-frame sync object creation.
-	FenceCreateFailed
+	FenceCreateFailed,
+	/// @brief vkCreateImage or vkBindImageMemory returned a VkResult other than VK_SUCCESS.
+	ImageCreateFailed,
+	/// @brief No suitable memory type was found, or vkAllocateMemory returned a VkResult other than VK_SUCCESS.
+	MemoryAllocFailed
 };
 
 /**
@@ -75,6 +79,8 @@ inline std::ostream& operator<<(std::ostream& os, RenderError error)
 		case RenderError::PipelineCreateFailed:    return os << "PipelineCreateFailed";
 		case RenderError::CommandPoolCreateFailed: return os << "CommandPoolCreateFailed";
 		case RenderError::FenceCreateFailed:       return os << "FenceCreateFailed";
+		case RenderError::ImageCreateFailed:       return os << "ImageCreateFailed";
+		case RenderError::MemoryAllocFailed:       return os << "MemoryAllocFailed";
 		default:
 			return os << "RenderError(" << static_cast<uint32_t>(static_cast<uint8_t>(error)) << ")";
 	}
@@ -147,6 +153,16 @@ struct RendererConfig
 	 * Common values are 2 (double-buffering) and 3 (triple-buffering). Must not be 0.
 	 */
 	uint32_t maxFramesInFlight = 2;
+
+	/**
+	 * @brief Format used for the renderer's depth attachment.
+	 *
+	 * Consumers that create a depth image use this format for the depth image and its view.
+	 * Must be a format supported by the selected VkPhysicalDevice as a depth-stencil attachment
+	 * with VK_IMAGE_TILING_OPTIMAL. Defaults to VK_FORMAT_D32_SFLOAT, which is required to be
+	 * supported as an optimal-tiling depth-stencil attachment on every conformant Vulkan implementation.
+	 */
+	VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 };
 
 /**

@@ -31,6 +31,8 @@ QueueFamilies SelectQueueFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
 
 	QueueFamilies result{};
 
+	const bool headless = (surface == VK_NULL_HANDLE);
+
 	for (uint32_t i = 0; i < familyCount; ++i)
 	{
 		const VkQueueFamilyProperties& props = families[i];
@@ -38,9 +40,13 @@ QueueFamilies SelectQueueFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
 		const bool hasGraphics = (props.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
 		const bool hasTransfer = (props.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0;
 
-		VkBool32 presentSupport = VK_FALSE;
-		vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);
-		const bool hasPresent = (presentSupport == VK_TRUE);
+		bool hasPresent = false;
+		if (!headless)
+		{
+			VkBool32 presentSupport = VK_FALSE;
+			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);
+			hasPresent = (presentSupport == VK_TRUE);
+		}
 
 		// Single-family override: a family that supports both graphics and present wins.
 		if (hasGraphics && hasPresent)
@@ -80,6 +86,14 @@ QueueFamilies SelectQueueFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
 	{
 		result.transferFamily = result.graphicsFamily;
 		// dedicatedTransfer remains false to distinguish from the dedicated case.
+	}
+
+	// Headless fallback: no surface means no present queue is needed; use the
+	// graphics family so that IsComplete() succeeds and the device can be created.
+	if (headless && result.graphicsFound && !result.presentFound)
+	{
+		result.presentFamily = result.graphicsFamily;
+		result.presentFound = true;
 	}
 
 	return result;
