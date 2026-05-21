@@ -22,13 +22,16 @@ Context::~Context()
 Context::Context(Context&& other) noexcept
     : _platform(other._platform), _config(other._config), _instance(std::move(other._instance)),
 	_surface(std::move(other._surface)), _device(std::move(other._device)),
-	_swapchain(std::move(other._swapchain)), _commandPool(other._commandPool),
+	_swapchain(std::move(other._swapchain)), _depthImage(std::move(other._depthImage)),
+	_commandPool(other._commandPool), _transferCommandPool(other._transferCommandPool),
 	_commandBuffers(std::move(other._commandBuffers)), _frameData(std::move(other._frameData)),
 	_currentFrameIndex(other._currentFrameIndex), _acquiredImageIndex(other._acquiredImageIndex),
 	_isReady(other._isReady)
 {
 	other._platform = nullptr;
 	other._commandPool = VK_NULL_HANDLE;
+	other._transferCommandPool = VK_NULL_HANDLE;
+	other._depthImage = Image{};
 	other._currentFrameIndex = 0;
 	other._acquiredImageIndex = 0;
 	other._isReady = false;
@@ -46,7 +49,9 @@ Context& Context::operator=(Context&& other) noexcept
 		_surface = std::move(other._surface);
 		_device = std::move(other._device);
 		_swapchain = std::move(other._swapchain);
+		_depthImage = std::move(other._depthImage);
 		_commandPool = other._commandPool;
+		_transferCommandPool = other._transferCommandPool;
 		_commandBuffers = std::move(other._commandBuffers);
 		_frameData = std::move(other._frameData);
 		_currentFrameIndex = other._currentFrameIndex;
@@ -55,6 +60,8 @@ Context& Context::operator=(Context&& other) noexcept
 
 		other._platform = nullptr;
 		other._commandPool = VK_NULL_HANDLE;
+		other._transferCommandPool = VK_NULL_HANDLE;
+		other._depthImage = Image{};
 		other._currentFrameIndex = 0;
 		other._acquiredImageIndex = 0;
 		other._isReady = false;
@@ -111,7 +118,25 @@ RenderError Context::Initialize(virasa::window::Platform& platform, const Render
 		}
 	}
 
-	// Step 6: Create graphics command pool and allocate command buffers
+	// Step 6: Create depth image
+	{
+		ImageConfig depthConfig{};
+		depthConfig.width = _swapchain.GetExtent().width;
+		depthConfig.height = _swapchain.GetExtent().height;
+		depthConfig.format = config.depthFormat;
+		depthConfig.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		depthConfig.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		depthConfig.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+		depthConfig.flags = 0;
+
+		RenderError err = _depthImage.Initialize(_device, depthConfig);
+		if (err != RenderError::None)
+		{
+			return err;
+		}
+	}
+
+	// Step 7: Create graphics command pool and allocate command buffers
 	{
 		VkCommandPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -141,7 +166,30 @@ RenderError Context::Initialize(virasa::window::Platform& platform, const Render
 		}
 	}
 
-	// Step 7: Create per-frame synchronization objects
+	// Step 8: Create transfer command pool (may alias graphics pool)
+	{
+		const QueueFamilies& qf = _device.GetQueueFamilies();
+		if (qf.transferFamily == qf.graphicsFamily)
+		{
+			_transferCommandPool = _commandPool;
+		}
+		else
+		{
+			VkCommandPoolCreateInfo poolInfo{};
+			poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+			poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+			poolInfo.queueFamilyIndex = qf.transferFamily;
+
+			VkResult result = vkCreateCommandPool(
+				_device.GetHandle(), &poolInfo, nullptr, &_transferCommandPool);
+			if (result != VK_SUCCESS)
+			{
+				return RenderError::CommandPoolCreateFailed;
+			}
+		}
+	}
+
+	// Step 9: Create per-frame synchronization objects
 	{
 		_frameData.resize(config.maxFramesInFlight);
 
@@ -213,12 +261,20 @@ void Context::DestroyPerFrameResources()
 	}
 	_frameData.clear();
 
+	if (_transferCommandPool != VK_NULL_HANDLE && _transferCommandPool != _commandPool)
+	{
+		vkDestroyCommandPool(device, _transferCommandPool, nullptr);
+	}
+	_transferCommandPool = VK_NULL_HANDLE;
+
 	if (_commandPool != VK_NULL_HANDLE)
 	{
 		vkDestroyCommandPool(device, _commandPool, nullptr);
 		_commandPool = VK_NULL_HANDLE;
 		_commandBuffers.clear();
 	}
+
+	_depthImage = Image{};
 }
 
 void Context::Shutdown()
@@ -259,9 +315,16 @@ void Context::RecreateSwapchain()
 	if (err != RenderError::None)
 	{
 		auto* logger = Logger::GetLogger("renderer");
-		// Log using ostream insertion operator via a stringstream
-		// We format the error into a string first
 		LOG_ERROR(logger, "Swapchain recreation failed.");
+		return;
+	}
+
+	VkExtent2D newExtent = _swapchain.GetExtent();
+	err = _depthImage.Resize(newExtent.width, newExtent.height);
+	if (err != RenderError::None)
+	{
+		auto* logger = Logger::GetLogger("renderer");
+		LOG_ERROR(logger, "Depth image resize failed after swapchain recreation.");
 	}
 }
 
@@ -453,6 +516,21 @@ uint32_t Context::GetMaxFramesInFlight() const noexcept
 bool Context::IsReady() const noexcept
 {
 	return _isReady;
+}
+
+VkImageView Context::GetDepthImageView() const noexcept
+{
+	return _depthImage.GetView();
+}
+
+VkFormat Context::GetDepthFormat() const noexcept
+{
+	return _config.depthFormat;
+}
+
+VkCommandPool Context::GetTransferCommandPool() const noexcept
+{
+	return _transferCommandPool;
 }
 
 } // namespace virasa

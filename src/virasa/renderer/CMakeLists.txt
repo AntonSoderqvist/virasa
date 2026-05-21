@@ -7,6 +7,7 @@ add_library(virasa_renderer_lib STATIC
     resources/ShaderModule.cpp
     resources/Pipeline.cpp
     resources/Image.cpp
+    resources/Buffer.cpp
 )
 
 target_include_directories(virasa_renderer_lib

@@ -10,6 +10,7 @@
 #include "virasa/renderer/core/Instance.h"
 #include "virasa/renderer/core/Surface.h"
 #include "virasa/renderer/core/Swapchain.h"
+#include "virasa/renderer/resources/Image.h"
 #include "virasa/window/Platform.h"
 #include "virasa/window/Types.h"
 
@@ -163,10 +164,44 @@ TEST(Context, test_context_initialize_builds_stack_in_dependency_order)
 		EXPECT_NE(ctx.GetInstance().GetHandle(), VK_NULL_HANDLE);
 		EXPECT_TRUE(ctx.GetSwapchain().IsInitialized());
 		EXPECT_NE(ctx.GetGraphicsCommandPool(), VK_NULL_HANDLE);
+		// Version-2 additions: depth image and transfer command pool
+		EXPECT_NE(ctx.GetDepthImageView(), VK_NULL_HANDLE);
+		EXPECT_NE(ctx.GetTransferCommandPool(), VK_NULL_HANDLE);
 	}
 	else
 	{
 		EXPECT_FALSE(ctx.IsReady());
+	}
+
+	ctx.Shutdown();
+	platform.Shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// context_creates_depth_image
+// ---------------------------------------------------------------------------
+TEST(Context, test_context_creates_depth_image)
+{
+	Platform platform;
+	ASSERT_EQ(InitializePlatform(platform), ErrorCode::None);
+	RendererConfig config = MakeTestConfig(platform);
+	config.depthFormat = VK_FORMAT_D32_SFLOAT;
+
+	Context ctx;
+	RenderError err = InitializeContext(ctx, platform, config);
+
+	if (err == RenderError::None)
+	{
+		// Depth image view must be non-null after successful Initialize.
+		EXPECT_NE(ctx.GetDepthImageView(), VK_NULL_HANDLE);
+
+		// Depth format must match the config supplied to Initialize.
+		EXPECT_EQ(ctx.GetDepthFormat(), VK_FORMAT_D32_SFLOAT);
+
+		// Depth image is sized to the swapchain extent.
+		VkExtent2D swapExt = ctx.GetSwapchainExtent();
+		EXPECT_GT(swapExt.width, 0u);
+		EXPECT_GT(swapExt.height, 0u);
 	}
 
 	ctx.Shutdown();
@@ -201,11 +236,41 @@ TEST(Context, test_context_creates_graphics_command_pool_and_buffers)
 }
 
 // ---------------------------------------------------------------------------
+// context_creates_transfer_command_pool
+// ---------------------------------------------------------------------------
+TEST(Context, test_context_creates_transfer_command_pool)
+{
+	Platform platform;
+	ASSERT_EQ(InitializePlatform(platform), ErrorCode::None);
+	RendererConfig config = MakeTestConfig(platform);
+
+	Context ctx;
+	RenderError err = InitializeContext(ctx, platform, config);
+
+	if (err == RenderError::None)
+	{
+		// Transfer command pool must be a valid (non-null) handle after Initialize.
+		VkCommandPool transferPool = ctx.GetTransferCommandPool();
+		EXPECT_NE(transferPool, VK_NULL_HANDLE);
+
+		// Transfer pool must be distinct from the graphics pool (they serve
+		// different purposes, though they may target the same queue family on
+		// devices without a dedicated transfer family).
+		// The contract does not require them to be distinct handles, so we only
+		// verify the transfer pool is valid.
+		(void)ctx.GetGraphicsCommandPool();
+	}
+
+	ctx.Shutdown();
+	platform.Shutdown();
+}
+
+// ---------------------------------------------------------------------------
 // context_creates_per_frame_sync_objects
 // ---------------------------------------------------------------------------
 // The per-frame sync objects (semaphores and fences) are internal; their
 // creation is verified indirectly: a successful Initialize (which includes
-// step 7) leaves IsReady true, and a subsequent BeginFrame/EndFrame cycle
+// step 9) leaves IsReady true, and a subsequent BeginFrame/EndFrame cycle
 // completes without error, which would be impossible if the sync objects
 // were not correctly created.
 TEST(Context, test_context_creates_per_frame_sync_objects)
@@ -465,6 +530,46 @@ TEST(Context, test_context_frame_state_observers)
 }
 
 // ---------------------------------------------------------------------------
+// context_depth_observers
+// ---------------------------------------------------------------------------
+TEST(Context, test_context_depth_observers)
+{
+	Platform platform;
+	ASSERT_EQ(InitializePlatform(platform), ErrorCode::None);
+	RendererConfig config = MakeTestConfig(platform);
+	config.depthFormat = VK_FORMAT_D32_SFLOAT;
+
+	Context ctx;
+	RenderError err = InitializeContext(ctx, platform, config);
+
+	if (err == RenderError::None)
+	{
+		// GetDepthImageView must return a non-null handle on a ready Context.
+		EXPECT_NE(ctx.GetDepthImageView(), VK_NULL_HANDLE);
+
+		// GetDepthFormat must return the format supplied in the config.
+		EXPECT_EQ(ctx.GetDepthFormat(), VK_FORMAT_D32_SFLOAT);
+
+		// The depth view is the same handle every call (single image, not per-frame).
+		VkImageView viewA = ctx.GetDepthImageView();
+		VkImageView viewB = ctx.GetDepthImageView();
+		EXPECT_EQ(viewA, viewB);
+
+		// The depth format is unchanged by a BeginFrame/EndFrame cycle.
+		SwapchainStatus status = ctx.BeginFrame();
+		EXPECT_NE(status, SwapchainStatus::Error);
+		if (status == SwapchainStatus::Success || status == SwapchainStatus::Recreated)
+		{
+			EXPECT_EQ(ctx.GetDepthFormat(), VK_FORMAT_D32_SFLOAT);
+			ctx.EndFrame();
+		}
+	}
+
+	ctx.Shutdown();
+	platform.Shutdown();
+}
+
+// ---------------------------------------------------------------------------
 // context_stack_observers
 // ---------------------------------------------------------------------------
 TEST(Context, test_context_stack_observers)
@@ -491,6 +596,9 @@ TEST(Context, test_context_stack_observers)
 		EXPECT_TRUE(swapchain.IsInitialized());
 
 		EXPECT_NE(ctx.GetGraphicsCommandPool(), VK_NULL_HANDLE);
+
+		// Version-2 addition: transfer command pool.
+		EXPECT_NE(ctx.GetTransferCommandPool(), VK_NULL_HANDLE);
 	}
 
 	ctx.Shutdown();

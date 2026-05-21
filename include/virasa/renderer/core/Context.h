@@ -9,6 +9,7 @@
 #include "virasa/renderer/core/Instance.h"
 #include "virasa/renderer/core/Surface.h"
 #include "virasa/renderer/core/Swapchain.h"
+#include "virasa/renderer/resources/Image.h"
 #include "vulkan/vulkan.h"
 
 namespace virasa
@@ -134,10 +135,28 @@ class Context final
 	[[nodiscard]] const Swapchain& GetSwapchain() const noexcept;
 
 	/**
+	 * @brief Returns the VkImageView of the owned depth image.
+	 * @return VkImageView valid until the next swapchain recreation, Shutdown, or destruction.
+	 */
+	[[nodiscard]] VkImageView GetDepthImageView() const noexcept;
+
+	/**
+	 * @brief Returns the VkFormat used for the depth image.
+	 * @return VkFormat equal to config.depthFormat supplied to Initialize.
+	 */
+	[[nodiscard]] VkFormat GetDepthFormat() const noexcept;
+
+	/**
 	 * @brief Returns the graphics command pool used for per-frame command buffers.
 	 * @return VkCommandPool valid while the Context is ready.
 	 */
 	[[nodiscard]] VkCommandPool GetGraphicsCommandPool() const noexcept;
+
+	/**
+	 * @brief Returns the transfer command pool intended for staging/upload command buffers.
+	 * @return VkCommandPool valid while the Context is ready.
+	 */
+	[[nodiscard]] VkCommandPool GetTransferCommandPool() const noexcept;
 
 	/**
 	 * @brief Returns the current frame-in-flight index.
@@ -176,7 +195,9 @@ class Context final
 	Device _device{};
 	Swapchain _swapchain{};
 
+	Image _depthImage{}; ///< Depth attachment shared across frames-in-flight.
 	VkCommandPool _commandPool = VK_NULL_HANDLE;
+	VkCommandPool _transferCommandPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> _commandBuffers{};
 	std::vector<FrameData> _frameData{};
 

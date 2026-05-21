@@ -8,6 +8,8 @@ set(GLSLC Vulkan::glslc)
 set(SHADERS
     triangle.vert
     triangle.frag
+    cube.vert
+    cube.frag
 )
 
 set(SPV_FILES)

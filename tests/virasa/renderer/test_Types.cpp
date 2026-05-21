@@ -71,7 +71,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint8_t>(RenderError::ImageCreateFailed),
 		static_cast<uint8_t>(RenderError::MemoryAllocFailed));
 
-	// All eighteen values are distinct.
+	// Version 8 adds BufferCreateFailed and MemoryMapFailed after MemoryAllocFailed.
+	EXPECT_LT(static_cast<uint8_t>(RenderError::MemoryAllocFailed),
+		static_cast<uint8_t>(RenderError::BufferCreateFailed));
+	EXPECT_LT(static_cast<uint8_t>(RenderError::BufferCreateFailed),
+		static_cast<uint8_t>(RenderError::MemoryMapFailed));
+
+	// All twenty values are distinct.
 	uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
@@ -91,10 +97,12 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::FenceCreateFailed),
 		static_cast<uint8_t>(RenderError::ImageCreateFailed),
 		static_cast<uint8_t>(RenderError::MemoryAllocFailed),
+		static_cast<uint8_t>(RenderError::BufferCreateFailed),
+		static_cast<uint8_t>(RenderError::MemoryMapFailed),
 	};
-	for (std::size_t i = 0; i < 18; ++i)
+	for (std::size_t i = 0; i < 20; ++i)
 	{
-		for (std::size_t j = i + 1; j < 18; ++j)
+		for (std::size_t j = i + 1; j < 20; ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -143,10 +151,16 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::FenceCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::ImageCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::MemoryAllocFailed));
+	EXPECT_FALSE(isSuccess(RenderError::BufferCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::MemoryMapFailed));
 
 	// Every non-None value is not equal to None (version-7 additions).
 	EXPECT_NE(RenderError::ImageCreateFailed, RenderError::None);
 	EXPECT_NE(RenderError::MemoryAllocFailed, RenderError::None);
+
+	// Version-8 additions are also not equal to None.
+	EXPECT_NE(RenderError::BufferCreateFailed, RenderError::None);
+	EXPECT_NE(RenderError::MemoryMapFailed, RenderError::None);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +507,8 @@ TEST(Types, test_render_error_has_ostream_insertion_operator)
 	EXPECT_EQ(toString(RenderError::FenceCreateFailed), "FenceCreateFailed");
 	EXPECT_EQ(toString(RenderError::ImageCreateFailed), "ImageCreateFailed");
 	EXPECT_EQ(toString(RenderError::MemoryAllocFailed), "MemoryAllocFailed");
+	EXPECT_EQ(toString(RenderError::BufferCreateFailed), "BufferCreateFailed");
+	EXPECT_EQ(toString(RenderError::MemoryMapFailed), "MemoryMapFailed");
 
 	// An out-of-range value writes "RenderError(N)" where N is the decimal integer.
 	auto outOfRange = static_cast<RenderError>(uint8_t{200});
