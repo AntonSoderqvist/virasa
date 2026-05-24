@@ -18,35 +18,31 @@ layout(buffer_reference, scalar) readonly buffer IndexBuffer {
     uint indices[];
 };
 
-// Push constants (vertex stage, offset 0, size 80):
-//   mat4 mvp                     -- pre-computed proj * view * model
-//   uint64_t vertexBufferAddress -- device address of the vertex buffer
-//   uint64_t indexBufferAddress  -- device address of the index buffer
+// 96-byte push constant block (vertex+fragment):
+//   mat4     mvp                    @  0  (64 bytes)
+//   uint64_t vertexBufferAddress    @ 64  (8 bytes)
+//   uint64_t indexBufferAddress     @ 72  (8 bytes)
+//   uint64_t materialBufferAddress  @ 80  (8 bytes)
+//   uint32_t materialId             @ 88  (4 bytes)
+//   uint32_t _pad                   @ 92  (4 bytes)
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
+    uint64_t materialBufferAddress;
+    uint materialId;
+    uint _pad;
 } pc;
 
-layout(location = 0) out vec3 fragColor;
-
-const vec3 faceColors[6] = vec3[6](
-    vec3(0.95, 0.25, 0.25),
-    vec3(0.25, 0.85, 0.30),
-    vec3(0.25, 0.45, 0.95),
-    vec3(0.95, 0.85, 0.25),
-    vec3(0.85, 0.30, 0.85),
-    vec3(0.25, 0.85, 0.95)
-);
+layout(location = 0) out vec2 fragUV;
 
 void main() {
     IndexBuffer ib = IndexBuffer(pc.indexBufferAddress);
     VertexBuffer vb = VertexBuffer(pc.vertexBufferAddress);
 
     uint vertIdx = ib.indices[gl_VertexIndex];
-    vec3 pos = vb.vertices[vertIdx].position;
-    gl_Position = pc.mvp * vec4(pos, 1.0);
+    Vertex v = vb.vertices[vertIdx];
 
-    // 6 indices per face (2 triangles); gl_VertexIndex / 6 gives face 0..5
-    fragColor = faceColors[clamp(gl_VertexIndex / 6, 0, 5)];
+    gl_Position = pc.mvp * vec4(v.position, 1.0);
+    fragUV = v.uv;
 }

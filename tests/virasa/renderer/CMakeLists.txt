@@ -13,6 +13,7 @@ add_executable(virasa_renderer_tests
     resources/test_Sampler.cpp
     resources/test_Mesh.cpp
     geometry/test_Primitives.cpp
+    material/test_Visual.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

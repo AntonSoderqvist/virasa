@@ -11,6 +11,7 @@ add_library(virasa_renderer_lib STATIC
     resources/BindlessTextureArray.cpp
     resources/Sampler.cpp
     resources/Mesh.cpp
+    material/Visual.cpp
 )
 
 target_include_directories(virasa_renderer_lib
