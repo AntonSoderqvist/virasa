@@ -141,6 +141,12 @@ class Context final
 	[[nodiscard]] VkImageView GetDepthImageView() const noexcept;
 
 	/**
+	 * @brief Returns the VkImage of the owned depth image.
+	 * @return VkImage valid until the next swapchain recreation, Shutdown, or destruction.
+	 */
+	[[nodiscard]] VkImage GetDepthImage() const noexcept;
+
+	/**
 	 * @brief Returns the VkFormat used for the depth image.
 	 * @return VkFormat equal to config.depthFormat supplied to Initialize.
 	 */

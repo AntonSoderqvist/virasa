@@ -523,6 +523,11 @@ VkImageView Context::GetDepthImageView() const noexcept
 	return _depthImage.GetView();
 }
 
+VkImage Context::GetDepthImage() const noexcept
+{
+	return _depthImage.GetHandle();
+}
+
 VkFormat Context::GetDepthFormat() const noexcept
 {
 	return _config.depthFormat;

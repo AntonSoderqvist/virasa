@@ -13,6 +13,10 @@ add_library(virasa_renderer_lib STATIC
     resources/Mesh.cpp
     resources/MeshRegistry.cpp
     material/Visual.cpp
+    graph/Graph.cpp
+    graph/Pass.cpp
+    graph/ImageRegistry.cpp
+    graph/BufferRegistry.cpp
 )
 
 target_include_directories(virasa_renderer_lib
