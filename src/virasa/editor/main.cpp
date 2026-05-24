@@ -14,7 +14,11 @@
 #include <span>
 
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/Components.h"
+#include "virasa/ecs/Types.h"
+#include "virasa/ecs/World.h"
 #include "virasa/math/Projection.h"
+#include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
@@ -24,6 +28,7 @@
 #include "virasa/renderer/resources/BindlessTextureArray.h"
 #include "virasa/renderer/resources/Image.h"
 #include "virasa/renderer/resources/Mesh.h"
+#include "virasa/renderer/resources/MeshRegistry.h"
 #include "virasa/renderer/resources/Pipeline.h"
 #include "virasa/renderer/resources/Sampler.h"
 #include "virasa/renderer/resources/ShaderModule.h"
@@ -65,14 +70,22 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
+	virasa::renderer::MeshRegistry meshRegistry;
+
 	virasa::MeshData cubeData = virasa::CreateCube();
-	virasa::Mesh mesh;
-	virasa::RenderError meshResult = mesh.Initialize(context.GetDevice(), context, cubeData);
+	virasa::Mesh localMesh;
+	virasa::RenderError meshResult = localMesh.Initialize(context.GetDevice(), context, cubeData);
 	if (meshResult != virasa::RenderError::None)
 	{
 		LOG_ERROR(logger,
 			"Mesh initialization failed with error code: {}",
 			static_cast<int>(meshResult));
+		return -1;
+	}
+	uint32_t cubeMeshId = meshRegistry.Allocate(std::move(localMesh));
+	if (cubeMeshId == 0xFFFFFFFFu)
+	{
+		LOG_ERROR(logger, "Failed to allocate cube mesh into MeshRegistry.");
 		return -1;
 	}
 
@@ -164,7 +177,13 @@ int main(int argc, char** argv)
 		vkCmdPipelineBarrier(uploadCmd,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+			0,
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&toTransfer);
 
 		// Copy buffer to image
 		VkBufferImageCopy copyRegion{};
@@ -205,7 +224,13 @@ int main(int argc, char** argv)
 		vkCmdPipelineBarrier(uploadCmd,
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &toShaderRead);
+			0,
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&toShaderRead);
 
 		vkEndCommandBuffer(uploadCmd);
 
@@ -242,8 +267,7 @@ int main(int argc, char** argv)
 	// Bindless texture array
 	virasa::BindlessTextureArray bindlessTextures;
 	{
-		virasa::RenderError btaResult =
-			bindlessTextures.Initialize(context.GetDevice(), 256);
+		virasa::RenderError btaResult = bindlessTextures.Initialize(context.GetDevice(), 256);
 		if (btaResult != virasa::RenderError::None)
 		{
 			LOG_ERROR(logger,
@@ -273,12 +297,20 @@ int main(int argc, char** argv)
 		}
 	}
 	virasa::VisualMaterial defaultMaterial{};
+	defaultMaterial.factors.baseColorFactor = virasa::math::Vec4(0.9f, 0.3f, 0.2f, 1.0f);
 	uint32_t defaultMaterialId = materialTable.Allocate(defaultMaterial);
 	if (defaultMaterialId == UINT32_MAX)
 	{
 		LOG_ERROR(logger, "Failed to allocate default material from VisualMaterialTable.");
 		return -1;
 	}
+
+	// Build ECS world with one drawable cube entity
+	virasa::ecs::World world;
+	virasa::ecs::Entity cubeEntity = world.CreateEntity();
+	world.AddTransformComponent(cubeEntity, virasa::math::Transform::Identity());
+	world.AddMeshComponent(cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
+	world.AddVisualComponent(cubeEntity, virasa::ecs::VisualComponent{defaultMaterialId});
 
 	virasa::ShaderModule vertShader;
 	virasa::RenderError vertResult =
@@ -303,13 +335,11 @@ int main(int argc, char** argv)
 	}
 
 	VkExtent2D swapExtent = context.GetSwapchainExtent();
-	virasa::math::Mat4 model = virasa::math::Mat4(1.0f);
 	virasa::math::Mat4 view = virasa::math::LookAtRH_ZUp(
 		virasa::math::Vec3(2.0f, 2.0f, 2.0f), virasa::math::Vec3(0.0f, 0.0f, 0.0f));
 	float aspect = static_cast<float>(swapExtent.width) / static_cast<float>(swapExtent.height);
 	virasa::math::Mat4 proj =
 		virasa::math::PerspectiveRH_ZO(glm::radians(45.0f), aspect, 0.1f, 10.0f);
-	virasa::math::Mat4 mvp = proj * view * model;
 
 	virasa::Pipeline pipeline;
 	virasa::PipelineBuilder builder;
@@ -323,8 +353,7 @@ int main(int argc, char** argv)
 		.SetDepthTest(true)
 		.SetDepthWrite(true)
 		.SetDepthCompareOp(VK_COMPARE_OP_LESS)
-		.AddPushConstantRange(
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 96)
+		.AddPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 96)
 		.AddDescriptorSetLayout(bindlessTextures.GetLayout());
 
 	virasa::RenderError pipelineResult = builder.Build(context.GetDevice(), pipeline);
@@ -338,12 +367,12 @@ int main(int argc, char** argv)
 
 	struct PushConstants
 	{
-		virasa::math::Mat4 mvp;            // offset  0, 64 bytes
-		VkDeviceAddress vertexBufferAddress;  // offset 64,  8 bytes
-		VkDeviceAddress indexBufferAddress;   // offset 72,  8 bytes
-		VkDeviceAddress materialBufferAddress;// offset 80,  8 bytes
-		uint32_t materialId;                  // offset 88,  4 bytes
-		uint32_t pad;                         // offset 92,  4 bytes
+		virasa::math::Mat4 mvp;			   // offset  0, 64 bytes
+		VkDeviceAddress vertexBufferAddress;   // offset 64,  8 bytes
+		VkDeviceAddress indexBufferAddress;	   // offset 72,  8 bytes
+		VkDeviceAddress materialBufferAddress; // offset 80,  8 bytes
+		uint32_t materialId;			   // offset 88,  4 bytes
+		uint32_t pad;				   // offset 92,  4 bytes
 	};
 
 	while (true)
@@ -407,9 +436,8 @@ int main(int argc, char** argv)
 			// Depth image: UNDEFINED -> DEPTH_ATTACHMENT_OPTIMAL
 			barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			barriers[1].srcAccessMask = 0;
-			barriers[1].dstAccessMask =
-				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			barriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+							    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 			barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 			barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
 			barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -507,21 +535,56 @@ int main(int argc, char** argv)
 			0,
 			nullptr);
 
-		PushConstants pushConstants{};
-		pushConstants.mvp = mvp;
-		pushConstants.vertexBufferAddress = mesh.GetVertexBufferAddress(context.GetDevice());
-		pushConstants.indexBufferAddress = mesh.GetIndexBufferAddress(context.GetDevice());
-		pushConstants.materialBufferAddress = materialTable.GetBufferAddress();
-		pushConstants.materialId = defaultMaterialId;
-		pushConstants.pad = 0u;
-		vkCmdPushConstants(cmd,
-			pipeline.GetLayout(),
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-			0,
-			96,
-			&pushConstants);
+		// Per-entity draw loop
+		const std::vector<virasa::ecs::Entity>& visualEntities =
+			world.GetVisualComponentEntities();
+		for (const virasa::ecs::Entity& entity : visualEntities)
+		{
+			if (!world.HasMeshComponent(entity))
+			{
+				continue;
+			}
+			const virasa::ecs::MeshComponent& meshComponent = world.GetMeshComponent(entity);
+			if (!meshRegistry.IsAllocated(meshComponent.meshId))
+			{
+				continue;
+			}
+			const virasa::Mesh& drawMesh = meshRegistry.Get(meshComponent.meshId);
 
-		vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+			virasa::math::Mat4 modelMatrix;
+			if (!world.HasTransformComponent(entity))
+			{
+				modelMatrix = virasa::math::Mat4(1.0f);
+			}
+			else
+			{
+				const virasa::math::Transform& transform =
+					world.GetTransformComponent(entity);
+				modelMatrix = transform.ToMatrix();
+			}
+
+			uint32_t entityMaterialId = world.GetVisualComponent(entity).materialId;
+
+			virasa::math::Mat4 mvp = proj * view * modelMatrix;
+
+			PushConstants pushConstants{};
+			pushConstants.mvp = mvp;
+			pushConstants.vertexBufferAddress =
+				drawMesh.GetVertexBufferAddress(context.GetDevice());
+			pushConstants.indexBufferAddress =
+				drawMesh.GetIndexBufferAddress(context.GetDevice());
+			pushConstants.materialBufferAddress = materialTable.GetBufferAddress();
+			pushConstants.materialId = entityMaterialId;
+			pushConstants.pad = 0u;
+			vkCmdPushConstants(cmd,
+				pipeline.GetLayout(),
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+				0,
+				96,
+				&pushConstants);
+
+			vkCmdDraw(cmd, drawMesh.GetIndexCount(), 1, 0, 0);
+		}
 
 		vkCmdEndRendering(cmd);
 

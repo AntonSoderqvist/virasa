@@ -36,6 +36,7 @@ add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/math)
 add_subdirectory(src/virasa/window)
 add_subdirectory(src/virasa/renderer)
+add_subdirectory(src/virasa/ecs)
 
 # --- Shaders ---
 add_subdirectory(shaders)
@@ -51,6 +52,7 @@ if(VIRASA_BUILD_TESTS)
     add_subdirectory(tests/virasa/math)
     add_subdirectory(tests/virasa/window)
     add_subdirectory(tests/virasa/renderer)
+    add_subdirectory(tests/virasa/ecs)
 endif()
 
 # --- Editor executable ---
@@ -62,4 +64,5 @@ target_link_libraries(virasa_editor
         virasa_window_lib
         virasa_renderer_lib
         virasa_math_lib
+        virasa_ecs_lib
 )

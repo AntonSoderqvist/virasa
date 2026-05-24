@@ -12,6 +12,7 @@ add_executable(virasa_renderer_tests
     resources/test_BindlessTextureArray.cpp
     resources/test_Sampler.cpp
     resources/test_Mesh.cpp
+    resources/test_MeshRegistry.cpp
     geometry/test_Primitives.cpp
     material/test_Visual.cpp
 )
