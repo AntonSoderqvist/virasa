@@ -367,15 +367,9 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 		queueCreateInfos.push_back(queueInfo);
 	}
 
-	// Build feature chain
-	VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
-	descriptorIndexingFeatures.sType =
-		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-	descriptorIndexingFeatures.pNext = nullptr;
-	descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
-	descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-	descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
-
+	// Build feature chain — all descriptor indexing knobs live in vk12Features;
+	// using a separate VkPhysicalDeviceDescriptorIndexingFeatures alongside
+	// VkPhysicalDeviceVulkan12Features in the same pNext chain violates VUID-02830.
 	VkPhysicalDeviceVulkan13Features vk13Features = {};
 	vk13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 	vk13Features.pNext = nullptr;
@@ -387,14 +381,16 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	vk12Features.pNext = &vk13Features;
 	vk12Features.bufferDeviceAddress = VK_TRUE;
 	vk12Features.descriptorIndexing = VK_TRUE;
-
-	// Chain descriptor indexing features between vk12 and vk13
-	descriptorIndexingFeatures.pNext = &vk12Features;
+	vk12Features.descriptorBindingPartiallyBound = VK_TRUE;
+	vk12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+	vk12Features.runtimeDescriptorArray = VK_TRUE;
+	vk12Features.scalarBlockLayout = VK_TRUE;
 
 	VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
 	enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	enabledFeatures2.pNext = &descriptorIndexingFeatures;
+	enabledFeatures2.pNext = &vk12Features;
 	enabledFeatures2.features.samplerAnisotropy = samplerAnisotropy ? VK_TRUE : VK_FALSE;
+	enabledFeatures2.features.shaderInt64 = VK_TRUE;
 
 	const char* enabledExtensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 

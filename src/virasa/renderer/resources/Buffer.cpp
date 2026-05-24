@@ -159,10 +159,18 @@ RenderError Buffer::Initialize(const Device& device, const BufferConfig& config)
 		return RenderError::MemoryAllocFailed;
 	}
 
+	VkMemoryAllocateFlagsInfo allocFlagsInfo{};
+	allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+	allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
 	VkMemoryAllocateInfo allocInfo{};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memReqs.size;
 	allocInfo.memoryTypeIndex = memTypeIndex;
+	if (config.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+	{
+		allocInfo.pNext = &allocFlagsInfo;
+	}
 
 	result = vkAllocateMemory(_device, &allocInfo, nullptr, &_memory);
 	if (result != VK_SUCCESS)

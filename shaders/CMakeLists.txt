@@ -21,7 +21,7 @@ foreach(SHADER ${SHADERS})
 
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
-        COMMAND ${GLSLC} -fshader-stage=${STAGE} "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}" -o "${SPV_OUT}"
+        COMMAND ${GLSLC} --target-env=vulkan1.2 -fshader-stage=${STAGE} "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}" -o "${SPV_OUT}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}"
         COMMENT "Compiling shader ${SHADER} -> ${SHADER_NAME}.spv"
         VERBATIM
