@@ -1,8 +1,10 @@
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <utility>
+#include <vector>
 
 #include "virasa/core/Logger.h"
 #include "virasa/renderer/Types.h"
@@ -12,7 +14,6 @@
 #include "virasa/window/Platform.h"
 #include "virasa/window/Types.h"
 
-using namespace virasa;
 using namespace virasa;
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,8 @@ TEST(Device, test_device_default_constructed_state)
 	EXPECT_EQ(props.deviceType, VK_PHYSICAL_DEVICE_TYPE_OTHER);
 
 	EXPECT_EQ(device.GetGraphicsQueueFamilyIndex(), 0u);
+	EXPECT_FALSE(device.IsBufferDeviceAddressEnabled());
+	EXPECT_FALSE(device.IsDescriptorIndexingEnabled());
 
 	// WaitIdle on a default-constructed device must be a no-op (no crash).
 	EXPECT_NO_FATAL_FAILURE(device.WaitIdle());
@@ -137,6 +140,8 @@ TEST(Device, test_device_is_raii_movable_non_copyable_handle_owner)
 		Device dst(std::move(src));
 		EXPECT_EQ(src.GetHandle(), VK_NULL_HANDLE);
 		EXPECT_FALSE(src.IsInitialized());
+		EXPECT_FALSE(src.IsBufferDeviceAddressEnabled());
+		EXPECT_FALSE(src.IsDescriptorIndexingEnabled());
 		EXPECT_EQ(src.GetPhysicalDevice(), VK_NULL_HANDLE);
 		EXPECT_EQ(src.GetGraphicsQueue(), VK_NULL_HANDLE);
 		EXPECT_EQ(src.GetPresentQueue(), VK_NULL_HANDLE);
@@ -150,6 +155,8 @@ TEST(Device, test_device_is_raii_movable_non_copyable_handle_owner)
 		dst = std::move(src);
 		EXPECT_EQ(src.GetHandle(), VK_NULL_HANDLE);
 		EXPECT_FALSE(src.IsInitialized());
+		EXPECT_FALSE(src.IsBufferDeviceAddressEnabled());
+		EXPECT_FALSE(src.IsDescriptorIndexingEnabled());
 		EXPECT_EQ(dst.GetHandle(), VK_NULL_HANDLE);
 		EXPECT_FALSE(dst.IsInitialized());
 	}
@@ -172,6 +179,8 @@ TEST(Device, test_device_is_raii_movable_non_copyable_handle_owner)
 	Device dst(std::move(src));
 	EXPECT_EQ(src.GetHandle(), VK_NULL_HANDLE);
 	EXPECT_FALSE(src.IsInitialized());
+	EXPECT_FALSE(src.IsBufferDeviceAddressEnabled());
+	EXPECT_FALSE(src.IsDescriptorIndexingEnabled());
 	EXPECT_EQ(dst.GetHandle(), originalHandle);
 	EXPECT_TRUE(dst.IsInitialized());
 
@@ -180,8 +189,29 @@ TEST(Device, test_device_is_raii_movable_non_copyable_handle_owner)
 	dst2 = std::move(dst);
 	EXPECT_EQ(dst.GetHandle(), VK_NULL_HANDLE);
 	EXPECT_FALSE(dst.IsInitialized());
+	EXPECT_FALSE(dst.IsBufferDeviceAddressEnabled());
+	EXPECT_FALSE(dst.IsDescriptorIndexingEnabled());
 	EXPECT_EQ(dst2.GetHandle(), originalHandle);
 	EXPECT_TRUE(dst2.IsInitialized());
+
+	// Move assignment into an already initialized Device destroys the prior handle.
+	{
+		Device dest;
+		ASSERT_EQ(dest.Initialize(instance, surface.GetHandle()), RenderError::None);
+		VkDevice oldDestHandle = dest.GetHandle();
+		Device src2;
+		ASSERT_EQ(src2.Initialize(instance, surface.GetHandle()), RenderError::None);
+		VkDevice srcHandle = src2.GetHandle();
+		dest = std::move(src2);
+		EXPECT_EQ(dest.GetHandle(), srcHandle);
+		EXPECT_TRUE(dest.IsInitialized());
+		EXPECT_EQ(src2.GetHandle(), VK_NULL_HANDLE);
+		EXPECT_FALSE(src2.IsInitialized());
+		EXPECT_FALSE(src2.IsBufferDeviceAddressEnabled());
+		EXPECT_FALSE(src2.IsDescriptorIndexingEnabled());
+		// The old handle is destroyed; we can't easily observe that directly,
+		// but the contract guarantees it.
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -230,8 +260,59 @@ TEST(Device, test_device_hard_requirements_for_physical_device_selection)
 	RenderError err = device.Initialize(instance, surface.GetHandle());
 	ASSERT_EQ(err, RenderError::None);
 
-	// The selected device must satisfy the Vulkan 1.3 hard requirement.
-	EXPECT_GE(device.GetProperties().apiVersion, static_cast<uint32_t>(VK_API_VERSION_1_3));
+	VkPhysicalDevice physicalDevice = device.GetPhysicalDevice();
+	ASSERT_NE(physicalDevice, VK_NULL_HANDLE);
+
+	// Hard requirement 1: Vulkan 1.3
+	VkPhysicalDeviceProperties props;
+	vkGetPhysicalDeviceProperties(physicalDevice, &props);
+	EXPECT_GE(props.apiVersion, static_cast<uint32_t>(VK_API_VERSION_1_3));
+
+	// Hard requirement 2: VK_KHR_swapchain extension
+	uint32_t extCount = 0;
+	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, nullptr);
+	std::vector<VkExtensionProperties> extensions(extCount);
+	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, extensions.data());
+	bool hasSwapchain = false;
+	for (const auto& ext : extensions)
+	{
+		if (std::strcmp(ext.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)
+		{
+			hasSwapchain = true;
+			break;
+		}
+	}
+	EXPECT_TRUE(hasSwapchain);
+
+	// Hard requirement 3: queue families complete
+	const QueueFamilies& qf = device.GetQueueFamilies();
+	EXPECT_TRUE(qf.IsComplete());
+
+	// Hard requirement 4: dynamicRendering and synchronization2
+	VkPhysicalDeviceVulkan13Features vulkan13Features{};
+	vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	VkPhysicalDeviceFeatures2 features2{};
+	features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	features2.pNext = &vulkan13Features;
+	vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+	EXPECT_TRUE(vulkan13Features.dynamicRendering);
+	EXPECT_TRUE(vulkan13Features.synchronization2);
+
+	// Hard requirement 5: bufferDeviceAddress
+	VkPhysicalDeviceVulkan12Features vulkan12Features{};
+	vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	features2.pNext = &vulkan12Features;
+	vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+	EXPECT_TRUE(vulkan12Features.bufferDeviceAddress);
+
+	// Hard requirement 6: descriptor indexing sub-features
+	VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
+	indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+	features2.pNext = &indexingFeatures;
+	vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+	EXPECT_TRUE(indexingFeatures.descriptorBindingPartiallyBound);
+	EXPECT_TRUE(indexingFeatures.descriptorBindingSampledImageUpdateAfterBind);
+	EXPECT_TRUE(indexingFeatures.runtimeDescriptorArray);
 }
 
 // ---------------------------------------------------------------------------
@@ -252,11 +333,146 @@ TEST(Device, test_device_scoring_algorithm)
 	Device device;
 	ASSERT_EQ(device.Initialize(instance, surface.GetHandle()), RenderError::None);
 
-	// The selected device must have a non-empty device name.
-	const VkPhysicalDeviceProperties& props = device.GetProperties();
-	EXPECT_GT(std::strlen(props.deviceName), 0u);
-	// The selected device must have passed the hard requirements.
-	EXPECT_GE(props.apiVersion, static_cast<uint32_t>(VK_API_VERSION_1_3));
+	VkPhysicalDevice selectedPhysicalDevice = device.GetPhysicalDevice();
+	ASSERT_NE(selectedPhysicalDevice, VK_NULL_HANDLE);
+
+	VkInstance vkInstance = instance.GetHandle();
+	VkSurfaceKHR vkSurface = surface.GetHandle();
+
+	// Enumerate all physical devices.
+	uint32_t deviceCount = 0;
+	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
+	ASSERT_GT(deviceCount, 0u);
+	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data());
+
+	// Helper to compute QueueFamilies for a given physical device.
+	auto getQueueFamilies = [&](VkPhysicalDevice pd) -> QueueFamilies {
+		QueueFamilies qf;
+		uint32_t queueFamilyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyCount, nullptr);
+		std::vector<VkQueueFamilyProperties> queueFamilyProps(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(pd, &queueFamilyCount, queueFamilyProps.data());
+
+		for (uint32_t i = 0; i < queueFamilyCount; ++i)
+		{
+			const VkQueueFamilyProperties& qfp = queueFamilyProps[i];
+			if (!qf.graphicsFound && (qfp.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+			{
+				qf.graphicsFamily = i;
+				qf.graphicsFound = true;
+			}
+			if (!qf.presentFound)
+			{
+				VkBool32 presentSupport = VK_FALSE;
+				vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, vkSurface, &presentSupport);
+				if (presentSupport)
+				{
+					qf.presentFamily = i;
+					qf.presentFound = true;
+				}
+			}
+			if ((qfp.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+			{
+				VkBool32 presentSupport = VK_FALSE;
+				vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, vkSurface, &presentSupport);
+				if (presentSupport)
+				{
+					qf.graphicsFamily = i;
+					qf.presentFamily = i;
+					qf.graphicsFound = true;
+					qf.presentFound = true;
+				}
+			}
+			if (!qf.dedicatedTransfer && (qfp.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+				!(qfp.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+			{
+				qf.transferFamily = i;
+				qf.dedicatedTransfer = true;
+			}
+		}
+		if (!qf.dedicatedTransfer && qf.graphicsFound)
+		{
+			qf.transferFamily = qf.graphicsFamily;
+		}
+		return qf;
+	};
+
+	// Helper to check hard requirements and compute score.
+	auto computeScore = [&](VkPhysicalDevice pd) -> int {
+		VkPhysicalDeviceProperties props;
+		vkGetPhysicalDeviceProperties(pd, &props);
+		if (props.apiVersion < VK_API_VERSION_1_3)
+			return -1;
+
+		uint32_t extCount = 0;
+		vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
+		std::vector<VkExtensionProperties> extensions(extCount);
+		vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, extensions.data());
+		bool hasSwapchain = false;
+		for (const auto& ext : extensions)
+		{
+			if (std::strcmp(ext.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)
+			{
+				hasSwapchain = true;
+				break;
+			}
+		}
+		if (!hasSwapchain)
+			return -1;
+
+		QueueFamilies qf = getQueueFamilies(pd);
+		if (!qf.IsComplete())
+			return -1;
+
+		// Hard requirements 4-6: query features in a single chain
+		VkPhysicalDeviceVulkan13Features vulkan13Features{};
+		vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+		VkPhysicalDeviceVulkan12Features vulkan12Features{};
+		vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		vulkan12Features.pNext = &vulkan13Features;
+		VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
+		indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+		indexingFeatures.pNext = &vulkan12Features;
+		VkPhysicalDeviceFeatures2 features2{};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = &indexingFeatures;
+		vkGetPhysicalDeviceFeatures2(pd, &features2);
+
+		if (!vulkan13Features.dynamicRendering || !vulkan13Features.synchronization2)
+			return -1;
+		if (!vulkan12Features.bufferDeviceAddress)
+			return -1;
+		if (!indexingFeatures.descriptorBindingPartiallyBound ||
+			!indexingFeatures.descriptorBindingSampledImageUpdateAfterBind ||
+			!indexingFeatures.runtimeDescriptorArray)
+			return -1;
+
+		// Compute score
+		int typeContribution = 0;
+		if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+			typeContribution = 1000;
+		else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+			typeContribution = 100;
+		int limitContribution = static_cast<int>(props.limits.maxImageDimension2D);
+		return typeContribution + limitContribution;
+	};
+
+	// Find the best candidate according to the algorithm.
+	int bestScore = -1;
+	VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+	for (size_t i = 0; i < physicalDevices.size(); ++i)
+	{
+		int score = computeScore(physicalDevices[i]);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			bestDevice = physicalDevices[i];
+		}
+	}
+
+	ASSERT_NE(bestDevice, VK_NULL_HANDLE);
+	EXPECT_EQ(selectedPhysicalDevice, bestDevice);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +546,8 @@ TEST(Device, test_device_logical_device_creation_uses_required_and_optional_feat
 	// (they are hard requirements checked before device creation).
 	EXPECT_NE(device.GetHandle(), VK_NULL_HANDLE);
 	EXPECT_TRUE(device.IsInitialized());
+	EXPECT_TRUE(device.IsBufferDeviceAddressEnabled());
+	EXPECT_TRUE(device.IsDescriptorIndexingEnabled());
 }
 
 // ---------------------------------------------------------------------------
@@ -370,22 +588,13 @@ TEST(Device, test_device_initialize_does_not_partially_modify_on_failure)
 {
 	EnsureLogger();
 
-	// Use a no-extensions Instance + VK_NULL_HANDLE surface to reliably force
-	// a failure: no physical device can satisfy the present-support check
-	// against a null surface.
-	Instance instance;
-	if (!TryInitializeInstance(instance))
-	{
-		GTEST_SKIP() << "No Vulkan driver available.";
-	}
+	// Use a default-constructed (null-handle) Instance to reliably force failure:
+	// vkEnumeratePhysicalDevices with a null VkInstance returns no devices.
+	Instance instance; // deliberately not initialized
 
 	Device device;
 	RenderError err = device.Initialize(instance, VK_NULL_HANDLE);
-	if (err == RenderError::None)
-	{
-		// Some drivers tolerate VK_NULL_HANDLE; skip rather than mis-assert.
-		GTEST_SKIP() << "Initialize unexpectedly succeeded with null surface; skipping failure-path check.";
-	}
+	ASSERT_NE(err, RenderError::None);
 
 	// On failure the Device must remain in its default-constructed state.
 	EXPECT_EQ(device.GetHandle(), VK_NULL_HANDLE);
@@ -394,6 +603,8 @@ TEST(Device, test_device_initialize_does_not_partially_modify_on_failure)
 	EXPECT_EQ(device.GetGraphicsQueue(), VK_NULL_HANDLE);
 	EXPECT_EQ(device.GetPresentQueue(), VK_NULL_HANDLE);
 	EXPECT_EQ(device.GetTransferQueue(), VK_NULL_HANDLE);
+	EXPECT_FALSE(device.IsBufferDeviceAddressEnabled());
+	EXPECT_FALSE(device.IsDescriptorIndexingEnabled());
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +652,8 @@ TEST(Device, test_device_observers_return_cached_state)
 	EXPECT_EQ(device.GetQueueFamilies().graphicsFound, false);
 	EXPECT_EQ(device.GetMemoryProperties().memoryTypeCount, 0u);
 	EXPECT_EQ(device.GetProperties().apiVersion, 0u);
+	EXPECT_FALSE(device.IsBufferDeviceAddressEnabled());
+	EXPECT_FALSE(device.IsDescriptorIndexingEnabled());
 
 	// On an initialized Device all observers return non-default values.
 	window::Platform platform;
@@ -460,6 +673,8 @@ TEST(Device, test_device_observers_return_cached_state)
 	EXPECT_NE(device2.GetPresentQueue(), VK_NULL_HANDLE);
 	EXPECT_NE(device2.GetTransferQueue(), VK_NULL_HANDLE);
 	EXPECT_TRUE(device2.IsInitialized());
+	EXPECT_TRUE(device2.IsBufferDeviceAddressEnabled());
+	EXPECT_TRUE(device2.IsDescriptorIndexingEnabled());
 
 	const QueueFamilies& qf = device2.GetQueueFamilies();
 	EXPECT_TRUE(qf.graphicsFound);

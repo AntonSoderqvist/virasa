@@ -1,7 +1,8 @@
 #include <cstdint>
-#include <cstring>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <gtest/gtest.h>
 
 #include "virasa/renderer/Types.h"
@@ -15,70 +16,10 @@ using namespace virasa;
 
 TEST(Types, test_render_error_enum_values_in_declared_order)
 {
-	// Underlying type is uint8_t.
 	static_assert(std::is_same_v<std::underlying_type_t<RenderError>, uint8_t>,
 		"RenderError underlying type must be uint8_t");
 
-	// None is explicitly 0.
-	EXPECT_EQ(static_cast<uint8_t>(RenderError::None), uint8_t{0});
-
-	// Values appear in declared order (each subsequent value is greater than
-	// the previous one, which is the natural result of no explicit assignment
-	// after the first).
-	EXPECT_LT(static_cast<uint8_t>(RenderError::None),
-		static_cast<uint8_t>(RenderError::AlreadyInitialized));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::AlreadyInitialized),
-		static_cast<uint8_t>(RenderError::NotInitialized));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::NotInitialized),
-		static_cast<uint8_t>(RenderError::VulkanNotAvailable));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::VulkanNotAvailable),
-		static_cast<uint8_t>(RenderError::InstanceCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::InstanceCreateFailed),
-		static_cast<uint8_t>(RenderError::SurfaceCreateFailed));
-
-	// Version 3 adds NoSuitableDevice and DeviceCreateFailed after SurfaceCreateFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::SurfaceCreateFailed),
-		static_cast<uint8_t>(RenderError::NoSuitableDevice));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::NoSuitableDevice),
-		static_cast<uint8_t>(RenderError::DeviceCreateFailed));
-
-	// Version 4 adds SwapchainCreateFailed and ImageViewCreateFailed after DeviceCreateFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::DeviceCreateFailed),
-		static_cast<uint8_t>(RenderError::SwapchainCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::SwapchainCreateFailed),
-		static_cast<uint8_t>(RenderError::ImageViewCreateFailed));
-
-	// Version 5 adds ShaderLoadFailed, ShaderCreateFailed, PipelineLayoutCreateFailed,
-	// and PipelineCreateFailed after ImageViewCreateFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::ImageViewCreateFailed),
-		static_cast<uint8_t>(RenderError::ShaderLoadFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::ShaderLoadFailed),
-		static_cast<uint8_t>(RenderError::ShaderCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::ShaderCreateFailed),
-		static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::PipelineLayoutCreateFailed),
-		static_cast<uint8_t>(RenderError::PipelineCreateFailed));
-
-	// Version 6 adds CommandPoolCreateFailed and FenceCreateFailed after PipelineCreateFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::PipelineCreateFailed),
-		static_cast<uint8_t>(RenderError::CommandPoolCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::CommandPoolCreateFailed),
-		static_cast<uint8_t>(RenderError::FenceCreateFailed));
-
-	// Version 7 adds ImageCreateFailed and MemoryAllocFailed after FenceCreateFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::FenceCreateFailed),
-		static_cast<uint8_t>(RenderError::ImageCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::ImageCreateFailed),
-		static_cast<uint8_t>(RenderError::MemoryAllocFailed));
-
-	// Version 8 adds BufferCreateFailed and MemoryMapFailed after MemoryAllocFailed.
-	EXPECT_LT(static_cast<uint8_t>(RenderError::MemoryAllocFailed),
-		static_cast<uint8_t>(RenderError::BufferCreateFailed));
-	EXPECT_LT(static_cast<uint8_t>(RenderError::BufferCreateFailed),
-		static_cast<uint8_t>(RenderError::MemoryMapFailed));
-
-	// All twenty values are distinct.
-	uint8_t values[] = {
+	constexpr uint8_t values[] = {
 		static_cast<uint8_t>(RenderError::None),
 		static_cast<uint8_t>(RenderError::AlreadyInitialized),
 		static_cast<uint8_t>(RenderError::NotInitialized),
@@ -99,10 +40,20 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 		static_cast<uint8_t>(RenderError::MemoryAllocFailed),
 		static_cast<uint8_t>(RenderError::BufferCreateFailed),
 		static_cast<uint8_t>(RenderError::MemoryMapFailed),
+		static_cast<uint8_t>(RenderError::SamplerCreateFailed),
+		static_cast<uint8_t>(RenderError::DescriptorPoolCreateFailed),
 	};
-	for (std::size_t i = 0; i < 20; ++i)
+
+	EXPECT_EQ(values[0], uint8_t{0});
+	for (std::size_t i = 1; i < std::size(values); ++i)
 	{
-		for (std::size_t j = i + 1; j < 20; ++j)
+		EXPECT_EQ(values[i], static_cast<uint8_t>(i));
+		EXPECT_GT(values[i], values[i - 1]);
+	}
+
+	for (std::size_t i = 0; i < std::size(values); ++i)
+	{
+		for (std::size_t j = i + 1; j < std::size(values); ++j)
 		{
 			EXPECT_NE(values[i], values[j]);
 		}
@@ -111,28 +62,13 @@ TEST(Types, test_render_error_enum_values_in_declared_order)
 
 TEST(Types, test_render_error_none_is_unique_success_value)
 {
-	// None == 0 is the success value.
 	EXPECT_EQ(RenderError::None, static_cast<RenderError>(0));
 
-	// Every non-None value is not equal to None.
-	EXPECT_NE(RenderError::AlreadyInitialized, RenderError::None);
-	EXPECT_NE(RenderError::NotInitialized, RenderError::None);
-	EXPECT_NE(RenderError::VulkanNotAvailable, RenderError::None);
-	EXPECT_NE(RenderError::InstanceCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::SurfaceCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::NoSuitableDevice, RenderError::None);
-	EXPECT_NE(RenderError::DeviceCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::SwapchainCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::ImageViewCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::ShaderLoadFailed, RenderError::None);
-	EXPECT_NE(RenderError::ShaderCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::PipelineLayoutCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::PipelineCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::CommandPoolCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::FenceCreateFailed, RenderError::None);
+	auto isSuccess = [](RenderError error)
+	{
+		return error == RenderError::None;
+	};
 
-	// Callers check against None to determine success.
-	auto isSuccess = [](RenderError e) { return e == RenderError::None; };
 	EXPECT_TRUE(isSuccess(RenderError::None));
 	EXPECT_FALSE(isSuccess(RenderError::AlreadyInitialized));
 	EXPECT_FALSE(isSuccess(RenderError::NotInitialized));
@@ -153,14 +89,8 @@ TEST(Types, test_render_error_none_is_unique_success_value)
 	EXPECT_FALSE(isSuccess(RenderError::MemoryAllocFailed));
 	EXPECT_FALSE(isSuccess(RenderError::BufferCreateFailed));
 	EXPECT_FALSE(isSuccess(RenderError::MemoryMapFailed));
-
-	// Every non-None value is not equal to None (version-7 additions).
-	EXPECT_NE(RenderError::ImageCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::MemoryAllocFailed, RenderError::None);
-
-	// Version-8 additions are also not equal to None.
-	EXPECT_NE(RenderError::BufferCreateFailed, RenderError::None);
-	EXPECT_NE(RenderError::MemoryMapFailed, RenderError::None);
+	EXPECT_FALSE(isSuccess(RenderError::SamplerCreateFailed));
+	EXPECT_FALSE(isSuccess(RenderError::DescriptorPoolCreateFailed));
 }
 
 // ---------------------------------------------------------------------------
@@ -481,11 +411,10 @@ TEST(Types, test_vertex_layout_describes_vertex_input_state)
 
 TEST(Types, test_render_error_has_ostream_insertion_operator)
 {
-	// Each named value writes its identifier as a plain string.
-	auto toString = [](RenderError e) -> std::string
+	auto toString = [](RenderError error) -> std::string
 	{
 		std::ostringstream oss;
-		oss << e;
+		oss << error;
 		return oss.str();
 	};
 
@@ -509,53 +438,28 @@ TEST(Types, test_render_error_has_ostream_insertion_operator)
 	EXPECT_EQ(toString(RenderError::MemoryAllocFailed), "MemoryAllocFailed");
 	EXPECT_EQ(toString(RenderError::BufferCreateFailed), "BufferCreateFailed");
 	EXPECT_EQ(toString(RenderError::MemoryMapFailed), "MemoryMapFailed");
+	EXPECT_EQ(toString(RenderError::SamplerCreateFailed), "SamplerCreateFailed");
+	EXPECT_EQ(toString(RenderError::DescriptorPoolCreateFailed), "DescriptorPoolCreateFailed");
 
-	// An out-of-range value writes "RenderError(N)" where N is the decimal integer.
-	auto outOfRange = static_cast<RenderError>(uint8_t{200});
-	EXPECT_EQ(toString(outOfRange), "RenderError(200)");
+	EXPECT_EQ(toString(static_cast<RenderError>(uint8_t{200})), "RenderError(200)");
 
-	// The operator returns the same ostream reference (supports chaining).
 	std::ostringstream oss;
 	std::ostream& ref = (oss << RenderError::None);
 	EXPECT_EQ(&ref, &oss);
 
-	// Chaining: two values written in sequence.
-	std::ostringstream oss2;
-	oss2 << RenderError::None << "|" << RenderError::AlreadyInitialized;
-	EXPECT_EQ(oss2.str(), "None|AlreadyInitialized");
+	std::ostringstream chained;
+	chained << RenderError::None << "|" << RenderError::SamplerCreateFailed;
+	EXPECT_EQ(chained.str(), "None|SamplerCreateFailed");
 }
 
 TEST(Types, test_renderer_config_targets_vulkan_1_3)
 {
-	// The contract pins the Vulkan API version to 1.3 as a compile-time
-	// constant — it is not a runtime field of RendererConfig. We verify this
-	// by confirming that RendererConfig has no member that could represent an
-	// API version (i.e., the struct has exactly the six documented members and
-	// no additional version field), and that VK_API_VERSION_1_3 is defined and
-	// has the expected encoded value.
-	//
-	// VK_API_VERSION_1_3 encodes major=1, minor=3 in the Vulkan variant/major/
-	// minor/patch packing: bits [31:29]=variant(0), [28:22]=major(1),
-	// [21:12]=minor(3), [11:0]=patch(0).
-	// Using VK_MAKE_API_VERSION(0, 1, 3, 0) = (0<<29)|(1<<22)|(3<<12)|(0).
-	constexpr uint32_t kExpectedApiVersion =
-		(uint32_t{0} << 29) | (uint32_t{1} << 22) | (uint32_t{3} << 12) | uint32_t{0};
-	EXPECT_EQ(VK_API_VERSION_1_3, kExpectedApiVersion);
+	constexpr uint32_t expectedApiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0);
+	EXPECT_EQ(VK_API_VERSION_1_3, expectedApiVersion);
 
-	// RendererConfig has no apiVersion field — the Vulkan version is not
-	// runtime-configurable. Verify the struct size is consistent with only the
-	// six documented members (applicationName ptr, applicationVersion u32,
-	// enableValidation bool, requiredInstanceExtensions ptr,
-	// requiredInstanceExtensionCount u32, preferMailbox bool).
-	// We do not assert an exact byte size (padding is implementation-defined),
-	// but we do assert the struct is default-constructible and that none of its
-	// public members is named apiVersion or vulkanVersion.
 	static_assert(std::is_default_constructible_v<RendererConfig>,
 		"RendererConfig must be default-constructible");
 
-	// Spot-check: a default RendererConfig does not expose a Vulkan version
-	// field (compile-time check via member access — if this compiles without
-	// the field, the field does not exist).
 	RendererConfig config;
 	(void)config.applicationName;
 	(void)config.applicationVersion;
@@ -566,7 +470,6 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	(void)config.swapchainImageUsage;
 	(void)config.maxFramesInFlight;
 	(void)config.depthFormat;
-	// If the struct had an apiVersion member the test author would have caught
-	// it during contract review; the absence of such a member is the assertion.
-	EXPECT_TRUE(true); // structural assertion satisfied at compile time above.
+
+	EXPECT_TRUE(true);
 }

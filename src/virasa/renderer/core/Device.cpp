@@ -20,123 +20,20 @@ namespace virasa
 namespace
 {
 
-/// Evaluate the queue families available on a physical device for a given surface.
-QueueFamilies SelectQueueFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
+/// Evaluate the hard requirements for a physical device candidate.
+/// Returns true if the device satisfies all six hard requirements.
+bool EvaluateHardRequirements(
+	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, const QueueFamilies& families)
 {
-	uint32_t familyCount = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, nullptr);
-
-	std::vector<VkQueueFamilyProperties> families(familyCount);
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, families.data());
-
-	QueueFamilies result{};
-
-	const bool headless = (surface == VK_NULL_HANDLE);
-
-	for (uint32_t i = 0; i < familyCount; ++i)
-	{
-		const VkQueueFamilyProperties& props = families[i];
-
-		const bool hasGraphics = (props.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
-		const bool hasTransfer = (props.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0;
-
-		bool hasPresent = false;
-		if (!headless)
-		{
-			VkBool32 presentSupport = VK_FALSE;
-			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);
-			hasPresent = (presentSupport == VK_TRUE);
-		}
-
-		// Single-family override: a family that supports both graphics and present wins.
-		if (hasGraphics && hasPresent)
-		{
-			result.graphicsFamily = i;
-			result.presentFamily = i;
-			result.graphicsFound = true;
-			result.presentFound = true;
-		}
-		else
-		{
-			// Graphics resolution (only if not yet found).
-			if (!result.graphicsFound && hasGraphics)
-			{
-				result.graphicsFamily = i;
-				result.graphicsFound = true;
-			}
-
-			// Present resolution (only if not yet found).
-			if (!result.presentFound && hasPresent)
-			{
-				result.presentFamily = i;
-				result.presentFound = true;
-			}
-		}
-
-		// Dedicated transfer: transfer but NOT graphics.
-		if (!result.dedicatedTransfer && hasTransfer && !hasGraphics)
-		{
-			result.transferFamily = i;
-			result.dedicatedTransfer = true;
-		}
-	}
-
-	// Transfer fallback: use the graphics family when no dedicated transfer family exists.
-	if (!result.dedicatedTransfer && result.graphicsFound)
-	{
-		result.transferFamily = result.graphicsFamily;
-		// dedicatedTransfer remains false to distinguish from the dedicated case.
-	}
-
-	// Headless fallback: no surface means no present queue is needed; use the
-	// graphics family so that IsComplete() succeeds and the device can be created.
-	if (headless && result.graphicsFound && !result.presentFound)
-	{
-		result.presentFamily = result.graphicsFamily;
-		result.presentFound = true;
-	}
-
-	return result;
-}
-
-/// Compute the score for a candidate physical device.
-int ScorePhysicalDevice(const VkPhysicalDeviceProperties& props)
-{
-	int score = 0;
-
-	switch (props.deviceType)
-	{
-		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-			score += 1000;
-			break;
-		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-			score += 100;
-			break;
-		default:
-			break;
-	}
-
-	score += static_cast<int>(props.limits.maxImageDimension2D);
-	return score;
-}
-
-/// Check whether a physical device meets all hard requirements.
-bool MeetsHardRequirements(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
-	const VkPhysicalDeviceProperties& props, QueueFamilies& outQueueFamilies,
-	quill::Logger* logger)
-{
-	// Hard requirement 1: Vulkan 1.3+
+	// Hard requirement 1: API version >= 1.3
+	VkPhysicalDeviceProperties props;
+	vkGetPhysicalDeviceProperties(physicalDevice, &props);
 	if (props.apiVersion < VK_API_VERSION_1_3)
 	{
-		LOG_INFO(logger,
-			"  '{}': rejected — Vulkan {}.{} < 1.3 required.",
-			props.deviceName,
-			VK_API_VERSION_MAJOR(props.apiVersion),
-			VK_API_VERSION_MINOR(props.apiVersion));
 		return false;
 	}
 
-	// Hard requirement 2: VK_KHR_swapchain extension.
+	// Hard requirement 2: VK_KHR_swapchain extension
 	uint32_t extCount = 0;
 	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, nullptr);
 	std::vector<VkExtensionProperties> extensions(extCount);
@@ -153,60 +50,166 @@ bool MeetsHardRequirements(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface
 	}
 	if (!hasSwapchain)
 	{
-		LOG_INFO(logger, "  '{}': rejected — missing VK_KHR_swapchain.", props.deviceName);
 		return false;
 	}
 
-	// Hard requirement 3: queue families complete.
-	QueueFamilies qf = SelectQueueFamilies(physicalDevice, surface);
-	if (!qf.IsComplete())
+	// Hard requirement 3: QueueFamilies IsComplete
+	if (!families.IsComplete())
 	{
-		LOG_INFO(logger,
-			"  '{}': rejected — incomplete queue families (graphicsFound={}, "
-			"presentFound={}).",
-			props.deviceName,
-			qf.graphicsFound,
-			qf.presentFound);
 		return false;
 	}
 
-	// Hard requirement 4: Vulkan 1.3 core features (dynamicRendering + synchronization2).
-	VkPhysicalDeviceVulkan13Features features13{};
-	features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-	features13.pNext = nullptr;
+	// Hard requirements 4, 5, 6: query features via pNext chain
+	VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
+	descriptorIndexingFeatures.sType =
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+	descriptorIndexingFeatures.pNext = nullptr;
 
-	VkPhysicalDeviceFeatures2 features2{};
+	VkPhysicalDeviceVulkan12Features vk12Features = {};
+	vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	vk12Features.pNext = &descriptorIndexingFeatures;
+
+	VkPhysicalDeviceVulkan13Features vk13Features = {};
+	vk13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	vk13Features.pNext = &vk12Features;
+
+	VkPhysicalDeviceFeatures2 features2 = {};
 	features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	features2.pNext = &features13;
+	features2.pNext = &vk13Features;
 
 	vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
 
-	if (features13.dynamicRendering != VK_TRUE || features13.synchronization2 != VK_TRUE)
+	// Hard requirement 4: dynamicRendering and synchronization2
+	if (vk13Features.dynamicRendering != VK_TRUE || vk13Features.synchronization2 != VK_TRUE)
 	{
-		LOG_INFO(logger,
-			"  '{}': rejected — missing 1.3 features (dynamicRendering={}, "
-			"synchronization2={}).",
-			props.deviceName,
-			features13.dynamicRendering == VK_TRUE,
-			features13.synchronization2 == VK_TRUE);
 		return false;
 	}
 
-	outQueueFamilies = qf;
+	// Hard requirement 5: bufferDeviceAddress
+	if (vk12Features.bufferDeviceAddress != VK_TRUE)
+	{
+		return false;
+	}
+
+	// Hard requirement 6: descriptor indexing sub-features
+	if (descriptorIndexingFeatures.descriptorBindingPartiallyBound != VK_TRUE ||
+		descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind != VK_TRUE ||
+		descriptorIndexingFeatures.runtimeDescriptorArray != VK_TRUE)
+	{
+		return false;
+	}
+
 	return true;
+}
+
+/// Compute the score for a candidate physical device.
+int ScorePhysicalDevice(const VkPhysicalDeviceProperties& props)
+{
+	int score = 0;
+
+	if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+	{
+		score += 1000;
+	}
+	else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+	{
+		score += 100;
+	}
+
+	score += static_cast<int>(props.limits.maxImageDimension2D);
+	return score;
+}
+
+/// Run the queue family selection algorithm for a physical device and surface.
+QueueFamilies SelectQueueFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
+{
+	QueueFamilies families = {};
+
+	uint32_t familyCount = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, nullptr);
+	std::vector<VkQueueFamilyProperties> familyProps(familyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, familyProps.data());
+
+	for (uint32_t i = 0; i < familyCount; ++i)
+	{
+		const auto& props = familyProps[i];
+		bool hasGraphics = (props.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+		bool hasTransfer = (props.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0;
+
+		VkBool32 presentSupport = VK_FALSE;
+		if (surface != VK_NULL_HANDLE)
+			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);
+
+		// Single-family override: supports both graphics and present
+		if (hasGraphics && presentSupport == VK_TRUE)
+		{
+			families.graphicsFamily = i;
+			families.presentFamily = i;
+			families.graphicsFound = true;
+			families.presentFound = true;
+		}
+		else
+		{
+			// Graphics resolution
+			if (!families.graphicsFound && hasGraphics)
+			{
+				families.graphicsFamily = i;
+				families.graphicsFound = true;
+			}
+
+			// Present resolution
+			if (!families.presentFound && presentSupport == VK_TRUE)
+			{
+				families.presentFamily = i;
+				families.presentFound = true;
+			}
+		}
+
+		// Dedicated transfer resolution: transfer but NOT graphics
+		if (!families.dedicatedTransfer && hasTransfer && !hasGraphics)
+		{
+			families.transferFamily = i;
+			families.dedicatedTransfer = true;
+		}
+	}
+
+	// Headless fallback: no surface means present queue is irrelevant; alias graphics.
+	if (surface == VK_NULL_HANDLE && families.graphicsFound && !families.presentFound)
+	{
+		families.presentFamily = families.graphicsFamily;
+		families.presentFound = true;
+	}
+
+	// Transfer fallback: use graphics family if no dedicated transfer
+	if (!families.dedicatedTransfer && families.graphicsFound)
+	{
+		families.transferFamily = families.graphicsFamily;
+		// dedicatedTransfer remains false
+	}
+
+	return families;
 }
 
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// Special members
+// Device implementation
 // ---------------------------------------------------------------------------
+
+Device::~Device()
+{
+	if (_device != VK_NULL_HANDLE)
+	{
+		vkDestroyDevice(_device, nullptr);
+		_device = VK_NULL_HANDLE;
+	}
+}
 
 Device::Device(Device&& other) noexcept
     : _device(other._device), _physicalDevice(other._physicalDevice),
 	_graphicsQueue(other._graphicsQueue), _presentQueue(other._presentQueue),
 	_transferQueue(other._transferQueue), _queueFamilies(other._queueFamilies),
-	_properties(other._properties), _memoryProperties(other._memoryProperties)
+	_deviceProperties(other._deviceProperties), _memoryProperties(other._memoryProperties)
 {
 	other._device = VK_NULL_HANDLE;
 	other._physicalDevice = VK_NULL_HANDLE;
@@ -214,16 +217,17 @@ Device::Device(Device&& other) noexcept
 	other._presentQueue = VK_NULL_HANDLE;
 	other._transferQueue = VK_NULL_HANDLE;
 	other._queueFamilies = {};
-	other._properties = {};
+	other._deviceProperties = {};
 	other._memoryProperties = {};
 }
 
 Device& Device::operator=(Device&& other) noexcept
 {
 	if (this == &other)
+	{
 		return *this;
+	}
 
-	// Destroy any currently owned handle.
 	if (_device != VK_NULL_HANDLE)
 	{
 		vkDestroyDevice(_device, nullptr);
@@ -235,7 +239,7 @@ Device& Device::operator=(Device&& other) noexcept
 	_presentQueue = other._presentQueue;
 	_transferQueue = other._transferQueue;
 	_queueFamilies = other._queueFamilies;
-	_properties = other._properties;
+	_deviceProperties = other._deviceProperties;
 	_memoryProperties = other._memoryProperties;
 
 	other._device = VK_NULL_HANDLE;
@@ -244,228 +248,209 @@ Device& Device::operator=(Device&& other) noexcept
 	other._presentQueue = VK_NULL_HANDLE;
 	other._transferQueue = VK_NULL_HANDLE;
 	other._queueFamilies = {};
-	other._properties = {};
+	other._deviceProperties = {};
 	other._memoryProperties = {};
 
 	return *this;
 }
 
-Device::~Device()
-{
-	if (_device != VK_NULL_HANDLE)
-	{
-		vkDestroyDevice(_device, nullptr);
-		_device = VK_NULL_HANDLE;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Initialize
-// ---------------------------------------------------------------------------
-
 RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 {
 	auto* logger = Logger::GetLogger("renderer");
 
-	VkInstance vkInstance = instance.GetHandle();
+	if (!instance.IsInitialized())
+	{
+		LOG_ERROR(logger, "Device::Initialize — instance is not initialized.");
+		return RenderError::DeviceCreateFailed;
+	}
 
-	// Enumerate physical devices.
+	// Enumerate physical devices
 	uint32_t deviceCount = 0;
-	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
+	vkEnumeratePhysicalDevices(instance.GetHandle(), &deviceCount, nullptr);
 
 	if (deviceCount == 0)
 	{
-		LOG_ERROR(logger, "No Vulkan physical devices found.");
+		LOG_ERROR(logger, "No physical devices found.");
 		return RenderError::NoSuitableDevice;
 	}
 
 	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data());
+	vkEnumeratePhysicalDevices(instance.GetHandle(), &deviceCount, physicalDevices.data());
 
-	// Evaluate each physical device.
-	struct Candidate
+	// Evaluate and score each physical device
+	VkPhysicalDevice selectedDevice = VK_NULL_HANDLE;
+	QueueFamilies selectedFamilies = {};
+	VkPhysicalDeviceProperties selectedProperties = {};
+	int bestScore = -1;
+
+	for (uint32_t i = 0; i < deviceCount; ++i)
 	{
-		VkPhysicalDevice physicalDevice;
-		QueueFamilies queueFamilies;
-		VkPhysicalDeviceProperties properties;
-		VkPhysicalDeviceMemoryProperties memoryProperties;
-		int score;
-		size_t enumerationIndex;
-	};
+		VkPhysicalDevice candidate = physicalDevices[i];
 
-	std::vector<Candidate> candidates;
+		VkPhysicalDeviceProperties props;
+		vkGetPhysicalDeviceProperties(candidate, &props);
 
-	for (size_t i = 0; i < physicalDevices.size(); ++i)
-	{
-		VkPhysicalDevice pd = physicalDevices[i];
+		QueueFamilies families = SelectQueueFamilies(candidate, surface);
 
-		VkPhysicalDeviceProperties props{};
-		vkGetPhysicalDeviceProperties(pd, &props);
-
-		QueueFamilies qf{};
-		if (!MeetsHardRequirements(pd, surface, props, qf, logger))
+		if (!EvaluateHardRequirements(candidate, surface, families))
 		{
 			LOG_INFO(logger,
-				"Physical device '{}' does not meet hard requirements; skipping.",
+				"Physical device '{}' disqualified (failed hard requirements).",
 				props.deviceName);
 			continue;
 		}
 
-		const int score = ScorePhysicalDevice(props);
-		LOG_INFO(logger, "Candidate physical device '{}' score: {}.", props.deviceName, score);
+		int score = ScorePhysicalDevice(props);
+		LOG_INFO(logger,
+			"Physical device '{}' is a candidate with score {}.",
+			props.deviceName,
+			score);
 
-		VkPhysicalDeviceMemoryProperties memProps{};
-		vkGetPhysicalDeviceMemoryProperties(pd, &memProps);
-
-		candidates.push_back(Candidate{pd, qf, props, memProps, score, i});
+		if (score > bestScore)
+		{
+			bestScore = score;
+			selectedDevice = candidate;
+			selectedFamilies = families;
+			selectedProperties = props;
+		}
 	}
 
-	if (candidates.empty())
+	if (selectedDevice == VK_NULL_HANDLE)
 	{
-		LOG_ERROR(logger, "No suitable Vulkan physical device found.");
+		LOG_ERROR(logger, "No suitable physical device found.");
 		return RenderError::NoSuitableDevice;
-	}
-
-	// Select the candidate with the highest score; earlier enumeration wins ties.
-	const Candidate* best = &candidates[0];
-	for (size_t i = 1; i < candidates.size(); ++i)
-	{
-		if (candidates[i].score > best->score)
-			best = &candidates[i];
 	}
 
 	LOG_INFO(logger,
 		"Selected physical device '{}' with score {}.",
-		best->properties.deviceName,
-		best->score);
+		selectedProperties.deviceName,
+		bestScore);
 
-	// Query optional features on the selected device.
-	VkPhysicalDeviceVulkan12Features features12{};
-	features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-	features12.pNext = nullptr;
+	// Cache physical device state (cleared on vkCreateDevice failure)
+	VkPhysicalDeviceMemoryProperties memProps = {};
+	vkGetPhysicalDeviceMemoryProperties(selectedDevice, &memProps);
 
-	VkPhysicalDeviceVulkan13Features features13{};
-	features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-	features13.pNext = nullptr;
+	// Query optional features
+	VkPhysicalDeviceFeatures2 availableFeatures2 = {};
+	availableFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	vkGetPhysicalDeviceFeatures2(selectedDevice, &availableFeatures2);
+	bool samplerAnisotropy = (availableFeatures2.features.samplerAnisotropy == VK_TRUE);
 
-	VkPhysicalDeviceFeatures2 features2{};
-	features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	features2.pNext = &features12;
-	features12.pNext = &features13;
+	if (samplerAnisotropy)
+	{
+		LOG_INFO(logger, "Optional feature samplerAnisotropy: enabled.");
+	}
+	else
+	{
+		LOG_INFO(logger, "Optional feature samplerAnisotropy: skipped (not supported).");
+	}
 
-	vkGetPhysicalDeviceFeatures2(best->physicalDevice, &features2);
-
-	const bool enableBufferDeviceAddress = (features12.bufferDeviceAddress == VK_TRUE);
-	const bool enableDescriptorIndexing = (features12.descriptorIndexing == VK_TRUE);
-	const bool enableSamplerAnisotropy = (features2.features.samplerAnisotropy == VK_TRUE);
-	const bool enableGeometryShader = (features2.features.geometryShader == VK_TRUE);
-
-	LOG_INFO(logger,
-		"Optional feature bufferDeviceAddress: {}.",
-		enableBufferDeviceAddress ? "enabled" : "skipped");
-	LOG_INFO(logger,
-		"Optional feature descriptorIndexing: {}.",
-		enableDescriptorIndexing ? "enabled" : "skipped");
-	LOG_INFO(logger,
-		"Optional feature samplerAnisotropy: {}.",
-		enableSamplerAnisotropy ? "enabled" : "skipped");
-	LOG_INFO(logger,
-		"Optional feature geometryShader: {}.",
-		enableGeometryShader ? "enabled" : "skipped");
-
-	// Build unique queue family set.
-	const QueueFamilies& qf = best->queueFamilies;
+	// Build unique queue family set
 	std::set<uint32_t> uniqueFamilies;
-	uniqueFamilies.insert(qf.graphicsFamily);
-	uniqueFamilies.insert(qf.presentFamily);
-	if (qf.dedicatedTransfer)
-		uniqueFamilies.insert(qf.transferFamily);
+	uniqueFamilies.insert(selectedFamilies.graphicsFamily);
+	uniqueFamilies.insert(selectedFamilies.presentFamily);
+	if (selectedFamilies.dedicatedTransfer)
+	{
+		uniqueFamilies.insert(selectedFamilies.transferFamily);
+	}
 
 	const float queuePriority = 1.0f;
 	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 	queueCreateInfos.reserve(uniqueFamilies.size());
-
 	for (uint32_t familyIndex : uniqueFamilies)
 	{
-		VkDeviceQueueCreateInfo qci{};
-		qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-		qci.queueFamilyIndex = familyIndex;
-		qci.queueCount = 1;
-		qci.pQueuePriorities = &queuePriority;
-		queueCreateInfos.push_back(qci);
+		VkDeviceQueueCreateInfo queueInfo = {};
+		queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queueInfo.queueFamilyIndex = familyIndex;
+		queueInfo.queueCount = 1;
+		queueInfo.pQueuePriorities = &queuePriority;
+		queueCreateInfos.push_back(queueInfo);
 	}
 
-	// Build feature chain for device creation.
-	VkPhysicalDeviceVulkan12Features enabledFeatures12{};
-	enabledFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-	enabledFeatures12.pNext = nullptr;
-	enabledFeatures12.bufferDeviceAddress = enableBufferDeviceAddress ? VK_TRUE : VK_FALSE;
-	enabledFeatures12.descriptorIndexing = enableDescriptorIndexing ? VK_TRUE : VK_FALSE;
+	// Build feature chain
+	VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
+	descriptorIndexingFeatures.sType =
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+	descriptorIndexingFeatures.pNext = nullptr;
+	descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+	descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+	descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
 
-	VkPhysicalDeviceVulkan13Features enabledFeatures13{};
-	enabledFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-	enabledFeatures13.pNext = nullptr;
-	enabledFeatures13.dynamicRendering = VK_TRUE;
-	enabledFeatures13.synchronization2 = VK_TRUE;
+	VkPhysicalDeviceVulkan13Features vk13Features = {};
+	vk13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	vk13Features.pNext = nullptr;
+	vk13Features.dynamicRendering = VK_TRUE;
+	vk13Features.synchronization2 = VK_TRUE;
 
-	VkPhysicalDeviceFeatures2 enabledFeatures2{};
+	VkPhysicalDeviceVulkan12Features vk12Features = {};
+	vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	vk12Features.pNext = &vk13Features;
+	vk12Features.bufferDeviceAddress = VK_TRUE;
+	vk12Features.descriptorIndexing = VK_TRUE;
+
+	// Chain descriptor indexing features between vk12 and vk13
+	descriptorIndexingFeatures.pNext = &vk12Features;
+
+	VkPhysicalDeviceFeatures2 enabledFeatures2 = {};
 	enabledFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	enabledFeatures2.features.samplerAnisotropy = enableSamplerAnisotropy ? VK_TRUE : VK_FALSE;
-	enabledFeatures2.features.geometryShader = enableGeometryShader ? VK_TRUE : VK_FALSE;
-	enabledFeatures2.pNext = &enabledFeatures12;
-	enabledFeatures12.pNext = &enabledFeatures13;
+	enabledFeatures2.pNext = &descriptorIndexingFeatures;
+	enabledFeatures2.features.samplerAnisotropy = samplerAnisotropy ? VK_TRUE : VK_FALSE;
 
-	const char* deviceExtensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+	const char* enabledExtensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-	VkDeviceCreateInfo deviceCI{};
-	deviceCI.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	deviceCI.pNext = &enabledFeatures2;
-	deviceCI.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-	deviceCI.pQueueCreateInfos = queueCreateInfos.data();
-	deviceCI.enabledExtensionCount = 1;
-	deviceCI.ppEnabledExtensionNames = deviceExtensions;
-	deviceCI.pEnabledFeatures = nullptr; // Using pNext chain instead.
+	VkDeviceCreateInfo deviceCreateInfo = {};
+	deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	deviceCreateInfo.pNext = &enabledFeatures2;
+	deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+	deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+	deviceCreateInfo.enabledExtensionCount = 1;
+	deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions;
+	deviceCreateInfo.pEnabledFeatures = nullptr; // using pNext chain
 
 	VkDevice newDevice = VK_NULL_HANDLE;
-	const VkResult result = vkCreateDevice(best->physicalDevice, &deviceCI, nullptr, &newDevice);
-
+	VkResult result = vkCreateDevice(selectedDevice, &deviceCreateInfo, nullptr, &newDevice);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR(logger, "vkCreateDevice failed with VkResult {}.", static_cast<int>(result));
+		LOG_ERROR(logger, "vkCreateDevice failed with result {}.", static_cast<int>(result));
+		// Leave Device in default-constructed state
 		return RenderError::DeviceCreateFailed;
 	}
 
-	// Commit state.
-	_device = newDevice;
-	_physicalDevice = best->physicalDevice;
-	_queueFamilies = best->queueFamilies;
-	_properties = best->properties;
-	_memoryProperties = best->memoryProperties;
+	// Retrieve queue handles
+	VkQueue graphicsQueue = VK_NULL_HANDLE;
+	VkQueue presentQueue = VK_NULL_HANDLE;
+	VkQueue transferQueue = VK_NULL_HANDLE;
 
-	// Retrieve queue handles.
-	vkGetDeviceQueue(_device, _queueFamilies.graphicsFamily, 0, &_graphicsQueue);
-	vkGetDeviceQueue(_device, _queueFamilies.presentFamily, 0, &_presentQueue);
+	vkGetDeviceQueue(newDevice, selectedFamilies.graphicsFamily, 0, &graphicsQueue);
+	vkGetDeviceQueue(newDevice, selectedFamilies.presentFamily, 0, &presentQueue);
 
-	if (_queueFamilies.dedicatedTransfer)
+	if (selectedFamilies.dedicatedTransfer)
 	{
-		vkGetDeviceQueue(_device, _queueFamilies.transferFamily, 0, &_transferQueue);
+		vkGetDeviceQueue(newDevice, selectedFamilies.transferFamily, 0, &transferQueue);
 		LOG_INFO(logger,
 			"Using dedicated transfer queue (family {}).",
-			_queueFamilies.transferFamily);
+			selectedFamilies.transferFamily);
 	}
 	else
 	{
-		_transferQueue = _graphicsQueue;
+		transferQueue = graphicsQueue;
 		LOG_INFO(logger,
-			"No dedicated transfer queue; using graphics queue as transfer-queue fallback.");
+			"Using graphics queue as transfer-queue fallback (family {}).",
+			selectedFamilies.graphicsFamily);
 	}
+
+	// Commit state
+	_device = newDevice;
+	_physicalDevice = selectedDevice;
+	_graphicsQueue = graphicsQueue;
+	_presentQueue = presentQueue;
+	_transferQueue = transferQueue;
+	_queueFamilies = selectedFamilies;
+	_deviceProperties = selectedProperties;
+	_memoryProperties = memProps;
 
 	return RenderError::None;
 }
-
-// ---------------------------------------------------------------------------
-// Observers
-// ---------------------------------------------------------------------------
 
 VkDevice Device::GetHandle() const noexcept
 {
@@ -509,7 +494,7 @@ const VkPhysicalDeviceMemoryProperties& Device::GetMemoryProperties() const noex
 
 const VkPhysicalDeviceProperties& Device::GetProperties() const noexcept
 {
-	return _properties;
+	return _deviceProperties;
 }
 
 bool Device::IsInitialized() const noexcept
@@ -517,10 +502,30 @@ bool Device::IsInitialized() const noexcept
 	return _device != VK_NULL_HANDLE;
 }
 
+VkDeviceAddress Device::GetBufferDeviceAddress(VkBuffer buffer) const noexcept
+{
+	VkBufferDeviceAddressInfo info = {};
+	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	info.buffer = buffer;
+	return vkGetBufferDeviceAddress(_device, &info);
+}
+
+bool Device::IsBufferDeviceAddressEnabled() const noexcept
+{
+	return IsInitialized();
+}
+
+bool Device::IsDescriptorIndexingEnabled() const noexcept
+{
+	return IsInitialized();
+}
+
 void Device::WaitIdle() const
 {
 	if (_device != VK_NULL_HANDLE)
+	{
 		vkDeviceWaitIdle(_device);
+	}
 }
 
 } // namespace virasa

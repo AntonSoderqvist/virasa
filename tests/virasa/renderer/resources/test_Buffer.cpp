@@ -1,7 +1,9 @@
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <thread>
 #include <type_traits>
 
 #include "virasa/core/Logger.h"
@@ -524,6 +526,32 @@ TEST(Buffer, test_buffer_is_initialized_reflects_owned_handle)
 
 	// IsInitialized is noexcept.
 	static_assert(noexcept(other.IsInitialized()));
+}
+
+// ---------------------------------------------------------------------------
+// buffer_get_device_address
+// ---------------------------------------------------------------------------
+TEST(Buffer, test_buffer_get_device_address)
+{
+	static_assert(noexcept(std::declval<const Buffer&>().GetDeviceAddress(
+		std::declval<const Device&>())));
+
+	VulkanFixture fx;
+	if (!fx.valid)
+		GTEST_SKIP() << "Vulkan device unavailable";
+
+	BufferConfig cfg;
+	cfg.size = 256;
+	cfg.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	cfg.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+	Buffer buf;
+	RenderError err = buf.Initialize(fx.device, cfg);
+	if (err != RenderError::None)
+		GTEST_SKIP() << "Buffer initialization failed (device may lack device address support)";
+
+	VkDeviceAddress addr = buf.GetDeviceAddress(fx.device);
+	EXPECT_NE(addr, static_cast<VkDeviceAddress>(0));
 }
 
 // ---------------------------------------------------------------------------

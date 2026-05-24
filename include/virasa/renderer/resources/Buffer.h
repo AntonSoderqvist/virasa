@@ -145,6 +145,13 @@ class Buffer final
 	 */
 	[[nodiscard]] bool IsInitialized() const noexcept;
 
+	/**
+	 * @brief Returns the GPU device address of the owned VkBuffer.
+	 * @param device The Device against which this Buffer was initialized.
+	 * @return The VkDeviceAddress of the buffer.
+	 */
+	[[nodiscard]] VkDeviceAddress GetDeviceAddress(const Device& device) const noexcept;
+
 	private:
 	/// Performs teardown: unmaps, destroys buffer, frees memory, resets handles.
 	void Teardown() noexcept;

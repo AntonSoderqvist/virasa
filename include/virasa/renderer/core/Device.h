@@ -6,15 +6,17 @@
 
 #include "vulkan/vulkan.h"
 
+#include <cstdint>
+
 namespace virasa
 {
 
 /**
- * @brief Owns and manages the Vulkan logical device (VkDevice) and its associated queues.
+ * @brief Selects a VkPhysicalDevice and owns the resulting VkDevice.
  *
- * Device selects a suitable VkPhysicalDevice, creates a VkDevice against it, and
- * retrieves the graphics, present, and transfer VkQueue handles. It is final and
- * non-copyable. It is default-constructible and movable.
+ * Device is a RAII wrapper around a Vulkan logical device. It is responsible
+ * for physical-device selection, logical-device creation, and retrieval of
+ * queue handles. Device is final and non-copyable; it is movable.
  */
 class Device final
 {
@@ -24,68 +26,53 @@ public:
 	 */
 	Device() = default;
 
-	/// Non-copyable.
-	Device(const Device&) = delete;
-	Device& operator=(const Device&) = delete;
-
-	/**
-	 * @brief Move-constructs a Device, transferring ownership from the source.
-	 * @param other The source Device; left in a default-constructed state after the move.
-	 */
-	Device(Device&& other) noexcept;
-
-	/**
-	 * @brief Move-assigns a Device, destroying any currently owned handle first.
-	 * @param other The source Device; left in a default-constructed state after the move.
-	 * @return Reference to this Device.
-	 */
-	Device& operator=(Device&& other) noexcept;
-
 	/**
 	 * @brief Destroys the owned VkDevice, if any.
 	 */
 	~Device();
 
+	// Non-copyable
+	Device(const Device&) = delete;
+	Device& operator=(const Device&) = delete;
+
+	// Movable
+	Device(Device&& other) noexcept;
+	Device& operator=(Device&& other) noexcept;
+
 	/**
-	 * @brief Selects a VkPhysicalDevice and creates a VkDevice against it.
-	 *
-	 * @param instance An initialized Instance whose VkInstance backs the Vulkan session.
-	 * @param surface  A valid VkSurfaceKHR used to check presentation support.
-	 * @return RenderError::None on success, RenderError::NoSuitableDevice if no physical
-	 *         device meets the hard requirements, or RenderError::DeviceCreateFailed if
-	 *         vkCreateDevice fails.
+	 * @brief Selects a physical device and creates a logical VkDevice.
+	 * @param instance An initialized Instance whose VkInstance backs the surface.
+	 * @param surface A valid VkSurfaceKHR created from the same VkInstance.
+	 * @return RenderError::None on success, or a specific error code on failure.
 	 */
 	[[nodiscard]] RenderError Initialize(const Instance& instance, VkSurfaceKHR surface);
 
 	/**
-	 * @brief Returns the owned VkDevice handle, or VK_NULL_HANDLE if none is owned.
-	 * @return The VkDevice handle.
+	 * @brief Returns the owned VkDevice handle, or VK_NULL_HANDLE if none.
+	 * @return The owned VkDevice.
 	 */
 	[[nodiscard]] VkDevice GetHandle() const noexcept;
 
 	/**
-	 * @brief Returns the selected VkPhysicalDevice handle, or VK_NULL_HANDLE if not initialized.
-	 * @return The VkPhysicalDevice handle.
+	 * @brief Returns the selected VkPhysicalDevice, or VK_NULL_HANDLE if none.
+	 * @return The selected VkPhysicalDevice.
 	 */
 	[[nodiscard]] VkPhysicalDevice GetPhysicalDevice() const noexcept;
 
 	/**
-	 * @brief Returns the graphics VkQueue handle, or VK_NULL_HANDLE if not initialized.
+	 * @brief Returns the graphics VkQueue handle.
 	 * @return The graphics queue.
 	 */
 	[[nodiscard]] VkQueue GetGraphicsQueue() const noexcept;
 
 	/**
-	 * @brief Returns the present VkQueue handle, or VK_NULL_HANDLE if not initialized.
+	 * @brief Returns the present VkQueue handle.
 	 * @return The present queue.
 	 */
 	[[nodiscard]] VkQueue GetPresentQueue() const noexcept;
 
 	/**
-	 * @brief Returns the transfer VkQueue handle, or VK_NULL_HANDLE if not initialized.
-	 *
-	 * If no dedicated transfer queue family was found, returns the same handle as
-	 * GetGraphicsQueue().
+	 * @brief Returns the transfer VkQueue handle (dedicated or graphics fallback).
 	 * @return The transfer queue.
 	 */
 	[[nodiscard]] VkQueue GetTransferQueue() const noexcept;
@@ -98,7 +85,7 @@ public:
 
 	/**
 	 * @brief Returns the graphics queue family index.
-	 * @return The graphicsFamily field of the cached QueueFamilies.
+	 * @return The graphics family index.
 	 */
 	[[nodiscard]] uint32_t GetGraphicsQueueFamilyIndex() const noexcept;
 
@@ -115,13 +102,32 @@ public:
 	[[nodiscard]] const VkPhysicalDeviceProperties& GetProperties() const noexcept;
 
 	/**
-	 * @brief Returns true if this Device owns a valid VkDevice handle.
-	 * @return True if initialized, false otherwise.
+	 * @brief Returns true if the Device owns a valid VkDevice handle.
+	 * @return True if initialized.
 	 */
 	[[nodiscard]] bool IsInitialized() const noexcept;
 
 	/**
-	 * @brief Blocks until all queues on the owned VkDevice have completed all submitted work.
+	 * @brief Returns the VkDeviceAddress for the given buffer.
+	 * @param buffer A VkBuffer created with VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
+	 * @return The VkDeviceAddress of the buffer.
+	 */
+	[[nodiscard]] VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer) const noexcept;
+
+	/**
+	 * @brief Returns true if buffer device address is enabled on this device.
+	 * @return True if bufferDeviceAddress is enabled.
+	 */
+	[[nodiscard]] bool IsBufferDeviceAddressEnabled() const noexcept;
+
+	/**
+	 * @brief Returns true if descriptor indexing features are enabled on this device.
+	 * @return True if descriptor indexing is enabled.
+	 */
+	[[nodiscard]] bool IsDescriptorIndexingEnabled() const noexcept;
+
+	/**
+	 * @brief Blocks until all queues on the owned VkDevice have completed work.
 	 *
 	 * No-op if the Device is not initialized.
 	 */
@@ -133,9 +139,9 @@ private:
 	VkQueue _graphicsQueue = VK_NULL_HANDLE;
 	VkQueue _presentQueue = VK_NULL_HANDLE;
 	VkQueue _transferQueue = VK_NULL_HANDLE;
-	QueueFamilies _queueFamilies{};
-	VkPhysicalDeviceProperties _properties{};
-	VkPhysicalDeviceMemoryProperties _memoryProperties{};
+	QueueFamilies _queueFamilies = {};
+	VkPhysicalDeviceProperties _deviceProperties = {};
+	VkPhysicalDeviceMemoryProperties _memoryProperties = {};
 };
 
 } // namespace virasa

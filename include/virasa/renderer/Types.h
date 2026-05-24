@@ -50,7 +50,11 @@ enum class RenderError : uint8_t
 	/// @brief vkCreateBuffer or vkBindBufferMemory returned a VkResult other than VK_SUCCESS.
 	BufferCreateFailed,
 	/// @brief vkMapMemory against a host-visible allocation returned a VkResult other than VK_SUCCESS.
-	MemoryMapFailed
+	MemoryMapFailed,
+	/// @brief vkCreateSampler returned a VkResult other than VK_SUCCESS.
+	SamplerCreateFailed,
+	/// @brief vkCreateDescriptorPool, vkCreateDescriptorSetLayout, or vkAllocateDescriptorSets returned a VkResult other than VK_SUCCESS.
+	DescriptorPoolCreateFailed
 };
 
 /**
@@ -87,6 +91,9 @@ inline std::ostream& operator<<(std::ostream& os, RenderError error)
 		case RenderError::MemoryAllocFailed:       return os << "MemoryAllocFailed";
 		case RenderError::BufferCreateFailed:      return os << "BufferCreateFailed";
 		case RenderError::MemoryMapFailed:         return os << "MemoryMapFailed";
+		case RenderError::SamplerCreateFailed:     return os << "SamplerCreateFailed";
+		case RenderError::DescriptorPoolCreateFailed:
+			return os << "DescriptorPoolCreateFailed";
 		default:
 			return os << "RenderError(" << static_cast<uint32_t>(static_cast<uint8_t>(error)) << ")";
 	}

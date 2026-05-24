@@ -114,11 +114,17 @@ RenderError Buffer::Initialize(const Device& device, const BufferConfig& config)
 	// Teardown any existing resources (re-initialization path).
 	Teardown();
 
+	auto* logger = Logger::GetLogger("renderer");
+
+	if (config.size == 0)
+	{
+		LOG_ERROR(logger, "Buffer::Initialize — size must be greater than zero");
+		return RenderError::BufferCreateFailed;
+	}
+
 	// Borrow the VkDevice and cache the size.
 	_device = device.GetHandle();
 	_size = config.size;
-
-	auto* logger = Logger::GetLogger("renderer");
 
 	// Step 1: create the VkBuffer.
 	VkBufferCreateInfo bufferInfo{};
@@ -365,6 +371,11 @@ VkDeviceSize Buffer::GetSize() const noexcept
 bool Buffer::IsInitialized() const noexcept
 {
 	return _buffer != VK_NULL_HANDLE;
+}
+
+VkDeviceAddress Buffer::GetDeviceAddress(const Device& device) const noexcept
+{
+	return device.GetBufferDeviceAddress(_buffer);
 }
 
 } // namespace virasa

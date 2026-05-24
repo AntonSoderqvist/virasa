@@ -9,6 +9,8 @@ add_executable(virasa_renderer_tests
     resources/test_Pipeline.cpp
     resources/test_Image.cpp
     resources/test_Buffer.cpp
+    resources/test_BindlessTextureArray.cpp
+    resources/test_Sampler.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

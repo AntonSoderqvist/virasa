@@ -8,6 +8,8 @@ add_library(virasa_renderer_lib STATIC
     resources/Pipeline.cpp
     resources/Image.cpp
     resources/Buffer.cpp
+    resources/BindlessTextureArray.cpp
+    resources/Sampler.cpp
 )
 
 target_include_directories(virasa_renderer_lib
