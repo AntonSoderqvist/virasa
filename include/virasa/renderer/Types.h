@@ -1,19 +1,25 @@
 #ifndef VIRASA_RENDERER_TYPES_H
 #define VIRASA_RENDERER_TYPES_H
 
+#include <vulkan/vulkan.h>
+
+#include <cstddef>
 #include <cstdint>
-#include <span>
 #include <ostream>
-#include "vulkan/vulkan.h"
+#include <span>
+#include <vector>
+
+#include "glm/vec2.hpp"
+#include "glm/vec3.hpp"
 
 namespace virasa
 {
 
 /**
- * @brief Error codes returned by renderer operations.
+ * @brief Error codes for renderer operations.
  *
- * RenderError::None is the unique success value. All other values represent
- * distinct failure modes. The underlying type is uint8_t.
+ * RenderError values represent distinct failure modes for renderer operations.
+ * None is the only success value.
  */
 enum class RenderError : uint8_t
 {
@@ -37,75 +43,38 @@ enum class RenderError : uint8_t
 	ShaderCreateFailed,
 	/// @brief vkCreatePipelineLayout returned a VkResult other than VK_SUCCESS.
 	PipelineLayoutCreateFailed,
-	/// @brief vkCreateGraphicsPipelines returned a VkResult other than VK_SUCCESS, or required inputs were missing.
+	/// @brief vkCreateGraphicsPipelines returned a VkResult other than VK_SUCCESS, or required
+	/// inputs were missing.
 	PipelineCreateFailed,
-	/// @brief vkCreateCommandPool or vkAllocateCommandBuffers returned a VkResult other than VK_SUCCESS.
+	/// @brief vkCreateCommandPool or vkAllocateCommandBuffers returned a VkResult other than
+	/// VK_SUCCESS.
 	CommandPoolCreateFailed,
-	/// @brief vkCreateSemaphore or vkCreateFence returned a VkResult other than VK_SUCCESS during per-frame sync object creation.
+	/// @brief vkCreateSemaphore or vkCreateFence returned a VkResult other than VK_SUCCESS during
+	/// per-frame sync object creation.
 	FenceCreateFailed,
 	/// @brief vkCreateImage or vkBindImageMemory returned a VkResult other than VK_SUCCESS.
 	ImageCreateFailed,
-	/// @brief No suitable memory type was found, or vkAllocateMemory returned a VkResult other than VK_SUCCESS.
+	/// @brief No suitable memory type was found, or vkAllocateMemory returned a VkResult other
+	/// than VK_SUCCESS.
 	MemoryAllocFailed,
 	/// @brief vkCreateBuffer or vkBindBufferMemory returned a VkResult other than VK_SUCCESS.
 	BufferCreateFailed,
-	/// @brief vkMapMemory against a host-visible allocation returned a VkResult other than VK_SUCCESS.
+	/// @brief vkMapMemory against a host-visible allocation returned a VkResult other than
+	/// VK_SUCCESS.
 	MemoryMapFailed,
 	/// @brief vkCreateSampler returned a VkResult other than VK_SUCCESS.
 	SamplerCreateFailed,
-	/// @brief vkCreateDescriptorPool, vkCreateDescriptorSetLayout, or vkAllocateDescriptorSets returned a VkResult other than VK_SUCCESS.
+	/// @brief vkCreateDescriptorPool, vkCreateDescriptorSetLayout, or vkAllocateDescriptorSets
+	/// returned a VkResult other than VK_SUCCESS.
 	DescriptorPoolCreateFailed
 };
 
 /**
- * @brief Writes the name of a RenderError value to an output stream.
+ * @brief Status codes for swapchain operations.
  *
- * For declared values, writes the identifier string (e.g. "None", "InstanceCreateFailed").
- * For unknown values, writes "RenderError(N)" where N is the decimal underlying value.
- *
- * @param os    The output stream to write to.
- * @param error The RenderError value to write.
- * @return The same ostream reference, to support chaining.
- */
-inline std::ostream& operator<<(std::ostream& os, RenderError error)
-{
-	switch (error)
-	{
-		case RenderError::None:                    return os << "None";
-		case RenderError::AlreadyInitialized:      return os << "AlreadyInitialized";
-		case RenderError::NotInitialized:          return os << "NotInitialized";
-		case RenderError::VulkanNotAvailable:      return os << "VulkanNotAvailable";
-		case RenderError::InstanceCreateFailed:    return os << "InstanceCreateFailed";
-		case RenderError::SurfaceCreateFailed:     return os << "SurfaceCreateFailed";
-		case RenderError::NoSuitableDevice:        return os << "NoSuitableDevice";
-		case RenderError::DeviceCreateFailed:      return os << "DeviceCreateFailed";
-		case RenderError::SwapchainCreateFailed:   return os << "SwapchainCreateFailed";
-		case RenderError::ImageViewCreateFailed:   return os << "ImageViewCreateFailed";
-		case RenderError::ShaderLoadFailed:        return os << "ShaderLoadFailed";
-		case RenderError::ShaderCreateFailed:      return os << "ShaderCreateFailed";
-		case RenderError::PipelineLayoutCreateFailed: return os << "PipelineLayoutCreateFailed";
-		case RenderError::PipelineCreateFailed:    return os << "PipelineCreateFailed";
-		case RenderError::CommandPoolCreateFailed: return os << "CommandPoolCreateFailed";
-		case RenderError::FenceCreateFailed:       return os << "FenceCreateFailed";
-		case RenderError::ImageCreateFailed:       return os << "ImageCreateFailed";
-		case RenderError::MemoryAllocFailed:       return os << "MemoryAllocFailed";
-		case RenderError::BufferCreateFailed:      return os << "BufferCreateFailed";
-		case RenderError::MemoryMapFailed:         return os << "MemoryMapFailed";
-		case RenderError::SamplerCreateFailed:     return os << "SamplerCreateFailed";
-		case RenderError::DescriptorPoolCreateFailed:
-			return os << "DescriptorPoolCreateFailed";
-		default:
-			return os << "RenderError(" << static_cast<uint32_t>(static_cast<uint8_t>(error)) << ")";
-	}
-}
-
-/**
- * @brief Status of a swapchain acquire or present operation.
- *
- * SwapchainStatus is an enum class with underlying type uint8_t.
- * Success is the unique "no action needed" value. Recreated indicates the
- * swapchain is out-of-date and should be recreated before the next frame.
- * Error indicates an unrecoverable failure.
+ * Success indicates a successful operation. Recreated indicates the swapchain
+ * needs to be recreated. Error indicates an unrecoverable failure. NotReady
+ * indicates the frame loop should skip rendering this iteration.
  */
 enum class SwapchainStatus : uint8_t
 {
@@ -116,80 +85,69 @@ enum class SwapchainStatus : uint8_t
 };
 
 /**
- * @brief Renderer-wide configuration shared by every contract in the virasa.renderer subtree.
+ * @brief Renderer-wide configuration shared by all renderer subsystems.
  *
- * RendererConfig is a plain aggregate struct. All pointer members are non-owning;
- * the caller must keep the referenced data alive for the duration of any call
- * that receives this struct.
- *
- * Consumers that create a VkInstance must set VkApplicationInfo::apiVersion to
- * VK_API_VERSION_1_3.
+ * Holds settings such as application name, validation, instance extensions,
+ * swapchain usage flags, and frame buffering.
  */
 struct RendererConfig
 {
-	/// @brief Null-terminated application name passed to Vulkan via VkApplicationInfo.
+	/** @brief Application name passed to Vulkan. */
 	const char* applicationName = "Virasa";
 
-	/// @brief Application version passed to Vulkan via VkApplicationInfo.
+	/** @brief Application version passed to Vulkan. */
 	uint32_t applicationVersion = 0;
 
-	/// @brief When true, the Khronos validation layer and VK_EXT_debug_utils are requested.
+	/** @brief Whether to enable validation layers. */
 	bool enableValidation = true;
 
-	/**
-	 * @brief Pointer to a contiguous array of null-terminated Vulkan instance extension names
-	 *        required by the caller. May be nullptr when requiredInstanceExtensionCount is 0.
-	 */
+	/** @brief Array of required instance extension names. */
 	const char* const* requiredInstanceExtensions = nullptr;
 
-	/// @brief Number of strings in the requiredInstanceExtensions array.
+	/** @brief Number of required instance extensions. */
 	uint32_t requiredInstanceExtensionCount = 0;
 
-	/**
-	 * @brief When true, prefer VK_PRESENT_MODE_MAILBOX_KHR over VK_PRESENT_MODE_FIFO_KHR
-	 *        if both are supported. Advisory only — falls back to FIFO when mailbox is unavailable.
-	 */
+	/** @brief Prefer VK_PRESENT_MODE_MAILBOX_KHR over FIFO. */
 	bool preferMailbox = false;
 
-	/**
-	 * @brief VkImageUsageFlags passed to VkSwapchainCreateInfoKHR::imageUsage.
-	 *
-	 * Must include VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT. Callers may add additional
-	 * flags (e.g. VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_USAGE_STORAGE_BIT).
-	 */
-	VkImageUsageFlags swapchainImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	/** @brief VkImageUsageFlags for the swapchain images. */
+	VkImageUsageFlags swapchainImageUsage =
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-	/**
-	 * @brief Number of frames that may be recorded and submitted concurrently.
-	 *
-	 * Determines the count of per-frame synchronization objects and per-frame command buffers.
-	 * Common values are 2 (double-buffering) and 3 (triple-buffering). Must not be 0.
-	 */
+	/** @brief Number of frames that may be in flight concurrently. */
 	uint32_t maxFramesInFlight = 2;
 
-	/**
-	 * @brief Format used for the renderer's depth attachment.
-	 *
-	 * Consumers that create a depth image use this format for the depth image and its view.
-	 * Must be a format supported by the selected VkPhysicalDevice as a depth-stencil attachment
-	 * with VK_IMAGE_TILING_OPTIMAL. Defaults to VK_FORMAT_D32_SFLOAT, which is required to be
-	 * supported as an optimal-tiling depth-stencil attachment on every conformant Vulkan implementation.
-	 */
+	/** @brief Depth format used for depth attachments. */
 	VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 };
 
 /**
- * @brief Holds the Vulkan queue family indices selected for a logical device.
+ * @brief Holds Vulkan queue family indices and their availability flags.
  *
- * QueueFamilies stores the resolved queue family indices together with flags
- * indicating which indices have been found. It owns no resources.
+ * Used to select queue families for graphics, present, and transfer operations.
  */
 struct QueueFamilies
 {
-public:
+	/** @brief Graphics queue family index. */
+	uint32_t graphicsFamily = 0;
+
+	/** @brief Present queue family index. */
+	uint32_t presentFamily = 0;
+
+	/** @brief Transfer queue family index. */
+	uint32_t transferFamily = 0;
+
+	/** @brief Whether a graphics queue family was found. */
+	bool graphicsFound = false;
+
+	/** @brief Whether a present queue family was found. */
+	bool presentFound = false;
+
+	/** @brief Whether a dedicated transfer queue family was found. */
+	bool dedicatedTransfer = false;
+
 	/**
-	 * @brief Returns true if and only if both graphicsFound and presentFound are true.
-	 * @return True when both a graphics and a present queue family have been resolved.
+	 * @brief Returns true if both graphics and present families are found.
 	 */
 	[[nodiscard]] bool IsComplete() const noexcept
 	{
@@ -197,71 +155,133 @@ public:
 	}
 
 	/**
-	 * @brief Returns true if and only if graphicsFamily equals presentFamily.
-	 * @return True when the graphics and present queue families share the same index.
+	 * @brief Returns true if the graphics and present families are the same.
 	 */
 	[[nodiscard]] bool IsSameFamily() const noexcept
 	{
 		return graphicsFamily == presentFamily;
 	}
-
-	/// @brief Queue family index selected for graphics submission.
-	uint32_t graphicsFamily = 0;
-
-	/// @brief Queue family index selected for presentation against a VkSurfaceKHR.
-	uint32_t presentFamily = 0;
-
-	/// @brief Queue family index selected for transfer-only submission.
-	uint32_t transferFamily = 0;
-
-	/// @brief True if a graphics-capable queue family has been resolved.
-	bool graphicsFound = false;
-
-	/// @brief True if a present-capable queue family has been resolved.
-	bool presentFound = false;
-
-	/// @brief True if a dedicated transfer queue family (no graphics) was found.
-	bool dedicatedTransfer = false;
 };
 
 /**
- * @brief Describes one vertex attribute consumed by a vertex shader.
+ * @brief Describes one vertex attribute for a vertex shader.
  *
- * VertexAttribute is a trivially destructible value type intended to be
- * constructed in arrays describing the layout of a vertex buffer.
+ * Specifies the shader location, format, and byte offset of the attribute.
  */
 struct VertexAttribute
 {
-public:
-	/// @brief Shader location index this attribute binds to (layout(location = N)).
+	/** @brief Shader location index. */
 	uint32_t location = 0;
 
-	/// @brief Data format of the attribute (e.g. VK_FORMAT_R32G32B32_SFLOAT).
+	/** @brief Vulkan format of the attribute. */
 	VkFormat format = VK_FORMAT_UNDEFINED;
 
-	/// @brief Byte offset of this attribute from the start of a vertex record.
+	/** @brief Byte offset from the start of the vertex record. */
 	uint32_t offset = 0;
 };
 
 /**
- * @brief Describes the vertex input layout for a single binding consumed by a pipeline.
+ * @brief Describes the vertex input layout for a single binding.
  *
- * VertexLayout is a non-owning descriptor; the caller must keep the storage
- * referenced by the attributes span alive for the duration of any call that
- * receives the VertexLayout.
+ * Contains the stride, input rate, and a span of attribute descriptors.
  */
 struct VertexLayout
 {
-public:
-	/// @brief Size in bytes of one vertex record in the bound buffer.
+	/** @brief Size in bytes of one vertex record. */
 	uint32_t stride = 0;
 
-	/// @brief Selects per-vertex versus per-instance stepping.
+	/** @brief Per-vertex or per-instance stepping. */
 	VkVertexInputRate inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-	/// @brief Non-owning span of VertexAttribute records describing individual attributes.
+	/** @brief Non-owning span of vertex attribute descriptors. */
 	std::span<const VertexAttribute> attributes;
 };
+
+/**
+ * @brief A single vertex with position, normal, and texture coordinates.
+ *
+ * The memory layout is tightly packed: 3 floats for position, 3 for normal,
+ * 2 for UV, total 32 bytes with no padding.
+ */
+struct Vertex
+{
+	glm::vec3 position;
+	glm::vec3 normal;
+	glm::vec2 uv;
+};
+
+/**
+ * @brief CPU-side geometry data with vertices and indices.
+ *
+ * Owns vectors of Vertex and uint32_t indices.
+ */
+struct MeshData
+{
+	/** @brief Vertex array. */
+	std::vector<Vertex> vertices;
+
+	/** @brief Index array. */
+	std::vector<uint32_t> indices;
+};
+
+/**
+ * @brief Writes the string representation of a RenderError to an ostream.
+ *
+ * For known values, writes the identifier (e.g., "None"). For unknown values,
+ * writes "RenderError(N)" where N is the decimal value.
+ */
+inline std::ostream& operator<<(std::ostream& os, RenderError error)
+{
+	switch (error)
+	{
+		case RenderError::None:
+			return os << "None";
+		case RenderError::AlreadyInitialized:
+			return os << "AlreadyInitialized";
+		case RenderError::NotInitialized:
+			return os << "NotInitialized";
+		case RenderError::VulkanNotAvailable:
+			return os << "VulkanNotAvailable";
+		case RenderError::InstanceCreateFailed:
+			return os << "InstanceCreateFailed";
+		case RenderError::SurfaceCreateFailed:
+			return os << "SurfaceCreateFailed";
+		case RenderError::NoSuitableDevice:
+			return os << "NoSuitableDevice";
+		case RenderError::DeviceCreateFailed:
+			return os << "DeviceCreateFailed";
+		case RenderError::SwapchainCreateFailed:
+			return os << "SwapchainCreateFailed";
+		case RenderError::ImageViewCreateFailed:
+			return os << "ImageViewCreateFailed";
+		case RenderError::ShaderLoadFailed:
+			return os << "ShaderLoadFailed";
+		case RenderError::ShaderCreateFailed:
+			return os << "ShaderCreateFailed";
+		case RenderError::PipelineLayoutCreateFailed:
+			return os << "PipelineLayoutCreateFailed";
+		case RenderError::PipelineCreateFailed:
+			return os << "PipelineCreateFailed";
+		case RenderError::CommandPoolCreateFailed:
+			return os << "CommandPoolCreateFailed";
+		case RenderError::FenceCreateFailed:
+			return os << "FenceCreateFailed";
+		case RenderError::ImageCreateFailed:
+			return os << "ImageCreateFailed";
+		case RenderError::MemoryAllocFailed:
+			return os << "MemoryAllocFailed";
+		case RenderError::BufferCreateFailed:
+			return os << "BufferCreateFailed";
+		case RenderError::MemoryMapFailed:
+			return os << "MemoryMapFailed";
+		case RenderError::SamplerCreateFailed:
+			return os << "SamplerCreateFailed";
+		case RenderError::DescriptorPoolCreateFailed:
+			return os << "DescriptorPoolCreateFailed";
+		default:
+			return os << "RenderError(" << static_cast<int>(error) << ")";
+	}
+}
 
 } // namespace virasa
 

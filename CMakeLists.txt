@@ -28,6 +28,9 @@ add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
 # Vulkan
 find_package(Vulkan REQUIRED)
 
+# GLM
+find_package(glm REQUIRED)
+
 # --- Engine Modules ---
 add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/window)

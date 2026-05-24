@@ -10,6 +10,7 @@ add_library(virasa_renderer_lib STATIC
     resources/Buffer.cpp
     resources/BindlessTextureArray.cpp
     resources/Sampler.cpp
+    resources/Mesh.cpp
 )
 
 target_include_directories(virasa_renderer_lib
@@ -20,6 +21,7 @@ target_include_directories(virasa_renderer_lib
 target_link_libraries(virasa_renderer_lib
     PUBLIC
         Vulkan::Vulkan
+        glm::glm
     PRIVATE
         virasa_core_lib
         virasa_window_lib

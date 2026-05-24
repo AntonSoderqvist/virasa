@@ -11,6 +11,8 @@ add_executable(virasa_renderer_tests
     resources/test_Buffer.cpp
     resources/test_BindlessTextureArray.cpp
     resources/test_Sampler.cpp
+    resources/test_Mesh.cpp
+    geometry/test_Primitives.cpp
 )
 
 target_link_libraries(virasa_renderer_tests

@@ -1,12 +1,16 @@
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 #include <gtest/gtest.h>
 
 #include "virasa/renderer/Types.h"
 #include "vulkan/vulkan.h"
+#include "glm/vec2.hpp"
+#include "glm/vec3.hpp"
 
 using namespace virasa;
 
@@ -459,6 +463,10 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 
 	static_assert(std::is_default_constructible_v<RendererConfig>,
 		"RendererConfig must be default-constructible");
+	static_assert(std::is_copy_constructible_v<RendererConfig>,
+		"RendererConfig must be copy-constructible");
+	static_assert(std::is_move_constructible_v<RendererConfig>,
+		"RendererConfig must be move-constructible");
 
 	RendererConfig config;
 	(void)config.applicationName;
@@ -471,5 +479,107 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	(void)config.maxFramesInFlight;
 	(void)config.depthFormat;
 
-	EXPECT_TRUE(true);
+	EXPECT_EQ(VK_VERSION_MAJOR(VK_API_VERSION_1_3), 1u);
+	EXPECT_EQ(VK_VERSION_MINOR(VK_API_VERSION_1_3), 3u);
+}
+
+TEST(Types, test_vertex_struct_layout)
+{
+	static_assert(std::is_default_constructible_v<Vertex>,
+		"Vertex must be default-constructible");
+	static_assert(std::is_copy_constructible_v<Vertex>,
+		"Vertex must be copy-constructible");
+	static_assert(std::is_move_constructible_v<Vertex>,
+		"Vertex must be move-constructible");
+	static_assert(offsetof(Vertex, position) == 0,
+		"Vertex::position must be the first field");
+	static_assert(offsetof(Vertex, normal) == sizeof(glm::vec3),
+		"Vertex::normal must immediately follow position");
+	static_assert(offsetof(Vertex, uv) == sizeof(glm::vec3) * 2,
+		"Vertex::uv must immediately follow normal");
+	static_assert(sizeof(Vertex) == 32,
+		"Vertex must be tightly packed to 32 bytes");
+
+	Vertex vertex{};
+	EXPECT_FLOAT_EQ(vertex.position.x, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.position.y, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.position.z, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.x, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.y, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.z, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.uv.x, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.uv.y, 0.0f);
+
+	vertex.position = glm::vec3{1.0f, 2.0f, 3.0f};
+	vertex.normal = glm::vec3{4.0f, 5.0f, 6.0f};
+	vertex.uv = glm::vec2{0.25f, 0.75f};
+
+	EXPECT_FLOAT_EQ(vertex.position.x, 1.0f);
+	EXPECT_FLOAT_EQ(vertex.position.y, 2.0f);
+	EXPECT_FLOAT_EQ(vertex.position.z, 3.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.x, 4.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.y, 5.0f);
+	EXPECT_FLOAT_EQ(vertex.normal.z, 6.0f);
+	EXPECT_FLOAT_EQ(vertex.uv.x, 0.25f);
+	EXPECT_FLOAT_EQ(vertex.uv.y, 0.75f);
+}
+
+TEST(Types, test_mesh_data_holds_cpu_geometry)
+{
+	static_assert(std::is_default_constructible_v<MeshData>,
+		"MeshData must be default-constructible");
+	static_assert(std::is_copy_constructible_v<MeshData>,
+		"MeshData must be copy-constructible");
+	static_assert(std::is_move_constructible_v<MeshData>,
+		"MeshData must be move-constructible");
+
+	MeshData mesh;
+	EXPECT_TRUE(mesh.vertices.empty());
+	EXPECT_TRUE(mesh.indices.empty());
+	EXPECT_EQ(mesh.vertices.size(), std::size_t{0});
+	EXPECT_EQ(mesh.indices.size(), std::size_t{0});
+
+	Vertex v0{};
+	v0.position = glm::vec3{1.0f, 0.0f, 0.0f};
+	v0.normal = glm::vec3{0.0f, 1.0f, 0.0f};
+	v0.uv = glm::vec2{0.0f, 0.0f};
+
+	Vertex v1{};
+	v1.position = glm::vec3{0.0f, 1.0f, 0.0f};
+	v1.normal = glm::vec3{0.0f, 1.0f, 0.0f};
+	v1.uv = glm::vec2{1.0f, 0.0f};
+
+	mesh.vertices.push_back(v0);
+	mesh.vertices.push_back(v1);
+	mesh.indices.push_back(0u);
+	mesh.indices.push_back(1u);
+	mesh.indices.push_back(0u);
+
+	EXPECT_EQ(mesh.vertices.size(), std::size_t{2});
+	EXPECT_EQ(mesh.indices.size(), std::size_t{3});
+	EXPECT_FLOAT_EQ(mesh.vertices[0].position.x, 1.0f);
+	EXPECT_FLOAT_EQ(mesh.vertices[1].position.y, 1.0f);
+	EXPECT_EQ(mesh.indices[0], uint32_t{0});
+	EXPECT_EQ(mesh.indices[1], uint32_t{1});
+	EXPECT_EQ(mesh.indices[2], uint32_t{0});
+
+	MeshData copy = mesh;
+	ASSERT_EQ(copy.vertices.size(), mesh.vertices.size());
+	ASSERT_EQ(copy.indices.size(), mesh.indices.size());
+	EXPECT_NE(copy.vertices.data(), mesh.vertices.data());
+	EXPECT_NE(copy.indices.data(), mesh.indices.data());
+	EXPECT_FLOAT_EQ(copy.vertices[0].position.x, mesh.vertices[0].position.x);
+	EXPECT_FLOAT_EQ(copy.vertices[1].uv.x, mesh.vertices[1].uv.x);
+	EXPECT_EQ(copy.indices[0], mesh.indices[0]);
+	EXPECT_EQ(copy.indices[1], mesh.indices[1]);
+	EXPECT_EQ(copy.indices[2], mesh.indices[2]);
+
+	MeshData moved = std::move(mesh);
+	EXPECT_EQ(moved.vertices.size(), std::size_t{2});
+	EXPECT_EQ(moved.indices.size(), std::size_t{3});
+	EXPECT_FLOAT_EQ(moved.vertices[0].normal.y, 1.0f);
+	EXPECT_FLOAT_EQ(moved.vertices[1].uv.x, 1.0f);
+	EXPECT_EQ(moved.indices[0], uint32_t{0});
+	EXPECT_EQ(moved.indices[1], uint32_t{1});
+	EXPECT_EQ(moved.indices[2], uint32_t{0});
 }
