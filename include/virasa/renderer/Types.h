@@ -9,8 +9,7 @@
 #include <span>
 #include <vector>
 
-#include "glm/vec2.hpp"
-#include "glm/vec3.hpp"
+#include "virasa/math/Types.h"
 
 namespace virasa
 {
@@ -205,9 +204,9 @@ struct VertexLayout
  */
 struct Vertex
 {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec2 uv;
+	virasa::math::Vec3 position;
+	virasa::math::Vec3 normal;
+	virasa::math::Vec2 uv;
 };
 
 /**

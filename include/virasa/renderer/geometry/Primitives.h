@@ -5,9 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "glm/geometric.hpp"
-#include "glm/vec2.hpp"
-#include "glm/vec3.hpp"
+#include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 
 namespace virasa

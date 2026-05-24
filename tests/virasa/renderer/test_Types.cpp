@@ -445,15 +445,23 @@ TEST(Types, test_render_error_has_ostream_insertion_operator)
 	EXPECT_EQ(toString(RenderError::SamplerCreateFailed), "SamplerCreateFailed");
 	EXPECT_EQ(toString(RenderError::DescriptorPoolCreateFailed), "DescriptorPoolCreateFailed");
 
+	// Out-of-range value: written as "RenderError(N)" where N is the decimal integer.
 	EXPECT_EQ(toString(static_cast<RenderError>(uint8_t{200})), "RenderError(200)");
+	// Value 255 is also out of range.
+	EXPECT_EQ(toString(static_cast<RenderError>(uint8_t{255})), "RenderError(255)");
 
+	// Returns the same ostream reference (chaining support).
 	std::ostringstream oss;
 	std::ostream& ref = (oss << RenderError::None);
 	EXPECT_EQ(&ref, &oss);
 
+	// Chaining works correctly.
 	std::ostringstream chained;
 	chained << RenderError::None << "|" << RenderError::SamplerCreateFailed;
 	EXPECT_EQ(chained.str(), "None|SamplerCreateFailed");
+
+	// No surrounding whitespace or punctuation.
+	EXPECT_EQ(toString(RenderError::DescriptorPoolCreateFailed), "DescriptorPoolCreateFailed");
 }
 
 TEST(Types, test_renderer_config_targets_vulkan_1_3)

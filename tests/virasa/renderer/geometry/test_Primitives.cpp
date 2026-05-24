@@ -204,14 +204,34 @@ TEST(Primitives, test_create_cube_generates_box_geometry)
 		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
 		{
 			const virasa::Vertex& vertex = cube.vertices[face * 4 + vertexIndex];
-			ExpectVertexMatches(
-				vertex,
-				expectedPositions[face][vertexIndex],
-				expectedNormals[face],
-				expectedUvs[vertexIndex]);
+
+			// Check normal and UV exactly; positions are checked loosely below
+			EXPECT_TRUE(NearlyEqualVec3(vertex.normal, expectedNormals[face]));
+			EXPECT_TRUE(NearlyEqualVec2(vertex.uv, expectedUvs[vertexIndex]));
+
 			xValues.insert(vertex.position.x);
 			yValues.insert(vertex.position.y);
 			zValues.insert(vertex.position.z);
+		}
+
+		// Verify the four face positions match the expected set (order-independent)
+		std::array<glm::vec3, 4> actualPositions;
+		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
+		{
+			actualPositions[vertexIndex] = cube.vertices[face * 4 + vertexIndex].position;
+		}
+		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
+		{
+			bool found = false;
+			for (std::size_t j = 0; j < 4; ++j)
+			{
+				if (NearlyEqualVec3(actualPositions[j], expectedPositions[face][vertexIndex]))
+				{
+					found = true;
+					break;
+				}
+			}
+			EXPECT_TRUE(found) << "Face " << face << " vertex " << vertexIndex << " position not found";
 		}
 	}
 

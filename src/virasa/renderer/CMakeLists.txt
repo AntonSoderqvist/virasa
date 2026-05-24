@@ -22,6 +22,7 @@ target_link_libraries(virasa_renderer_lib
     PUBLIC
         Vulkan::Vulkan
         glm::glm
+        virasa_math_lib
     PRIVATE
         virasa_core_lib
         virasa_window_lib

@@ -33,6 +33,7 @@ find_package(glm REQUIRED)
 
 # --- Engine Modules ---
 add_subdirectory(src/virasa/core)
+add_subdirectory(src/virasa/math)
 add_subdirectory(src/virasa/window)
 add_subdirectory(src/virasa/renderer)
 
@@ -47,6 +48,7 @@ if(VIRASA_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     add_subdirectory(vendor/googletest EXCLUDE_FROM_ALL)
     add_subdirectory(tests/virasa/core)
+    add_subdirectory(tests/virasa/math)
     add_subdirectory(tests/virasa/window)
     add_subdirectory(tests/virasa/renderer)
 endif()
@@ -59,4 +61,5 @@ target_link_libraries(virasa_editor
         virasa_core_lib
         virasa_window_lib
         virasa_renderer_lib
+        virasa_math_lib
 )

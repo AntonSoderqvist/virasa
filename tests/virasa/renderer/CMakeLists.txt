@@ -20,6 +20,7 @@ target_link_libraries(virasa_renderer_tests
         virasa_renderer_lib
         virasa_core_lib
         virasa_window_lib
+        virasa_math_lib
         GTest::gtest_main
 )
 

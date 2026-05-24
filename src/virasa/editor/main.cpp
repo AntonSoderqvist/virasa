@@ -2,17 +2,18 @@
 // Copyright 2026 Anton Soderqvist
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_RADIANS
 #include <vulkan/vulkan.h>
 
 #include <quill/LogMacros.h>
 #include <quill/Logger.h>
 
 #include <cstdint>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <span>
 
 #include "virasa/core/Logger.h"
+#include "virasa/math/Projection.h"
+#include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/core/Device.h"
@@ -22,16 +23,17 @@
 #include "virasa/window/Events.h"
 #include "virasa/window/Platform.h"
 #include "virasa/window/Types.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 int main(int argc, char** argv)
 {
-	quill::Logger* logger = virasa::Logger::GetLogger("Main");
+	quill::Logger* logger = virasa::core::Logger::GetLogger("Main");
 	LOG_INFO(logger, "Entry point reached.");
 
 	// --- Platform ---
 	virasa::window::Platform platform;
-	virasa::ErrorCode platformResult = platform.Initialize("Virasa Editor", 800, 800);
-	if (platformResult != virasa::ErrorCode::None)
+	virasa::window::ErrorCode platformResult = platform.Initialize("Virasa Editor", 800, 800);
+	if (platformResult != virasa::window::ErrorCode::None)
 	{
 		LOG_ERROR(logger,
 			"Platform initialization failed with error code: {}",
@@ -40,15 +42,15 @@ int main(int argc, char** argv)
 	}
 
 	// --- Renderer Context ---
-	virasa::Context context;
-	virasa::RendererConfig rendererConfig;
+	virasa::renderer::core::Context context;
+	virasa::renderer::RendererConfig rendererConfig;
 	uint32_t extensionCount = 0;
 	rendererConfig.requiredInstanceExtensions =
 		virasa::window::Platform::GetRequiredVulkanExtensions(&extensionCount);
 	rendererConfig.requiredInstanceExtensionCount = extensionCount;
 
-	virasa::RenderError contextResult = context.Initialize(platform, rendererConfig);
-	if (contextResult != virasa::RenderError::None)
+	virasa::renderer::RenderError contextResult = context.Initialize(platform, rendererConfig);
+	if (contextResult != virasa::renderer::RenderError::None)
 	{
 		LOG_ERROR(logger,
 			"Renderer context initialization failed with error code: {}",
@@ -131,14 +133,14 @@ int main(int argc, char** argv)
 	};
 
 	// Vertex buffer
-	virasa::Buffer vertexBuffer;
+	virasa::renderer::resources::Buffer vertexBuffer;
 	{
-		virasa::BufferConfig cfg{};
+		virasa::renderer::BufferConfig cfg{};
 		cfg.size = sizeof(vertices);
 		cfg.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		cfg.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-		virasa::RenderError err = vertexBuffer.Initialize(context.GetDevice(), cfg);
-		if (err != virasa::RenderError::None)
+		virasa::renderer::RenderError err = vertexBuffer.Initialize(context.GetDevice(), cfg);
+		if (err != virasa::renderer::RenderError::None)
 		{
 			LOG_ERROR(logger,
 				"Vertex buffer initialization failed with error code: {}",
@@ -148,14 +150,14 @@ int main(int argc, char** argv)
 	}
 
 	// Index buffer
-	virasa::Buffer indexBuffer;
+	virasa::renderer::resources::Buffer indexBuffer;
 	{
-		virasa::BufferConfig cfg{};
+		virasa::renderer::BufferConfig cfg{};
 		cfg.size = sizeof(indices);
 		cfg.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		cfg.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-		virasa::RenderError err = indexBuffer.Initialize(context.GetDevice(), cfg);
-		if (err != virasa::RenderError::None)
+		virasa::renderer::RenderError err = indexBuffer.Initialize(context.GetDevice(), cfg);
+		if (err != virasa::renderer::RenderError::None)
 		{
 			LOG_ERROR(logger,
 				"Index buffer initialization failed with error code: {}",
@@ -166,12 +168,12 @@ int main(int argc, char** argv)
 
 	// Upload vertex data via staging
 	{
-		virasa::RenderError err = vertexBuffer.UploadViaStaging(context.GetDevice(),
+		virasa::renderer::RenderError err = vertexBuffer.UploadViaStaging(context.GetDevice(),
 			context.GetTransferCommandPool(),
 			context.GetDevice().GetTransferQueue(),
 			vertices,
 			sizeof(vertices));
-		if (err != virasa::RenderError::None)
+		if (err != virasa::renderer::RenderError::None)
 		{
 			LOG_ERROR(logger,
 				"Vertex buffer upload failed with error code: {}",
@@ -182,12 +184,12 @@ int main(int argc, char** argv)
 
 	// Upload index data via staging
 	{
-		virasa::RenderError err = indexBuffer.UploadViaStaging(context.GetDevice(),
+		virasa::renderer::RenderError err = indexBuffer.UploadViaStaging(context.GetDevice(),
 			context.GetTransferCommandPool(),
 			context.GetDevice().GetTransferQueue(),
 			indices,
 			sizeof(indices));
-		if (err != virasa::RenderError::None)
+		if (err != virasa::renderer::RenderError::None)
 		{
 			LOG_ERROR(logger,
 				"Index buffer upload failed with error code: {}",
@@ -197,10 +199,10 @@ int main(int argc, char** argv)
 	}
 
 	// --- Shaders ---
-	virasa::ShaderModule vertShader;
-	virasa::RenderError vertResult =
+	virasa::renderer::resources::ShaderModule vertShader;
+	virasa::renderer::RenderError vertResult =
 		vertShader.Initialize(context.GetDevice(), "shaders/cube.vert.spv");
-	if (vertResult != virasa::RenderError::None)
+	if (vertResult != virasa::renderer::RenderError::None)
 	{
 		LOG_ERROR(logger,
 			"Vertex shader initialization failed with error code: {}",
@@ -208,10 +210,10 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	virasa::ShaderModule fragShader;
-	virasa::RenderError fragResult =
+	virasa::renderer::resources::ShaderModule fragShader;
+	virasa::renderer::RenderError fragResult =
 		fragShader.Initialize(context.GetDevice(), "shaders/cube.frag.spv");
-	if (fragResult != virasa::RenderError::None)
+	if (fragResult != virasa::renderer::RenderError::None)
 	{
 		LOG_ERROR(logger,
 			"Fragment shader initialization failed with error code: {}",
@@ -221,28 +223,28 @@ int main(int argc, char** argv)
 
 	// --- Precompute MVP ---
 	VkExtent2D swapExtent = context.GetSwapchainExtent();
-	glm::mat4 model = glm::mat4(1.0f);
-	glm::mat4 view = glm::lookAt(
-		glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	virasa::math::Mat4 model = virasa::math::Mat4(1.0f);
+	virasa::math::Mat4 view = virasa::math::LookAtRH_ZUp(
+		virasa::math::Vec3(2.0f, 2.0f, 2.0f),
+		virasa::math::Vec3(0.0f, 0.0f, 0.0f));
 	float aspect = static_cast<float>(swapExtent.width) / static_cast<float>(swapExtent.height);
-	glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 10.0f);
-	// Invert Y for Vulkan clip space.
-	proj[1][1] *= -1.0f;
-	glm::mat4 mvp = proj * view * model;
+	virasa::math::Mat4 proj =
+		virasa::math::PerspectiveRH_ZO(glm::radians(45.0f), aspect, 0.1f, 10.0f);
+	virasa::math::Mat4 mvp = proj * view * model;
 
 	// --- Pipeline ---
-	virasa::VertexAttribute vertAttr{};
+	virasa::renderer::VertexAttribute vertAttr{};
 	vertAttr.location = 0;
 	vertAttr.format = VK_FORMAT_R32G32B32_SFLOAT;
 	vertAttr.offset = 0;
 
-	virasa::VertexLayout vertLayout{};
+	virasa::renderer::VertexLayout vertLayout{};
 	vertLayout.stride = 12;
 	vertLayout.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-	vertLayout.attributes = std::span<const virasa::VertexAttribute>(&vertAttr, 1);
+	vertLayout.attributes = std::span<const virasa::renderer::VertexAttribute>(&vertAttr, 1);
 
-	virasa::Pipeline pipeline;
-	virasa::PipelineBuilder builder;
+	virasa::renderer::resources::Pipeline pipeline;
+	virasa::renderer::resources::PipelineBuilder builder;
 	builder.SetVertexShader(vertShader)
 		.SetFragmentShader(fragShader)
 		.SetVertexLayout(vertLayout)
@@ -256,8 +258,8 @@ int main(int argc, char** argv)
 		.SetDepthCompareOp(VK_COMPARE_OP_LESS)
 		.AddPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, 64);
 
-	virasa::RenderError pipelineResult = builder.Build(context.GetDevice(), pipeline);
-	if (pipelineResult != virasa::RenderError::None)
+	virasa::renderer::RenderError pipelineResult = builder.Build(context.GetDevice(), pipeline);
+	if (pipelineResult != virasa::renderer::RenderError::None)
 	{
 		LOG_ERROR(logger,
 			"Pipeline build failed with error code: {}",
@@ -268,19 +270,19 @@ int main(int argc, char** argv)
 	// --- Main Loop ---
 	while (true)
 	{
-		std::span<const virasa::Event> events = platform.PollEvents();
+		std::span<const virasa::window::Event> events = platform.PollEvents();
 
 		bool shouldExit = false;
-		for (const virasa::Event& event : events)
+		for (const virasa::window::Event& event : events)
 		{
-			if (event.type == virasa::EventType::Quit)
+			if (event.type == virasa::window::EventType::Quit)
 			{
 				LOG_INFO(logger, "Quit event received, exiting.");
 				shouldExit = true;
 				break;
 			}
-			if (event.type == virasa::EventType::KeyDown &&
-				event.keyboard.key == virasa::KeyCode::Escape)
+			if (event.type == virasa::window::EventType::KeyDown &&
+				event.keyboard.key == virasa::window::KeyCode::Escape)
 			{
 				LOG_INFO(logger, "Escape pressed, exiting.");
 				shouldExit = true;
@@ -294,13 +296,13 @@ int main(int argc, char** argv)
 		}
 
 		// --- Render Frame ---
-		virasa::SwapchainStatus beginStatus = context.BeginFrame();
-		if (beginStatus == virasa::SwapchainStatus::NotReady)
+		virasa::renderer::SwapchainStatus beginStatus = context.BeginFrame();
+		if (beginStatus == virasa::renderer::SwapchainStatus::NotReady)
 		{
 			// Window is minimized or swapchain not usable; skip this frame.
 			continue;
 		}
-		if (beginStatus == virasa::SwapchainStatus::Error)
+		if (beginStatus == virasa::renderer::SwapchainStatus::Error)
 		{
 			LOG_ERROR(logger, "BeginFrame returned an error, exiting.");
 			return -1;
@@ -500,17 +502,14 @@ int main(int argc, char** argv)
 				&barrier);
 		}
 
-		virasa::SwapchainStatus endStatus = context.EndFrame();
-		if (endStatus == virasa::SwapchainStatus::Error)
+		virasa::renderer::SwapchainStatus endStatus = context.EndFrame();
+		if (endStatus == virasa::renderer::SwapchainStatus::Error)
 		{
 			LOG_ERROR(logger, "EndFrame returned an error, exiting.");
 			return -1;
 		}
 		// Recreated is handled inside Context; we simply continue.
 	}
-
-	// Wait for all GPU work to finish before destroying pipeline and buffers.
-	context.GetDevice().WaitIdle();
 
 	return 0;
 }
