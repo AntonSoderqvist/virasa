@@ -13,7 +13,7 @@ namespace virasa::renderer::text
 {
 namespace
 {
-constexpr VkDeviceSize kInitialGeometryBufferSize = 65536;
+constexpr VkDeviceSize kPerFrameGeometryBufferSize = 65536;
 
 struct QuadVertex
 {
@@ -137,12 +137,16 @@ UiPass::UiPass(UiPass&& other) noexcept
 	, _textPipeline(std::move(other._textPipeline))
 	, _imageQuadPipeline(std::move(other._imageQuadPipeline))
 	, _geometryBuffer(std::move(other._geometryBuffer))
+	, _perFrameSliceSize(other._perFrameSliceSize)
+	, _framesInFlight(other._framesInFlight)
 	, _device(other._device)
 	, _textSetLayout(other._textSetLayout)
 	, _textDescriptorPool(other._textDescriptorPool)
 	, _textDescriptorSet(other._textDescriptorSet)
 	, _initialized(other._initialized)
 {
+	other._perFrameSliceSize = 0;
+	other._framesInFlight = 0;
 	other._device = VK_NULL_HANDLE;
 	other._textSetLayout = VK_NULL_HANDLE;
 	other._textDescriptorPool = VK_NULL_HANDLE;
@@ -173,6 +177,8 @@ UiPass& UiPass::operator=(UiPass&& other) noexcept
 	_textPipeline = std::move(other._textPipeline);
 	_imageQuadPipeline = std::move(other._imageQuadPipeline);
 	_geometryBuffer = std::move(other._geometryBuffer);
+	_perFrameSliceSize = other._perFrameSliceSize;
+	_framesInFlight = other._framesInFlight;
 	_device = other._device;
 	_textSetLayout = other._textSetLayout;
 	_textDescriptorPool = other._textDescriptorPool;
@@ -182,6 +188,8 @@ UiPass& UiPass::operator=(UiPass&& other) noexcept
 	other._textSetLayout = VK_NULL_HANDLE;
 	other._textDescriptorPool = VK_NULL_HANDLE;
 	other._textDescriptorSet = VK_NULL_HANDLE;
+	other._perFrameSliceSize = 0;
+	other._framesInFlight = 0;
 	other._initialized = false;
 	return *this;
 }
@@ -554,8 +562,15 @@ RenderError UiPass::Initialize(const Device& device, const Context& context,
 
 	vkUpdateDescriptorSets(device.GetHandle(), 1, &write, 0, nullptr);
 
+	fresh._framesInFlight = context.GetMaxFramesInFlight();
+	if (fresh._framesInFlight == 0)
+	{
+		fresh._framesInFlight = 1;
+	}
+	fresh._perFrameSliceSize = kPerFrameGeometryBufferSize;
+
 	BufferConfig geometryConfig = {};
-	geometryConfig.size = kInitialGeometryBufferSize;
+	geometryConfig.size = fresh._perFrameSliceSize * fresh._framesInFlight;
 	geometryConfig.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 	geometryConfig.memoryProperties =
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -575,9 +590,13 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	virasa::renderer::graph::ImageHandle swapchainTarget, const virasa::ui::DrawList& list,
 	const virasa::ui::FontAtlas& atlas,
 	std::span<const virasa::renderer::graph::ImageHandle> sampledImages,
-	VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight)
+	VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight,
+	uint32_t frameIndex)
 {
 	assert(_initialized);
+	assert(frameIndex < _framesInFlight);
+	const VkDeviceSize frameBase =
+		static_cast<VkDeviceSize>(frameIndex) * _perFrameSliceSize;
 
 	std::vector<QuadVertex> quadVertices;
 	std::vector<uint16_t> quadIndices;
@@ -758,7 +777,7 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	}
 
 	GeometryLayout geometry = {};
-	geometry.quadVertexOffset = 0;
+	geometry.quadVertexOffset = frameBase;
 	geometry.quadIndexOffset =
 		geometry.quadVertexOffset +
 		static_cast<VkDeviceSize>(quadVertices.size() * sizeof(QuadVertex));
@@ -779,7 +798,7 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	const VkDeviceSize totalSize =
 		geometry.textIndexOffset +
 		static_cast<VkDeviceSize>(textIndices.size() * sizeof(uint16_t));
-	assert(totalSize <= _geometryBuffer.GetSize());
+	assert(totalSize <= frameBase + _perFrameSliceSize);
 
 	void* mapped = _geometryBuffer.Map();
 	assert(mapped != nullptr);

@@ -59,6 +59,7 @@ TEST(UiPass, test_submit_appends_single_overlay_pass_with_load_op_load)
 		std::span<const renderer::graph::ImageHandle>,
 		VkDescriptorSet,
 		uint32_t,
+		uint32_t,
 		uint32_t);
 
 	EXPECT_TRUE((std::is_same_v<decltype(&UiPass::Submit), SubmitSignature>));
@@ -70,6 +71,7 @@ TEST(UiPass, test_submit_appends_single_overlay_pass_with_load_op_load)
 					    std::declval<const ui::FontAtlas&>(),
 					    std::declval<std::span<const renderer::graph::ImageHandle>>(),
 					    std::declval<VkDescriptorSet>(),
+					    std::declval<uint32_t>(),
 					    std::declval<uint32_t>(),
 					    std::declval<uint32_t>())),
 			void>));

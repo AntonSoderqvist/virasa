@@ -63,7 +63,8 @@ class UiPass final
 		virasa::renderer::graph::ImageHandle swapchainTarget, const virasa::ui::DrawList& list,
 		const virasa::ui::FontAtlas& atlas,
 		std::span<const virasa::renderer::graph::ImageHandle> sampledImages,
-		VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight);
+		VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight,
+		uint32_t frameIndex);
 
 	private:
 	Image _atlasImage = {};
@@ -72,6 +73,8 @@ class UiPass final
 	Pipeline _textPipeline = {};
 	Pipeline _imageQuadPipeline = {};
 	Buffer _geometryBuffer = {};
+	VkDeviceSize _perFrameSliceSize = 0;
+	uint32_t _framesInFlight = 0;
 	VkDevice _device = VK_NULL_HANDLE;
 	VkDescriptorSetLayout _textSetLayout = VK_NULL_HANDLE;
 	VkDescriptorPool _textDescriptorPool = VK_NULL_HANDLE;

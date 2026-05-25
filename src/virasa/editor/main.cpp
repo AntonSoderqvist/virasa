@@ -881,7 +881,8 @@ int main(int argc, char** argv)
 			std::span<const virasa::renderer::graph::ImageHandle>(sampledHandles, 1),
 			bindlessTextureArray.GetDescriptorSet(),
 			swapchainExtent.width,
-			swapchainExtent.height);
+			swapchainExtent.height,
+			context.GetCurrentFrameIndex());
 
 		virasa::RenderError compileError = graph.Compile();
 		if (compileError != virasa::RenderError::None)
