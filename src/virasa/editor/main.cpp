@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <span>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "virasa/renderer/resources/Sampler.h"
 #include "virasa/renderer/resources/ShaderModule.h"
 #include "virasa/window/Events.h"
+#include "virasa/window/InputState.h"
 #include "virasa/window/Platform.h"
 #include "virasa/window/Types.h"
 
@@ -344,7 +346,7 @@ int main(int argc, char** argv)
 
 		virasa::ecs::Entity lightEntity = world.CreateEntity();
 		virasa::ecs::DirectionalLightComponent lightComponent;
-		lightComponent.direction = virasa::math::Vec3(0.0f, 0.0f, -1.0f);
+		lightComponent.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
 		lightComponent.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
 		lightComponent.intensity = 1.0f;
 		world.AddDirectionalLightComponent(lightEntity, lightComponent);
@@ -399,13 +401,31 @@ int main(int argc, char** argv)
 		}
 	}
 
-	virasa::math::Mat4 viewMatrix = virasa::math::LookAtRH_ZUp(
-		virasa::math::Vec3(2.0f, 2.0f, 2.0f), virasa::math::Vec3(0.0f, 0.0f, 0.0f));
-	VkExtent2D swapchainExtent = context.GetSwapchainExtent();
-	virasa::math::Mat4 projectionMatrix = virasa::math::PerspectiveRH_ZO(glm::radians(45.0f),
-		static_cast<float>(swapchainExtent.width) / static_cast<float>(swapchainExtent.height),
-		0.1f,
-		10.0f);
+	virasa::ecs::Entity cameraEntity = world.CreateEntity();
+	float cameraYaw = glm::radians(-135.0f);
+	float cameraPitch = glm::radians(-30.0f);
+	virasa::math::Vec3 cameraPosition(4.0f, 4.0f, 3.0f);
+	{
+		virasa::math::Transform cameraTransform = virasa::math::Transform::Identity();
+		cameraTransform.translation = cameraPosition;
+		world.AddTransformComponent(cameraEntity, cameraTransform);
+
+		virasa::ecs::CameraComponent cameraComponent;
+		cameraComponent.domain = virasa::CameraDomain::Editor;
+		cameraComponent.fovY = glm::radians(45.0f);
+		cameraComponent.nearPlane = 0.1f;
+		cameraComponent.farPlane = 100.0f;
+		world.AddCameraComponent(cameraEntity, cameraComponent);
+	}
+
+	virasa::math::Mat4 viewMatrix(1.0f);
+	virasa::math::Mat4 projectionMatrix(1.0f);
+
+	virasa::InputState inputState;
+
+	constexpr float kRotateSensitivity = 0.005f;
+	constexpr float kPanSensitivity = 0.01f;
+	constexpr float kPitchLimit = glm::radians(89.0f);
 
 	virasa::Pipeline cubePipeline;
 	{
@@ -457,6 +477,67 @@ int main(int argc, char** argv)
 		{
 			context.GetDevice().WaitIdle();
 			return 0;
+		}
+
+		inputState.Update(events);
+
+		if (inputState.IsMouseButtonDown(virasa::MouseButton::Middle))
+		{
+			auto [dx, dy] = inputState.GetMouseDelta();
+			const bool ctrlHeld = inputState.IsKeyDown(virasa::KeyCode::LCtrl) ||
+						    inputState.IsKeyDown(virasa::KeyCode::RCtrl);
+
+			virasa::math::Quat yawQuat =
+				glm::angleAxis(cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+			virasa::math::Quat pitchQuat =
+				glm::angleAxis(cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+			virasa::math::Quat orientation = yawQuat * pitchQuat;
+
+			if (ctrlHeld)
+			{
+				virasa::math::Vec3 right =
+					orientation * virasa::math::Vec3(1.0f, 0.0f, 0.0f);
+				virasa::math::Vec3 up = orientation * virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+				cameraPosition += right * (-static_cast<float>(dx) * kPanSensitivity);
+				cameraPosition += up * (static_cast<float>(dy) * kPanSensitivity);
+			}
+			else
+			{
+				cameraYaw -= static_cast<float>(dx) * kRotateSensitivity;
+				cameraPitch -= static_cast<float>(dy) * kRotateSensitivity;
+				cameraPitch = std::clamp(cameraPitch, -kPitchLimit, kPitchLimit);
+			}
+		}
+
+		{
+			virasa::math::Quat yawQuat =
+				glm::angleAxis(cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+			virasa::math::Quat pitchQuat =
+				glm::angleAxis(cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+			virasa::math::Transform& cameraTransform =
+				world.GetTransformComponent(cameraEntity);
+			cameraTransform.translation = cameraPosition;
+			cameraTransform.rotation = yawQuat * pitchQuat;
+		}
+
+		{
+			const virasa::math::Transform& cameraTransform =
+				world.GetTransformComponent(cameraEntity);
+			const virasa::ecs::CameraComponent& cameraComponent =
+				world.GetCameraComponent(cameraEntity);
+			virasa::math::Vec3 forward = cameraTransform.Forward();
+			viewMatrix = virasa::math::LookAtRH_ZUp(
+				cameraTransform.translation, cameraTransform.translation + forward);
+
+			VkExtent2D currentExtent = context.GetSwapchainExtent();
+			float aspect = cameraComponent.aspect > 0.0f
+						   ? cameraComponent.aspect
+						   : static_cast<float>(currentExtent.width) /
+							     static_cast<float>(currentExtent.height);
+			projectionMatrix = virasa::math::PerspectiveRH_ZO(cameraComponent.fovY,
+				aspect,
+				cameraComponent.nearPlane,
+				cameraComponent.farPlane);
 		}
 
 		virasa::SwapchainStatus frameStatus = context.BeginFrame();

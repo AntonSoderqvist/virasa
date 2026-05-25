@@ -99,6 +99,7 @@ void World::DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromPar
 	RemoveDirectionalLightComponentInternal(entity);
 	RemovePointLightComponentInternal(entity);
 	RemoveSpotLightComponentInternal(entity);
+	RemoveCameraComponentInternal(entity);
 
 	// (b) Hierarchy detachment
 	if (detachFromParent)
@@ -157,6 +158,9 @@ World::World(World&& other) noexcept
 	, _spotLightValues(std::move(other._spotLightValues))
 	, _spotLightEntities(std::move(other._spotLightEntities))
 	, _spotLightSparse(std::move(other._spotLightSparse))
+	, _cameraValues(std::move(other._cameraValues))
+	, _cameraEntities(std::move(other._cameraEntities))
+	, _cameraSparse(std::move(other._cameraSparse))
 {
 	other._entityCount = 0u;
 }
@@ -189,6 +193,9 @@ World& World::operator=(World&& other) noexcept
 		_spotLightValues            = std::move(other._spotLightValues);
 		_spotLightEntities          = std::move(other._spotLightEntities);
 		_spotLightSparse            = std::move(other._spotLightSparse);
+		_cameraValues               = std::move(other._cameraValues);
+		_cameraEntities             = std::move(other._cameraEntities);
+		_cameraSparse               = std::move(other._cameraSparse);
 		other._entityCount          = 0u;
 	}
 	return *this;
@@ -651,6 +658,72 @@ virasa::ecs::SpotLightComponent& World::GetSpotLightComponent(virasa::ecs::Entit
 const std::vector<virasa::ecs::Entity>& World::GetSpotLightComponentEntities() const noexcept
 {
 	return _spotLightEntities;
+}
+
+// ---------------------------------------------------------------------------
+// CameraComponent
+// ---------------------------------------------------------------------------
+
+void World::RemoveCameraComponentInternal(virasa::ecs::Entity entity)
+{
+	if (!HasCameraComponent(entity))
+		return;
+
+	const uint32_t denseIdx = _cameraSparse[entity.index];
+	const uint32_t lastIdx  = static_cast<uint32_t>(_cameraValues.size()) - 1u;
+
+	if (denseIdx != lastIdx)
+	{
+		_cameraValues[denseIdx]   = _cameraValues[lastIdx];
+		_cameraEntities[denseIdx] = _cameraEntities[lastIdx];
+		_cameraSparse[_cameraEntities[denseIdx].index] = denseIdx;
+	}
+
+	_cameraValues.pop_back();
+	_cameraEntities.pop_back();
+	_cameraSparse[entity.index] = kSparseNone;
+}
+
+void World::AddCameraComponent(virasa::ecs::Entity entity, virasa::ecs::CameraComponent component)
+{
+	EnsureSparseCapacity(_cameraSparse, entity.index);
+
+	const uint32_t denseIdx = static_cast<uint32_t>(_cameraValues.size());
+	_cameraValues.push_back(component);
+	_cameraEntities.push_back(entity);
+	_cameraSparse[entity.index] = denseIdx;
+}
+
+void World::RemoveCameraComponent(virasa::ecs::Entity entity)
+{
+	RemoveCameraComponentInternal(entity);
+}
+
+bool World::HasCameraComponent(virasa::ecs::Entity entity) const noexcept
+{
+	if (!IsValid(entity))
+		return false;
+	if (entity.index >= static_cast<uint32_t>(_cameraSparse.size()))
+		return false;
+	const uint32_t denseIdx = _cameraSparse[entity.index];
+	if (denseIdx == kSparseNone)
+		return false;
+	return _cameraEntities[denseIdx] == entity;
+}
+
+const virasa::ecs::CameraComponent& World::GetCameraComponent(virasa::ecs::Entity entity) const
+{
+	return _cameraValues[_cameraSparse[entity.index]];
+}
+
+virasa::ecs::CameraComponent& World::GetCameraComponent(virasa::ecs::Entity entity)
+{
+	return _cameraValues[_cameraSparse[entity.index]];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetCameraComponentEntities() const noexcept
+{
+	return _cameraEntities;
 }
 
 } // namespace virasa::ecs

@@ -1,3 +1,11 @@
+#include <gtest/gtest.h>
+
+#include "virasa/renderer/Types.h"
+
+#include "vulkan/vulkan.h"
+#include "glm/vec2.hpp"
+#include "glm/vec3.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -5,14 +13,9 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <gtest/gtest.h>
-
-#include "virasa/renderer/Types.h"
-#include "vulkan/vulkan.h"
-#include "glm/vec2.hpp"
-#include "glm/vec3.hpp"
 
 using namespace virasa;
+using namespace virasa::math;
 
 // ---------------------------------------------------------------------------
 // RenderError enum tests
@@ -264,42 +267,30 @@ TEST(Types, test_renderer_config_holds_renderer_wide_configuration)
 
 TEST(Types, test_swapchain_status_enum_values_in_declared_order)
 {
-	// Underlying type is uint8_t.
 	static_assert(std::is_same_v<std::underlying_type_t<SwapchainStatus>, uint8_t>,
 		"SwapchainStatus underlying type must be uint8_t");
 
-	// Success is explicitly 0.
-	EXPECT_EQ(static_cast<uint8_t>(SwapchainStatus::Success), uint8_t{0});
+	constexpr uint8_t values[] = {
+		static_cast<uint8_t>(SwapchainStatus::Success),
+		static_cast<uint8_t>(SwapchainStatus::Recreated),
+		static_cast<uint8_t>(SwapchainStatus::Error),
+		static_cast<uint8_t>(SwapchainStatus::NotReady),
+	};
 
-	// Values appear in declared order.
-	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Success),
-		static_cast<uint8_t>(SwapchainStatus::Recreated));
-	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Recreated),
-		static_cast<uint8_t>(SwapchainStatus::Error));
+	EXPECT_EQ(values[0], uint8_t{0});
+	for (std::size_t i = 1; i < std::size(values); ++i)
+	{
+		EXPECT_EQ(values[i], static_cast<uint8_t>(i));
+		EXPECT_GT(values[i], values[i - 1]);
+	}
 
-	// Version 6 adds NotReady after Error.
-	EXPECT_LT(static_cast<uint8_t>(SwapchainStatus::Error),
-		static_cast<uint8_t>(SwapchainStatus::NotReady));
-
-	// All four values are distinct.
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
-		static_cast<uint8_t>(SwapchainStatus::Recreated));
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
-		static_cast<uint8_t>(SwapchainStatus::Error));
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Success),
-		static_cast<uint8_t>(SwapchainStatus::NotReady));
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Recreated),
-		static_cast<uint8_t>(SwapchainStatus::Error));
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Recreated),
-		static_cast<uint8_t>(SwapchainStatus::NotReady));
-	EXPECT_NE(static_cast<uint8_t>(SwapchainStatus::Error),
-		static_cast<uint8_t>(SwapchainStatus::NotReady));
-
-	// Success == 0 is the only value indicating a clean operation.
-	EXPECT_EQ(SwapchainStatus::Success, static_cast<SwapchainStatus>(0));
-	EXPECT_NE(SwapchainStatus::Recreated, SwapchainStatus::Success);
-	EXPECT_NE(SwapchainStatus::Error, SwapchainStatus::Success);
-	EXPECT_NE(SwapchainStatus::NotReady, SwapchainStatus::Success);
+	for (std::size_t i = 0; i < std::size(values); ++i)
+	{
+		for (std::size_t j = i + 1; j < std::size(values); ++j)
+		{
+			EXPECT_NE(values[i], values[j]);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +482,22 @@ TEST(Types, test_renderer_config_targets_vulkan_1_3)
 	EXPECT_EQ(VK_VERSION_MINOR(VK_API_VERSION_1_3), 3u);
 }
 
+TEST(Types, test_camera_domain_enum_values_in_declared_order)
+{
+	static_assert(std::is_same_v<std::underlying_type_t<CameraDomain>, uint8_t>,
+		"CameraDomain underlying type must be uint8_t");
+
+	constexpr uint8_t values[] = {
+		static_cast<uint8_t>(CameraDomain::Main),
+		static_cast<uint8_t>(CameraDomain::Editor),
+	};
+
+	EXPECT_EQ(values[0], uint8_t{0});
+	EXPECT_EQ(values[1], uint8_t{1});
+	EXPECT_LT(values[0], values[1]);
+	EXPECT_NE(values[0], values[1]);
+}
+
 TEST(Types, test_vertex_struct_layout)
 {
 	static_assert(std::is_default_constructible_v<Vertex>,
@@ -499,6 +506,12 @@ TEST(Types, test_vertex_struct_layout)
 		"Vertex must be copy-constructible");
 	static_assert(std::is_move_constructible_v<Vertex>,
 		"Vertex must be move-constructible");
+	static_assert(std::is_same_v<decltype(Vertex::position), Vec3>,
+		"Vertex::position must be virasa::math::Vec3");
+	static_assert(std::is_same_v<decltype(Vertex::normal), Vec3>,
+		"Vertex::normal must be virasa::math::Vec3");
+	static_assert(std::is_same_v<decltype(Vertex::uv), Vec2>,
+		"Vertex::uv must be virasa::math::Vec2");
 	static_assert(offsetof(Vertex, position) == 0,
 		"Vertex::position must be the first field");
 	static_assert(offsetof(Vertex, normal) == sizeof(glm::vec3),
@@ -518,9 +531,9 @@ TEST(Types, test_vertex_struct_layout)
 	EXPECT_FLOAT_EQ(vertex.uv.x, 0.0f);
 	EXPECT_FLOAT_EQ(vertex.uv.y, 0.0f);
 
-	vertex.position = glm::vec3{1.0f, 2.0f, 3.0f};
-	vertex.normal = glm::vec3{4.0f, 5.0f, 6.0f};
-	vertex.uv = glm::vec2{0.25f, 0.75f};
+	vertex.position = Vec3{1.0f, 2.0f, 3.0f};
+	vertex.normal = Vec3{4.0f, 5.0f, 6.0f};
+	vertex.uv = Vec2{0.25f, 0.75f};
 
 	EXPECT_FLOAT_EQ(vertex.position.x, 1.0f);
 	EXPECT_FLOAT_EQ(vertex.position.y, 2.0f);

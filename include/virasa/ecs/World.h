@@ -15,10 +15,11 @@ namespace virasa::ecs
  * @brief Owns the full state of a single entity-component-system instance.
  *
  * World manages a generational entity table, a parent/child hierarchy,
- * and six independent sparse-set component storages for Transform,
+ * and seven independent sparse-set component storages for Transform,
  * MeshComponent, VisualComponent, DirectionalLightComponent,
- * PointLightComponent, and SpotLightComponent. World is final and cannot
- * be subclassed. It is default-constructible, movable, but not copyable.
+ * PointLightComponent, SpotLightComponent, and CameraComponent. World is
+ * final and cannot be subclassed. It is default-constructible, movable,
+ * but not copyable.
  * No Initialize call is required; a default-constructed World is
  * immediately ready for use.
  */
@@ -361,6 +362,50 @@ class World final
 	[[nodiscard]] const std::vector<virasa::ecs::Entity>&
 	GetSpotLightComponentEntities() const noexcept;
 
+	// --- CameraComponent ---
+
+	/**
+	 * @brief Adds a CameraComponent to entity.
+	 * @param entity A valid entity that does not yet have a CameraComponent.
+	 * @param component The CameraComponent value to store.
+	 */
+	void AddCameraComponent(virasa::ecs::Entity entity, virasa::ecs::CameraComponent component);
+
+	/**
+	 * @brief Removes the CameraComponent from entity.
+	 * @param entity A valid entity that currently has a CameraComponent.
+	 */
+	void RemoveCameraComponent(virasa::ecs::Entity entity);
+
+	/**
+	 * @brief Returns true if entity currently has a CameraComponent.
+	 * @param entity Any entity value.
+	 * @return true if the entity is valid and has a CameraComponent.
+	 */
+	[[nodiscard]] bool HasCameraComponent(virasa::ecs::Entity entity) const noexcept;
+
+	/**
+	 * @brief Returns a const reference to entity's CameraComponent.
+	 * @param entity A valid entity with a CameraComponent.
+	 * @return Const reference to the stored CameraComponent.
+	 */
+	[[nodiscard]] const virasa::ecs::CameraComponent& GetCameraComponent(
+		virasa::ecs::Entity entity) const;
+
+	/**
+	 * @brief Returns a mutable reference to entity's CameraComponent.
+	 * @param entity A valid entity with a CameraComponent.
+	 * @return Mutable reference to the stored CameraComponent.
+	 */
+	[[nodiscard]] virasa::ecs::CameraComponent& GetCameraComponent(virasa::ecs::Entity entity);
+
+	/**
+	 * @brief Returns the dense-entities vector for the CameraComponent storage.
+	 * @return Const reference to the vector of entities with CameraComponents.
+	 */
+	[[nodiscard]] const std::vector<virasa::ecs::Entity>&
+	GetCameraComponentEntities() const noexcept;
+
 	private:
 	static constexpr uint32_t kInvalidIndex = 0xFFFFFFFFu;
 
@@ -414,8 +459,14 @@ class World final
 	void RemoveDirectionalLightComponentInternal(virasa::ecs::Entity entity);
 	void RemovePointLightComponentInternal(virasa::ecs::Entity entity);
 	void RemoveSpotLightComponentInternal(virasa::ecs::Entity entity);
+	void RemoveCameraComponentInternal(virasa::ecs::Entity entity);
 
 	void EnsureSparseCapacity(std::vector<uint32_t>& sparse, uint32_t index);
+
+	// CameraComponent sparse-set
+	std::vector<virasa::ecs::CameraComponent> _cameraValues;
+	std::vector<virasa::ecs::Entity> _cameraEntities;
+	std::vector<uint32_t> _cameraSparse;
 };
 
 } // namespace virasa::ecs

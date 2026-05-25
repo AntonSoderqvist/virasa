@@ -2,6 +2,7 @@
 
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Types.h"
+#include "virasa/renderer/Types.h"
 
 #include <cstdint>
 #include <type_traits>
@@ -249,4 +250,61 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_TRUE(std::is_copy_assignable_v<virasa::ecs::SpotLightComponent>);
 	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::SpotLightComponent>);
 	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::SpotLightComponent>);
+}
+
+TEST(Components, test_camera_component_describes_viewpoint)
+{
+	virasa::ecs::CameraComponent defaultComp;
+	EXPECT_EQ(defaultComp.domain, virasa::CameraDomain::Main);
+	EXPECT_FLOAT_EQ(defaultComp.fovY, 0.7853981633974483f);
+	EXPECT_FLOAT_EQ(defaultComp.aspect, 0.0f);
+	EXPECT_FLOAT_EQ(defaultComp.nearPlane, 0.1f);
+	EXPECT_FLOAT_EQ(defaultComp.farPlane, 1000.0f);
+	EXPECT_LT(defaultComp.nearPlane, defaultComp.farPlane);
+	EXPECT_GE(defaultComp.aspect, 0.0f);
+
+	virasa::ecs::CameraComponent comp;
+	comp.domain = virasa::CameraDomain::Editor;
+	comp.fovY = 1.2f;
+	comp.aspect = 16.0f / 9.0f;
+	comp.nearPlane = 0.25f;
+	comp.farPlane = 250.0f;
+	EXPECT_EQ(comp.domain, virasa::CameraDomain::Editor);
+	EXPECT_FLOAT_EQ(comp.fovY, 1.2f);
+	EXPECT_FLOAT_EQ(comp.aspect, 16.0f / 9.0f);
+	EXPECT_FLOAT_EQ(comp.nearPlane, 0.25f);
+	EXPECT_FLOAT_EQ(comp.farPlane, 250.0f);
+	EXPECT_GT(comp.aspect, 0.0f);
+	EXPECT_GT(comp.nearPlane, 0.0f);
+	EXPECT_GT(comp.farPlane, 0.0f);
+	EXPECT_LT(comp.nearPlane, comp.farPlane);
+
+	virasa::ecs::CameraComponent copy = comp;
+	EXPECT_EQ(copy.domain, comp.domain);
+	EXPECT_FLOAT_EQ(copy.fovY, comp.fovY);
+	EXPECT_FLOAT_EQ(copy.aspect, comp.aspect);
+	EXPECT_FLOAT_EQ(copy.nearPlane, comp.nearPlane);
+	EXPECT_FLOAT_EQ(copy.farPlane, comp.farPlane);
+
+	virasa::ecs::CameraComponent assigned;
+	assigned = comp;
+	EXPECT_EQ(assigned.domain, comp.domain);
+	EXPECT_FLOAT_EQ(assigned.fovY, comp.fovY);
+	EXPECT_FLOAT_EQ(assigned.aspect, comp.aspect);
+	EXPECT_FLOAT_EQ(assigned.nearPlane, comp.nearPlane);
+	EXPECT_FLOAT_EQ(assigned.farPlane, comp.farPlane);
+
+	virasa::ecs::CameraComponent moved = std::move(copy);
+	EXPECT_EQ(moved.domain, comp.domain);
+	EXPECT_FLOAT_EQ(moved.fovY, comp.fovY);
+	EXPECT_FLOAT_EQ(moved.aspect, comp.aspect);
+	EXPECT_FLOAT_EQ(moved.nearPlane, comp.nearPlane);
+	EXPECT_FLOAT_EQ(moved.farPlane, comp.farPlane);
+
+	EXPECT_TRUE(std::is_trivially_destructible_v<virasa::ecs::CameraComponent>);
+	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::CameraComponent>);
+	EXPECT_TRUE(std::is_copy_constructible_v<virasa::ecs::CameraComponent>);
+	EXPECT_TRUE(std::is_copy_assignable_v<virasa::ecs::CameraComponent>);
+	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::CameraComponent>);
+	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::CameraComponent>);
 }

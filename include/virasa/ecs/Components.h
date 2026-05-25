@@ -2,7 +2,9 @@
 #define VIRASA_ECS_COMPONENTS_H
 
 #include <cstdint>
+
 #include "virasa/math/Types.h"
+#include "virasa/renderer/Types.h"
 
 namespace virasa::ecs
 {
@@ -84,6 +86,28 @@ public:
 	float innerConeCos = 0.95f;
 	/// Cosine of the outer cone half-angle (~32 degrees by default).
 	float outerConeCos = 0.85f;
+};
+
+/**
+ * @brief Component describing a viewpoint into a scene.
+ *
+ * Position and orientation are read from the entity's TransformComponent at
+ * render time. The aspect value of 0.0f means the renderer should derive the
+ * aspect ratio from the output target.
+ */
+struct CameraComponent
+{
+public:
+	/// Camera domain selecting which renderer subsystem consumes this camera.
+	virasa::CameraDomain domain = virasa::CameraDomain::Main;
+	/// Vertical field of view in radians.
+	float fovY = 0.7853981633974483f;
+	/// Width divided by height, or 0.0f to use the output target's native aspect.
+	float aspect = 0.0f;
+	/// Positive near clip plane distance.
+	float nearPlane = 0.1f;
+	/// Positive far clip plane distance.
+	float farPlane = 1000.0f;
 };
 
 } // namespace virasa::ecs

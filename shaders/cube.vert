@@ -37,6 +37,8 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec3 fragWorldPos;
+layout(location = 2) out vec3 fragWorldNormal;
 
 void main() {
     IndexBuffer ib = IndexBuffer(pc.indexBufferAddress);
@@ -45,6 +47,10 @@ void main() {
     uint vertIdx = ib.indices[gl_VertexIndex];
     Vertex v = vb.vertices[vertIdx];
 
+    vec4 worldPos = pc.model * vec4(v.position, 1.0);
     gl_Position = pc.mvp * vec4(v.position, 1.0);
     fragUV = v.uv;
+    fragWorldPos = worldPos.xyz;
+    // Assumes uniform scale; for non-uniform scale, use a normal matrix.
+    fragWorldNormal = normalize(mat3(pc.model) * v.normal);
 }

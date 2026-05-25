@@ -967,3 +967,99 @@ TEST(World, test_world_is_not_thread_safe_per_instance)
 	EXPECT_FALSE(w1.IsValid(Entity::Invalid()));
 	EXPECT_FALSE(w2.IsValid(Entity::Invalid()));
 }
+
+// ===========================================================================
+// world_camera_component_storage_is_sparse_set
+// ===========================================================================
+TEST(World, test_world_camera_component_storage_is_sparse_set)
+{
+	World w;
+	Entity e1 = w.CreateEntity();
+	Entity e2 = w.CreateEntity();
+	Entity e3 = w.CreateEntity();
+
+	// Initially no components.
+	EXPECT_FALSE(w.HasCameraComponent(e1));
+	EXPECT_TRUE(w.GetCameraComponentEntities().empty());
+
+	// Add components with distinct field values.
+	CameraComponent cam1;
+	cam1.domain    = virasa::CameraDomain::Main;
+	cam1.fovY      = 0.7853981633974483f; // 45 deg
+	cam1.aspect    = 16.f / 9.f;
+	cam1.nearPlane = 0.1f;
+	cam1.farPlane  = 1000.f;
+
+	CameraComponent cam2;
+	cam2.domain    = virasa::CameraDomain::Editor;
+	cam2.fovY      = 1.0471975511965976f; // 60 deg
+	cam2.aspect    = 4.f / 3.f;
+	cam2.nearPlane = 0.5f;
+	cam2.farPlane  = 500.f;
+
+	CameraComponent cam3;
+	cam3.domain    = virasa::CameraDomain::Main;
+	cam3.fovY      = 1.5707963267948966f; // 90 deg
+	cam3.aspect    = 0.0f; // sentinel: use native aspect
+	cam3.nearPlane = 0.01f;
+	cam3.farPlane  = 2000.f;
+
+	w.AddCameraComponent(e1, cam1);
+	w.AddCameraComponent(e2, cam2);
+	w.AddCameraComponent(e3, cam3);
+
+	EXPECT_TRUE(w.HasCameraComponent(e1));
+	EXPECT_TRUE(w.HasCameraComponent(e2));
+	EXPECT_TRUE(w.HasCameraComponent(e3));
+	EXPECT_EQ(w.GetCameraComponentEntities().size(), 3u);
+
+	// Const overload returns correct stored values.
+	const World& cw = w;
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e1).fovY, 0.7853981633974483f);
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e2).fovY, 1.0471975511965976f);
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e3).fovY, 1.5707963267948966f);
+	EXPECT_EQ(cw.GetCameraComponent(e1).domain, virasa::CameraDomain::Main);
+	EXPECT_EQ(cw.GetCameraComponent(e2).domain, virasa::CameraDomain::Editor);
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e1).nearPlane, 0.1f);
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e1).farPlane, 1000.f);
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e3).aspect, 0.0f);
+
+	// Non-const overload allows mutation.
+	w.GetCameraComponent(e1).fovY = 0.5f;
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e1).fovY, 0.5f);
+
+	w.GetCameraComponent(e2).aspect = 2.0f;
+	EXPECT_FLOAT_EQ(cw.GetCameraComponent(e2).aspect, 2.0f);
+
+	// Remove middle entity (swap-and-pop).
+	w.RemoveCameraComponent(e2);
+	EXPECT_FALSE(w.HasCameraComponent(e2));
+	EXPECT_TRUE(w.HasCameraComponent(e1));
+	EXPECT_TRUE(w.HasCameraComponent(e3));
+	EXPECT_EQ(w.GetCameraComponentEntities().size(), 2u);
+
+	// Remove remaining components.
+	w.RemoveCameraComponent(e1);
+	w.RemoveCameraComponent(e3);
+	EXPECT_TRUE(w.GetCameraComponentEntities().empty());
+
+	// GetCameraComponentEntities lists exactly the entities with components.
+	w.AddCameraComponent(e1, cam1);
+	w.AddCameraComponent(e3, cam3);
+	const auto& ents = w.GetCameraComponentEntities();
+	EXPECT_EQ(ents.size(), 2u);
+	bool hasE1 = false, hasE3 = false;
+	for (const Entity& e : ents)
+	{
+		if (e == e1) hasE1 = true;
+		if (e == e3) hasE3 = true;
+	}
+	EXPECT_TRUE(hasE1);
+	EXPECT_TRUE(hasE3);
+
+	// DestroyEntity removes the camera component from storage.
+	w.DestroyEntity(e1);
+	EXPECT_FALSE(w.HasCameraComponent(e1));
+	EXPECT_EQ(w.GetCameraComponentEntities().size(), 1u);
+	EXPECT_TRUE(w.HasCameraComponent(e3));
+}

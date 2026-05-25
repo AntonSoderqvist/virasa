@@ -84,6 +84,18 @@ enum class SwapchainStatus : uint8_t
 };
 
 /**
+ * @brief Identifies which camera domain a camera belongs to.
+ *
+ * Main identifies the primary runtime camera. Editor identifies a camera
+ * owned by an editor or authoring tool.
+ */
+enum class CameraDomain : uint8_t
+{
+	Main = 0,
+	Editor
+};
+
+/**
  * @brief Renderer-wide configuration shared by all renderer subsystems.
  *
  * Holds settings such as application name, validation, instance extensions,
@@ -204,10 +216,17 @@ struct VertexLayout
  */
 struct Vertex
 {
+	/** @brief Vertex position. */
 	virasa::math::Vec3 position;
+
+	/** @brief Vertex normal. */
 	virasa::math::Vec3 normal;
+
+	/** @brief Vertex texture coordinates. */
 	virasa::math::Vec2 uv;
 };
+
+static_assert(sizeof(Vertex) == 32, "Vertex must remain tightly packed at 32 bytes.");
 
 /**
  * @brief CPU-side geometry data with vertices and indices.
