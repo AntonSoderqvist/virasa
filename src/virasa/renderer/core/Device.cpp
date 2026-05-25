@@ -384,6 +384,7 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	vk12Features.descriptorBindingPartiallyBound = VK_TRUE;
 	vk12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 	vk12Features.runtimeDescriptorArray = VK_TRUE;
+	vk12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 	vk12Features.scalarBlockLayout = VK_TRUE;
 
 	VkPhysicalDeviceFeatures2 enabledFeatures2 = {};

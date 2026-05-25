@@ -25,6 +25,19 @@ struct QuadVertex
 	float a;
 };
 
+struct ImageQuadVertex
+{
+	float x;
+	float y;
+	float u;
+	float v;
+	float r;
+	float g;
+	float b;
+	float a;
+	uint32_t slot;
+};
+
 struct TextVertex
 {
 	float x;
@@ -48,6 +61,9 @@ struct GeometryLayout
 	VkDeviceSize quadVertexOffset = 0;
 	VkDeviceSize quadIndexOffset = 0;
 	uint32_t quadIndexCount = 0;
+	VkDeviceSize imageVertexOffset = 0;
+	VkDeviceSize imageIndexOffset = 0;
+	uint32_t imageIndexCount = 0;
 	VkDeviceSize textVertexOffset = 0;
 	VkDeviceSize textIndexOffset = 0;
 	uint32_t textIndexCount = 0;
@@ -101,35 +117,84 @@ struct GeometryLayout
 
 UiPass::~UiPass()
 {
-	if (_device == VK_NULL_HANDLE)
+	if (_device != VK_NULL_HANDLE)
 	{
-		return;
-	}
-	if (_descriptorPool != VK_NULL_HANDLE)
-	{
-		vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
-	}
-	if (_atlasSampler != VK_NULL_HANDLE)
-	{
-		vkDestroySampler(_device, _atlasSampler, nullptr);
-	}
-	if (_textSetLayout != VK_NULL_HANDLE)
-	{
-		vkDestroyDescriptorSetLayout(_device, _textSetLayout, nullptr);
+		if (_textDescriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(_device, _textDescriptorPool, nullptr);
+		}
+		if (_textSetLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorSetLayout(_device, _textSetLayout, nullptr);
+		}
 	}
 }
 
-RenderError UiPass::Initialize(
-	const Device& device, const Context& context, const virasa::ui::FontAtlas& atlas)
+UiPass::UiPass(UiPass&& other) noexcept
+	: _atlasImage(std::move(other._atlasImage))
+	, _linearSampler(std::move(other._linearSampler))
+	, _quadPipeline(std::move(other._quadPipeline))
+	, _textPipeline(std::move(other._textPipeline))
+	, _imageQuadPipeline(std::move(other._imageQuadPipeline))
+	, _geometryBuffer(std::move(other._geometryBuffer))
+	, _device(other._device)
+	, _textSetLayout(other._textSetLayout)
+	, _textDescriptorPool(other._textDescriptorPool)
+	, _textDescriptorSet(other._textDescriptorSet)
+	, _initialized(other._initialized)
+{
+	other._device = VK_NULL_HANDLE;
+	other._textSetLayout = VK_NULL_HANDLE;
+	other._textDescriptorPool = VK_NULL_HANDLE;
+	other._textDescriptorSet = VK_NULL_HANDLE;
+	other._initialized = false;
+}
+
+UiPass& UiPass::operator=(UiPass&& other) noexcept
+{
+	if (this == &other)
+	{
+		return *this;
+	}
+	if (_device != VK_NULL_HANDLE)
+	{
+		if (_textDescriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(_device, _textDescriptorPool, nullptr);
+		}
+		if (_textSetLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorSetLayout(_device, _textSetLayout, nullptr);
+		}
+	}
+	_atlasImage = std::move(other._atlasImage);
+	_linearSampler = std::move(other._linearSampler);
+	_quadPipeline = std::move(other._quadPipeline);
+	_textPipeline = std::move(other._textPipeline);
+	_imageQuadPipeline = std::move(other._imageQuadPipeline);
+	_geometryBuffer = std::move(other._geometryBuffer);
+	_device = other._device;
+	_textSetLayout = other._textSetLayout;
+	_textDescriptorPool = other._textDescriptorPool;
+	_textDescriptorSet = other._textDescriptorSet;
+	_initialized = other._initialized;
+	other._device = VK_NULL_HANDLE;
+	other._textSetLayout = VK_NULL_HANDLE;
+	other._textDescriptorPool = VK_NULL_HANDLE;
+	other._textDescriptorSet = VK_NULL_HANDLE;
+	other._initialized = false;
+	return *this;
+}
+
+RenderError UiPass::Initialize(const Device& device, const Context& context,
+	const virasa::ui::FontAtlas& atlas, const BindlessTextureArray& bindless)
 {
 	if (_initialized)
 	{
 		return RenderError::AlreadyInitialized;
 	}
 
-	Image atlasImage;
-	Pipeline quadPipeline;
-	Pipeline textPipeline;
+	UiPass fresh;
 
 	ImageConfig imageConfig = {};
 	imageConfig.width = atlas.GetAtlasWidth();
@@ -140,7 +205,7 @@ RenderError UiPass::Initialize(
 	imageConfig.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	imageConfig.flags = 0;
 
-	RenderError error = atlasImage.Initialize(device, imageConfig);
+	RenderError error = fresh._atlasImage.Initialize(device, imageConfig);
 	if (error != RenderError::None)
 	{
 		return error;
@@ -200,7 +265,7 @@ RenderError UiPass::Initialize(
 		toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toTransfer.image = atlasImage.GetHandle();
+		toTransfer.image = fresh._atlasImage.GetHandle();
 		toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		toTransfer.subresourceRange.baseMipLevel = 0;
 		toTransfer.subresourceRange.levelCount = 1;
@@ -233,7 +298,7 @@ RenderError UiPass::Initialize(
 
 		vkCmdCopyBufferToImage(commandBuffer,
 			stagingBuffer.GetHandle(),
-			atlasImage.GetHandle(),
+			fresh._atlasImage.GetHandle(),
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
 			&copyRegion);
@@ -244,7 +309,7 @@ RenderError UiPass::Initialize(
 		toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		toShaderRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		toShaderRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toShaderRead.image = atlasImage.GetHandle();
+		toShaderRead.image = fresh._atlasImage.GetHandle();
 		toShaderRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		toShaderRead.subresourceRange.baseMipLevel = 0;
 		toShaderRead.subresourceRange.levelCount = 1;
@@ -289,30 +354,54 @@ RenderError UiPass::Initialize(
 			device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
 	}
 
+	SamplerConfig samplerConfig = {};
+	samplerConfig.magFilter = VK_FILTER_LINEAR;
+	samplerConfig.minFilter = VK_FILTER_LINEAR;
+	samplerConfig.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	samplerConfig.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	samplerConfig.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	samplerConfig.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	samplerConfig.anisotropyEnable = false;
+
+	error = fresh._linearSampler.Initialize(device, samplerConfig);
+	if (error != RenderError::None)
+	{
+		return error;
+	}
+
 	ShaderModule quadVertexShader;
 	ShaderModule quadFragmentShader;
 	ShaderModule textVertexShader;
 	ShaderModule textFragmentShader;
+	ShaderModule imageVertexShader;
+	ShaderModule imageFragmentShader;
 
 	error = quadVertexShader.Initialize(device, "shaders/ui_quad.vert.spv");
 	if (error != RenderError::None)
 	{
 		return error;
 	}
-
 	error = quadFragmentShader.Initialize(device, "shaders/ui_quad.frag.spv");
 	if (error != RenderError::None)
 	{
 		return error;
 	}
-
 	error = textVertexShader.Initialize(device, "shaders/ui_text.vert.spv");
 	if (error != RenderError::None)
 	{
 		return error;
 	}
-
 	error = textFragmentShader.Initialize(device, "shaders/ui_text.frag.spv");
+	if (error != RenderError::None)
+	{
+		return error;
+	}
+	error = imageVertexShader.Initialize(device, "shaders/ui_image_quad.vert.spv");
+	if (error != RenderError::None)
+	{
+		return error;
+	}
+	error = imageFragmentShader.Initialize(device, "shaders/ui_image_quad.frag.spv");
 	if (error != RenderError::None)
 	{
 		return error;
@@ -338,7 +427,7 @@ RenderError UiPass::Initialize(
 		.AddDynamicState(VK_DYNAMIC_STATE_VIEWPORT)
 		.AddDynamicState(VK_DYNAMIC_STATE_SCISSOR);
 
-	error = quadBuilder.Build(device, quadPipeline);
+	error = quadBuilder.Build(device, fresh._quadPipeline);
 	if (error != RenderError::None)
 	{
 		return error;
@@ -357,19 +446,21 @@ RenderError UiPass::Initialize(
 	atlasBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	atlasBinding.descriptorCount = 1;
 	atlasBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	atlasBinding.pImmutableSamplers = nullptr;
+	const VkSampler immutableSampler = fresh._linearSampler.GetHandle();
+	atlasBinding.pImmutableSamplers = &immutableSampler;
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.bindingCount = 1;
 	layoutInfo.pBindings = &atlasBinding;
 
-	VkDescriptorSetLayout textSetLayout = VK_NULL_HANDLE;
-	if (vkCreateDescriptorSetLayout(device.GetHandle(), &layoutInfo, nullptr, &textSetLayout) !=
-		VK_SUCCESS)
+	fresh._device = device.GetHandle();
+	if (vkCreateDescriptorSetLayout(
+			device.GetHandle(), &layoutInfo, nullptr, &fresh._textSetLayout) != VK_SUCCESS)
 	{
 		return RenderError::DescriptorPoolCreateFailed;
 	}
+	VkDescriptorSetLayout textSetLayout = fresh._textSetLayout;
 
 	PipelineBuilder textBuilder;
 	textBuilder.SetVertexShader(textVertexShader)
@@ -385,26 +476,39 @@ RenderError UiPass::Initialize(
 		.AddDynamicState(VK_DYNAMIC_STATE_VIEWPORT)
 		.AddDynamicState(VK_DYNAMIC_STATE_SCISSOR);
 
-	error = textBuilder.Build(device, textPipeline);
+	error = textBuilder.Build(device, fresh._textPipeline);
 	if (error != RenderError::None)
 	{
-		vkDestroyDescriptorSetLayout(device.GetHandle(), textSetLayout, nullptr);
 		return error;
 	}
 
-	VkSamplerCreateInfo samplerInfo = {};
-	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	samplerInfo.magFilter = VK_FILTER_LINEAR;
-	samplerInfo.minFilter = VK_FILTER_LINEAR;
-	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	const std::array<VertexAttribute, 4> imageAttributes = {{{0, VK_FORMAT_R32G32_SFLOAT, 0},
+		{1, VK_FORMAT_R32G32_SFLOAT, 8},
+		{2, VK_FORMAT_R32G32B32A32_SFLOAT, 16},
+		{3, VK_FORMAT_R32_UINT, 32}}};
+	VertexLayout imageLayout = {};
+	imageLayout.stride = sizeof(ImageQuadVertex);
+	imageLayout.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	imageLayout.attributes = std::span<const VertexAttribute>(imageAttributes);
 
-	VkSampler atlasSampler = VK_NULL_HANDLE;
-	if (vkCreateSampler(device.GetHandle(), &samplerInfo, nullptr, &atlasSampler) != VK_SUCCESS)
+	PipelineBuilder imageBuilder;
+	imageBuilder.SetVertexShader(imageVertexShader)
+		.SetFragmentShader(imageFragmentShader)
+		.SetVertexLayout(imageLayout)
+		.SetColorFormat(context.GetSwapchainFormat())
+		.SetDepthFormat(VK_FORMAT_UNDEFINED)
+		.SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+		.SetCullMode(VK_CULL_MODE_NONE)
+		.SetBlendEnabled(true)
+		.AddPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants))
+		.AddDescriptorSetLayout(bindless.GetLayout())
+		.AddDynamicState(VK_DYNAMIC_STATE_VIEWPORT)
+		.AddDynamicState(VK_DYNAMIC_STATE_SCISSOR);
+
+	error = imageBuilder.Build(device, fresh._imageQuadPipeline);
+	if (error != RenderError::None)
 	{
-		vkDestroyDescriptorSetLayout(device.GetHandle(), textSetLayout, nullptr);
-		return RenderError::DescriptorPoolCreateFailed;
+		return error;
 	}
 
 	VkDescriptorPoolSize poolSize = {};
@@ -417,39 +521,32 @@ RenderError UiPass::Initialize(
 	poolInfo.poolSizeCount = 1;
 	poolInfo.pPoolSizes = &poolSize;
 
-	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-	if (vkCreateDescriptorPool(device.GetHandle(), &poolInfo, nullptr, &descriptorPool) !=
-		VK_SUCCESS)
+	if (vkCreateDescriptorPool(
+			device.GetHandle(), &poolInfo, nullptr, &fresh._textDescriptorPool) != VK_SUCCESS)
 	{
-		vkDestroySampler(device.GetHandle(), atlasSampler, nullptr);
-		vkDestroyDescriptorSetLayout(device.GetHandle(), textSetLayout, nullptr);
 		return RenderError::DescriptorPoolCreateFailed;
 	}
 
 	VkDescriptorSetAllocateInfo setAllocInfo = {};
 	setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	setAllocInfo.descriptorPool = descriptorPool;
+	setAllocInfo.descriptorPool = fresh._textDescriptorPool;
 	setAllocInfo.descriptorSetCount = 1;
-	setAllocInfo.pSetLayouts = &textSetLayout;
+	setAllocInfo.pSetLayouts = &fresh._textSetLayout;
 
-	VkDescriptorSet atlasDescriptorSet = VK_NULL_HANDLE;
-	if (vkAllocateDescriptorSets(device.GetHandle(), &setAllocInfo, &atlasDescriptorSet) !=
-		VK_SUCCESS)
+	if (vkAllocateDescriptorSets(
+			device.GetHandle(), &setAllocInfo, &fresh._textDescriptorSet) != VK_SUCCESS)
 	{
-		vkDestroyDescriptorPool(device.GetHandle(), descriptorPool, nullptr);
-		vkDestroySampler(device.GetHandle(), atlasSampler, nullptr);
-		vkDestroyDescriptorSetLayout(device.GetHandle(), textSetLayout, nullptr);
 		return RenderError::DescriptorPoolCreateFailed;
 	}
 
 	VkDescriptorImageInfo imageInfo = {};
-	imageInfo.sampler = atlasSampler;
-	imageInfo.imageView = atlasImage.GetView();
+	imageInfo.sampler = VK_NULL_HANDLE;
+	imageInfo.imageView = fresh._atlasImage.GetView();
 	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 	VkWriteDescriptorSet write = {};
 	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	write.dstSet = atlasDescriptorSet;
+	write.dstSet = fresh._textDescriptorSet;
 	write.dstBinding = 0;
 	write.descriptorCount = 1;
 	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -463,34 +560,22 @@ RenderError UiPass::Initialize(
 	geometryConfig.memoryProperties =
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-	const uint32_t framesInFlight = context.GetMaxFramesInFlight();
-	std::vector<Buffer> geometryBuffers(framesInFlight);
-	for (uint32_t i = 0; i < framesInFlight; ++i)
+	error = fresh._geometryBuffer.Initialize(device, geometryConfig);
+	if (error != RenderError::None)
 	{
-		error = geometryBuffers[i].Initialize(device, geometryConfig);
-		if (error != RenderError::None)
-		{
-			return error;
-		}
+		return error;
 	}
 
-	_device = device.GetHandle();
-	_atlasSampler = atlasSampler;
-	_textSetLayout = textSetLayout;
-	_descriptorPool = descriptorPool;
-	_atlasDescriptorSet = atlasDescriptorSet;
-	_atlasImage = std::move(atlasImage);
-	_quadPipeline = std::move(quadPipeline);
-	_textPipeline = std::move(textPipeline);
-	_geometryBuffers = std::move(geometryBuffers);
-	_initialized = true;
+	fresh._initialized = true;
+	*this = std::move(fresh);
 	return RenderError::None;
 }
 
 void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	virasa::renderer::graph::ImageHandle swapchainTarget, const virasa::ui::DrawList& list,
-	const virasa::ui::FontAtlas& atlas, uint32_t frameIndex, uint32_t windowWidth,
-	uint32_t windowHeight)
+	const virasa::ui::FontAtlas& atlas,
+	std::span<const virasa::renderer::graph::ImageHandle> sampledImages,
+	VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight)
 {
 	assert(_initialized);
 
@@ -527,6 +612,69 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 		quadIndices.push_back(baseIndex + 0);
 		quadIndices.push_back(baseIndex + 2);
 		quadIndices.push_back(baseIndex + 3);
+	}
+
+	std::vector<ImageQuadVertex> imageVertices;
+	std::vector<uint16_t> imageIndices;
+	imageVertices.reserve(list.GetImageQuads().size() * 4);
+	imageIndices.reserve(list.GetImageQuads().size() * 6);
+
+	for (const virasa::ui::ImageQuadCommand& quad : list.GetImageQuads())
+	{
+		if (quad.width <= 0.0f || quad.height <= 0.0f)
+		{
+			continue;
+		}
+
+		const uint16_t baseIndex = static_cast<uint16_t>(imageVertices.size());
+		const float x0 = quad.x;
+		const float y0 = quad.y;
+		const float x1 = quad.x + quad.width;
+		const float y1 = quad.y + quad.height;
+
+		imageVertices.push_back({x0,
+			y0,
+			quad.u0,
+			quad.v0,
+			quad.tint.r,
+			quad.tint.g,
+			quad.tint.b,
+			quad.tint.a,
+			quad.textureSlot});
+		imageVertices.push_back({x1,
+			y0,
+			quad.u1,
+			quad.v0,
+			quad.tint.r,
+			quad.tint.g,
+			quad.tint.b,
+			quad.tint.a,
+			quad.textureSlot});
+		imageVertices.push_back({x1,
+			y1,
+			quad.u1,
+			quad.v1,
+			quad.tint.r,
+			quad.tint.g,
+			quad.tint.b,
+			quad.tint.a,
+			quad.textureSlot});
+		imageVertices.push_back({x0,
+			y1,
+			quad.u0,
+			quad.v1,
+			quad.tint.r,
+			quad.tint.g,
+			quad.tint.b,
+			quad.tint.a,
+			quad.textureSlot});
+
+		imageIndices.push_back(baseIndex + 0);
+		imageIndices.push_back(baseIndex + 1);
+		imageIndices.push_back(baseIndex + 2);
+		imageIndices.push_back(baseIndex + 0);
+		imageIndices.push_back(baseIndex + 2);
+		imageIndices.push_back(baseIndex + 3);
 	}
 
 	std::vector<TextVertex> textVertices;
@@ -615,8 +763,14 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 		geometry.quadVertexOffset +
 		static_cast<VkDeviceSize>(quadVertices.size() * sizeof(QuadVertex));
 	geometry.quadIndexCount = static_cast<uint32_t>(quadIndices.size());
-	geometry.textVertexOffset = geometry.quadIndexOffset +
-					    static_cast<VkDeviceSize>(quadIndices.size() * sizeof(uint16_t));
+	geometry.imageVertexOffset = geometry.quadIndexOffset +
+					     static_cast<VkDeviceSize>(quadIndices.size() * sizeof(uint16_t));
+	geometry.imageIndexOffset =
+		geometry.imageVertexOffset +
+		static_cast<VkDeviceSize>(imageVertices.size() * sizeof(ImageQuadVertex));
+	geometry.imageIndexCount = static_cast<uint32_t>(imageIndices.size());
+	geometry.textVertexOffset = geometry.imageIndexOffset +
+					    static_cast<VkDeviceSize>(imageIndices.size() * sizeof(uint16_t));
 	geometry.textIndexOffset =
 		geometry.textVertexOffset +
 		static_cast<VkDeviceSize>(textVertices.size() * sizeof(TextVertex));
@@ -625,10 +779,9 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	const VkDeviceSize totalSize =
 		geometry.textIndexOffset +
 		static_cast<VkDeviceSize>(textIndices.size() * sizeof(uint16_t));
-	Buffer& geometryBuffer = _geometryBuffers[frameIndex % _geometryBuffers.size()];
-	assert(totalSize <= geometryBuffer.GetSize());
+	assert(totalSize <= _geometryBuffer.GetSize());
 
-	void* mapped = geometryBuffer.Map();
+	void* mapped = _geometryBuffer.Map();
 	assert(mapped != nullptr);
 
 	uint8_t* bytes = static_cast<uint8_t*>(mapped);
@@ -644,6 +797,18 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			quadIndices.data(),
 			quadIndices.size() * sizeof(uint16_t));
 	}
+	if (!imageVertices.empty())
+	{
+		std::memcpy(bytes + geometry.imageVertexOffset,
+			imageVertices.data(),
+			imageVertices.size() * sizeof(ImageQuadVertex));
+	}
+	if (!imageIndices.empty())
+	{
+		std::memcpy(bytes + geometry.imageIndexOffset,
+			imageIndices.data(),
+			imageIndices.size() * sizeof(uint16_t));
+	}
 	if (!textVertices.empty())
 	{
 		std::memcpy(bytes + geometry.textVertexOffset,
@@ -657,96 +822,127 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			textIndices.size() * sizeof(uint16_t));
 	}
 
-	geometry.buffer = geometryBuffer.GetHandle();
+	geometry.buffer = _geometryBuffer.GetHandle();
 
 	const PushConstants pushConstants = {
 		2.0f / static_cast<float>(windowWidth), 2.0f / static_cast<float>(windowHeight)};
 
-	const VkPipeline quadPipelineHandle = _quadPipeline.GetHandle();
 	const VkPipelineLayout quadPipelineLayout = _quadPipeline.GetLayout();
-	const VkPipeline textPipelineHandle = _textPipeline.GetHandle();
+	const VkPipelineLayout imagePipelineLayout = _imageQuadPipeline.GetLayout();
 	const VkPipelineLayout textPipelineLayout = _textPipeline.GetLayout();
-	const VkDescriptorSet textDescriptorSet = _atlasDescriptorSet;
+	const VkDescriptorSet textDescriptorSet = _textDescriptorSet;
+	const VkBuffer geometryBufferHandle = _geometryBuffer.GetHandle();
 
-	graph.AddPass("ui")
-		.ColorAttachment(swapchainTarget, virasa::renderer::graph::LoadOp::Load, {})
-		.Record(
-			[pushConstants,
-				geometry,
-				quadPipelineHandle,
-				quadPipelineLayout,
-				textPipelineHandle,
-				textPipelineLayout,
-				textDescriptorSet,
-				this](const virasa::renderer::graph::GraphContext& ctx)
+	virasa::renderer::graph::PassBuilder& passBuilder = graph.AddPass("ui");
+	passBuilder.ColorAttachment(swapchainTarget, virasa::renderer::graph::LoadOp::Load, {});
+	for (virasa::renderer::graph::ImageHandle handle : sampledImages)
+	{
+		passBuilder.Read(handle, virasa::renderer::graph::ResourceUsage::SampledFragment);
+	}
+	passBuilder.Record(
+		[pushConstants,
+			geometry,
+			geometryBufferHandle,
+			quadPipelineLayout,
+			imagePipelineLayout,
+			textPipelineLayout,
+			textDescriptorSet,
+			bindlessSet,
+			this](const virasa::renderer::graph::GraphContext& ctx)
+		{
+			const VkCommandBuffer cmd = ctx.GetCommandBuffer();
+			const VkExtent2D extent = ctx.GetRenderExtent();
+
+			VkViewport viewport = {};
+			viewport.x = 0.0f;
+			viewport.y = 0.0f;
+			viewport.width = static_cast<float>(extent.width);
+			viewport.height = static_cast<float>(extent.height);
+			viewport.minDepth = 0.0f;
+			viewport.maxDepth = 1.0f;
+
+			VkRect2D scissor = {};
+			scissor.offset = {0, 0};
+			scissor.extent = extent;
+
+			if (geometry.quadIndexCount > 0)
 			{
-				const VkCommandBuffer cmd = ctx.GetCommandBuffer();
-				const VkExtent2D extent = ctx.GetRenderExtent();
+				vkCmdSetViewport(cmd, 0, 1, &viewport);
+				vkCmdSetScissor(cmd, 0, 1, &scissor);
+				this->_quadPipeline.Bind(cmd);
+				const VkDeviceSize vertexOffset = geometry.quadVertexOffset;
+				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
+				vkCmdBindIndexBuffer(cmd,
+					geometryBufferHandle,
+					geometry.quadIndexOffset,
+					VK_INDEX_TYPE_UINT16);
+				vkCmdPushConstants(cmd,
+					quadPipelineLayout,
+					VK_SHADER_STAGE_VERTEX_BIT,
+					0,
+					sizeof(PushConstants),
+					&pushConstants);
+				vkCmdDrawIndexed(cmd, geometry.quadIndexCount, 1, 0, 0, 0);
+			}
 
-				VkViewport viewport = {};
-				viewport.x = 0.0f;
-				viewport.y = 0.0f;
-				viewport.width = static_cast<float>(extent.width);
-				viewport.height = static_cast<float>(extent.height);
-				viewport.minDepth = 0.0f;
-				viewport.maxDepth = 1.0f;
+			if (geometry.imageIndexCount > 0)
+			{
+				vkCmdSetViewport(cmd, 0, 1, &viewport);
+				vkCmdSetScissor(cmd, 0, 1, &scissor);
+				this->_imageQuadPipeline.Bind(cmd);
+				const VkDeviceSize vertexOffset = geometry.imageVertexOffset;
+				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
+				vkCmdBindIndexBuffer(cmd,
+					geometryBufferHandle,
+					geometry.imageIndexOffset,
+					VK_INDEX_TYPE_UINT16);
+				vkCmdPushConstants(cmd,
+					imagePipelineLayout,
+					VK_SHADER_STAGE_VERTEX_BIT,
+					0,
+					sizeof(PushConstants),
+					&pushConstants);
+				vkCmdBindDescriptorSets(cmd,
+					VK_PIPELINE_BIND_POINT_GRAPHICS,
+					imagePipelineLayout,
+					0,
+					1,
+					&bindlessSet,
+					0,
+					nullptr);
+				vkCmdDrawIndexed(cmd, geometry.imageIndexCount, 1, 0, 0, 0);
+			}
 
-				VkRect2D scissor = {};
-				scissor.offset = {0, 0};
-				scissor.extent = extent;
-
-				if (geometry.quadIndexCount > 0)
+			if (geometry.textIndexCount > 0)
+			{
+				vkCmdSetViewport(cmd, 0, 1, &viewport);
+				vkCmdSetScissor(cmd, 0, 1, &scissor);
+				this->_textPipeline.Bind(cmd);
+				const VkDeviceSize vertexOffset = geometry.textVertexOffset;
+				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
+				vkCmdBindIndexBuffer(cmd,
+					geometryBufferHandle,
+					geometry.textIndexOffset,
+					VK_INDEX_TYPE_UINT16);
+				vkCmdPushConstants(cmd,
+					textPipelineLayout,
+					VK_SHADER_STAGE_VERTEX_BIT,
+					0,
+					sizeof(PushConstants),
+					&pushConstants);
+				if (textDescriptorSet != VK_NULL_HANDLE)
 				{
-					vkCmdSetViewport(cmd, 0, 1, &viewport);
-					vkCmdSetScissor(cmd, 0, 1, &scissor);
-					this->_quadPipeline.Bind(cmd);
-
-					const VkDeviceSize vertexOffset = geometry.quadVertexOffset;
-					vkCmdBindVertexBuffers(cmd, 0, 1, &geometry.buffer, &vertexOffset);
-					vkCmdBindIndexBuffer(cmd,
-						geometry.buffer,
-						geometry.quadIndexOffset,
-						VK_INDEX_TYPE_UINT16);
-					vkCmdPushConstants(cmd,
-						quadPipelineLayout,
-						VK_SHADER_STAGE_VERTEX_BIT,
-						0,
-						sizeof(PushConstants),
-						&pushConstants);
-					vkCmdDrawIndexed(cmd, geometry.quadIndexCount, 1, 0, 0, 0);
-				}
-
-				if (geometry.textIndexCount > 0)
-				{
-					vkCmdSetViewport(cmd, 0, 1, &viewport);
-					vkCmdSetScissor(cmd, 0, 1, &scissor);
-					this->_textPipeline.Bind(cmd);
-
-					const VkDeviceSize vertexOffset = geometry.textVertexOffset;
-					vkCmdBindVertexBuffers(cmd, 0, 1, &geometry.buffer, &vertexOffset);
-					vkCmdBindIndexBuffer(cmd,
-						geometry.buffer,
-						geometry.textIndexOffset,
-						VK_INDEX_TYPE_UINT16);
-					vkCmdPushConstants(cmd,
+					vkCmdBindDescriptorSets(cmd,
+						VK_PIPELINE_BIND_POINT_GRAPHICS,
 						textPipelineLayout,
-						VK_SHADER_STAGE_VERTEX_BIT,
 						0,
-						sizeof(PushConstants),
-						&pushConstants);
-					if (textDescriptorSet != VK_NULL_HANDLE)
-					{
-						vkCmdBindDescriptorSets(cmd,
-							VK_PIPELINE_BIND_POINT_GRAPHICS,
-							textPipelineLayout,
-							0,
-							1,
-							&textDescriptorSet,
-							0,
-							nullptr);
-					}
-					vkCmdDrawIndexed(cmd, geometry.textIndexCount, 1, 0, 0, 0);
+						1,
+						&textDescriptorSet,
+						0,
+						nullptr);
 				}
-			});
+				vkCmdDrawIndexed(cmd, geometry.textIndexCount, 1, 0, 0, 0);
+			}
+		});
 }
 } // namespace virasa::renderer::text

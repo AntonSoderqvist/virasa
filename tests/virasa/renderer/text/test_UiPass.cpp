@@ -1,15 +1,21 @@
 #include <concepts>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <span>
+#include <string>
 #include <type_traits>
 
 #include "virasa/renderer/Types.h"
+#include "virasa/renderer/core/Context.h"
+#include "virasa/renderer/core/Device.h"
 #include "virasa/renderer/graph/Graph.h"
 #include "virasa/renderer/graph/Pass.h"
 #include "virasa/renderer/graph/Types.h"
+#include "virasa/renderer/resources/BindlessTextureArray.h"
 #include "virasa/renderer/text/UiPass.h"
 #include "virasa/ui/FontAtlas.h"
 #include "virasa/ui/Types.h"
+#include "vulkan/vulkan.h"
 
 using namespace virasa;
 using namespace virasa::ui;
@@ -28,15 +34,20 @@ TEST(UiPass, test_ui_pass_is_raii_movable_non_copyable)
 
 TEST(UiPass, test_initialize_uploads_atlas_and_creates_pipelines_and_buffer)
 {
-	using InitializeSignature =
-		RenderError (UiPass::*)(const Device&, const Context&, const FontAtlas&);
+	using InitializeSignature = RenderError (UiPass::*)(
+		const Device&, const Context&, const FontAtlas&, const BindlessTextureArray&);
 
 	EXPECT_TRUE((std::is_same_v<decltype(&UiPass::Initialize), InitializeSignature>));
 	EXPECT_TRUE((std::is_same_v<decltype(std::declval<UiPass&>().Initialize(
-						   std::declval<const Device&>(),
-						   std::declval<const Context&>(),
-						   std::declval<const ui::FontAtlas&>())),
+						    std::declval<const Device&>(),
+						    std::declval<const Context&>(),
+						    std::declval<const ui::FontAtlas&>(),
+						    std::declval<const BindlessTextureArray&>())),
 		RenderError>));
+
+	EXPECT_TRUE(std::is_default_constructible_v<BindlessTextureArray>);
+	EXPECT_TRUE(std::is_move_constructible_v<BindlessTextureArray>);
+	EXPECT_FALSE(std::is_copy_constructible_v<BindlessTextureArray>);
 }
 
 TEST(UiPass, test_submit_appends_single_overlay_pass_with_load_op_load)
@@ -45,29 +56,35 @@ TEST(UiPass, test_submit_appends_single_overlay_pass_with_load_op_load)
 		renderer::graph::ImageHandle,
 		const ui::DrawList&,
 		const ui::FontAtlas&,
-		uint32_t,
+		std::span<const renderer::graph::ImageHandle>,
+		VkDescriptorSet,
 		uint32_t,
 		uint32_t);
 
 	EXPECT_TRUE((std::is_same_v<decltype(&UiPass::Submit), SubmitSignature>));
-	EXPECT_TRUE((std::is_same_v<decltype(std::declval<UiPass&>().Submit(
-						   std::declval<renderer::graph::Graph&>(),
-						   std::declval<renderer::graph::ImageHandle>(),
-						   std::declval<const ui::DrawList&>(),
-						   std::declval<const ui::FontAtlas&>(),
-						   std::declval<uint32_t>(),
-						   std::declval<uint32_t>(),
-						   std::declval<uint32_t>())),
-		void>));
+	EXPECT_TRUE(
+		(std::is_same_v<decltype(std::declval<UiPass&>().Submit(
+					    std::declval<renderer::graph::Graph&>(),
+					    std::declval<renderer::graph::ImageHandle>(),
+					    std::declval<const ui::DrawList&>(),
+					    std::declval<const ui::FontAtlas&>(),
+					    std::declval<std::span<const renderer::graph::ImageHandle>>(),
+					    std::declval<VkDescriptorSet>(),
+					    std::declval<uint32_t>(),
+					    std::declval<uint32_t>())),
+			void>));
 
 	constexpr renderer::graph::LoadOp kExpectedLoad = renderer::graph::LoadOp::Load;
 	EXPECT_EQ(static_cast<uint8_t>(kExpectedLoad), 0u);
+	EXPECT_TRUE((std::is_same_v<std::underlying_type_t<renderer::graph::LoadOp>, uint8_t>));
 }
 
 TEST(UiPass, test_submit_rebuilds_geometry_buffer_per_call)
 {
 	static_assert(std::is_same_v<decltype(std::declval<ui::DrawList>().GetQuads()),
 		std::span<const ui::QuadCommand>>);
+	static_assert(std::is_same_v<decltype(std::declval<ui::DrawList>().GetImageQuads()),
+		std::span<const ui::ImageQuadCommand>>);
 	static_assert(std::is_same_v<decltype(std::declval<ui::DrawList>().GetTexts()),
 		std::span<const ui::TextCommand>>);
 	static_assert(std::is_same_v<decltype(std::declval<ui::DrawList>().GetTextBuffer()),
@@ -75,6 +92,31 @@ TEST(UiPass, test_submit_rebuilds_geometry_buffer_per_call)
 	static_assert(
 		std::is_same_v<decltype(std::declval<const ui::FontAtlas&>().GetGlyph(uint32_t{})),
 			const ui::GlyphMetrics&>);
+
+	ui::DrawList list;
+	list.AddQuad(ui::QuadCommand{1.0f, 2.0f, 3.0f, 4.0f, ui::Color{0.1f, 0.2f, 0.3f, 0.4f}});
+	list.AddImageQuad(ui::ImageQuadCommand{10.0f,
+		20.0f,
+		30.0f,
+		40.0f,
+		0.25f,
+		0.5f,
+		0.75f,
+		1.0f,
+		7u,
+		ui::Color{0.9f, 0.8f, 0.7f, 0.6f}});
+	list.AddText(50.0f, 60.0f, "A", ui::Color{1.0f, 1.0f, 1.0f, 1.0f});
+
+	ASSERT_EQ(list.GetQuads().size(), 1u);
+	ASSERT_EQ(list.GetImageQuads().size(), 1u);
+	ASSERT_EQ(list.GetTexts().size(), 1u);
+
+	const auto& imageQuad = list.GetImageQuads().front();
+	EXPECT_FLOAT_EQ(imageQuad.u0, 0.25f);
+	EXPECT_FLOAT_EQ(imageQuad.v0, 0.5f);
+	EXPECT_FLOAT_EQ(imageQuad.u1, 0.75f);
+	EXPECT_FLOAT_EQ(imageQuad.v1, 1.0f);
+	EXPECT_EQ(imageQuad.textureSlot, 7u);
 
 	ui::GlyphMetrics glyph{};
 	glyph.advance = 7.5f;
@@ -123,16 +165,30 @@ TEST(UiPass, test_submit_records_ndc_conversion_via_push_constants)
 	EXPECT_EQ(sizeof(PushConstants), 8u);
 }
 
-TEST(UiPass, test_submit_records_two_draws_quads_then_text)
+TEST(UiPass, test_submit_records_three_stage_draws_in_order)
 {
 	ui::DrawList list;
 	list.AddQuad(ui::QuadCommand{10.0f, 20.0f, 30.0f, 40.0f, ui::Color{1.0f, 0.0f, 0.0f, 1.0f}});
+	list.AddImageQuad(ui::ImageQuadCommand{15.0f,
+		25.0f,
+		35.0f,
+		45.0f,
+		0.0f,
+		0.0f,
+		1.0f,
+		1.0f,
+		3u,
+		ui::Color{1.0f, 1.0f, 1.0f, 0.5f}});
 	list.AddText(50.0f, 60.0f, "abc", ui::Color{0.0f, 1.0f, 0.0f, 1.0f});
 
 	ASSERT_EQ(list.GetQuads().size(), 1u);
+	ASSERT_EQ(list.GetImageQuads().size(), 1u);
 	ASSERT_EQ(list.GetTexts().size(), 1u);
 	EXPECT_EQ(list.GetTextBuffer(), "abc");
-	EXPECT_LT(list.GetQuads().front().x, list.GetTexts().front().x);
+
+	EXPECT_LT(list.GetQuads().front().x, list.GetImageQuads().front().x);
+	EXPECT_LT(list.GetImageQuads().front().x, list.GetTexts().front().x);
+	EXPECT_EQ(list.GetImageQuads().front().textureSlot, 3u);
 }
 
 TEST(UiPass, test_submit_record_callback_captures_per_frame_data_by_value)

@@ -14,6 +14,8 @@ set(SHADERS
     ui_quad.frag
     ui_text.vert
     ui_text.frag
+    ui_image_quad.vert
+    ui_image_quad.frag
 )
 
 set(SPV_FILES)

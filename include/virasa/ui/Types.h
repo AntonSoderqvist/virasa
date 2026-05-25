@@ -18,7 +18,8 @@ namespace ui
 enum class DrawCommandKind : uint32_t
 {
 	Quad,
-	Text
+	Text,
+	ImageQuad
 };
 
 /**
@@ -60,7 +61,25 @@ struct TextCommand
 };
 
 /**
- * @brief Collects quad and text draw commands for a UI frame.
+ * @brief Describes one textured axis-aligned rectangle in framebuffer-pixel space.
+ */
+struct ImageQuadCommand
+{
+	public:
+	float x = 0.0f;
+	float y = 0.0f;
+	float width = 0.0f;
+	float height = 0.0f;
+	float u0 = 0.0f;
+	float v0 = 0.0f;
+	float u1 = 1.0f;
+	float v1 = 1.0f;
+	uint32_t textureSlot = 0u;
+	virasa::ui::Color tint = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+
+/**
+ * @brief Collects quad, image-quad, and text draw commands for a UI frame.
  */
 class DrawList final
 {
@@ -72,6 +91,7 @@ class DrawList final
 	{
 		_quads.clear();
 		_texts.clear();
+		_imageQuads.clear();
 		_textBuffer.clear();
 	}
 
@@ -100,6 +120,15 @@ class DrawList final
 	}
 
 	/**
+	 * @brief Append an image quad command.
+	 * @param quad Image quad command to append.
+	 */
+	void AddImageQuad(const ImageQuadCommand& quad)
+	{
+		_imageQuads.push_back(quad);
+	}
+
+	/**
 	 * @brief Get the appended quad commands.
 	 * @return A span over the internal quad storage.
 	 */
@@ -118,6 +147,15 @@ class DrawList final
 	}
 
 	/**
+	 * @brief Get the appended image quad commands.
+	 * @return A span over the internal image-quad storage.
+	 */
+	[[nodiscard]] std::span<const ImageQuadCommand> GetImageQuads() const noexcept
+	{
+		return std::span<const ImageQuadCommand>(_imageQuads.data(), _imageQuads.size());
+	}
+
+	/**
 	 * @brief Get the accumulated text buffer.
 	 * @return A string view into the internal text buffer.
 	 */
@@ -129,6 +167,7 @@ class DrawList final
 	private:
 	std::vector<QuadCommand> _quads = {};
 	std::vector<TextCommand> _texts = {};
+	std::vector<ImageQuadCommand> _imageQuads = {};
 	std::string _textBuffer = {};
 };
 

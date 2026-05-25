@@ -9,6 +9,7 @@
 #include <glm/trigonometric.hpp>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "virasa/core/Logger.h"
@@ -471,7 +472,8 @@ int main(int argc, char** argv)
 
 	virasa::renderer::text::UiPass uiPass;
 	{
-		virasa::RenderError error = uiPass.Initialize(device, context, fontAtlas);
+		virasa::RenderError error =
+			uiPass.Initialize(device, context, fontAtlas, bindlessTextureArray);
 		if (error != virasa::RenderError::None)
 		{
 			LOG_ERROR(logger, "UiPass::Initialize failed: {}", static_cast<int>(error));
@@ -486,6 +488,10 @@ int main(int argc, char** argv)
 	virasa::ui::DrawList drawList;
 	std::string commandBuffer;
 	std::size_t commandCursor = 0;
+
+	const float kBarLineHeight = fontAtlas.GetAscender() - fontAtlas.GetDescender();
+	const float kBarHeight = kBarLineHeight + 2.0f * commandBarConfig.paddingY;
+	std::unordered_map<VkImageView, uint32_t> sceneSlotCache;
 
 	for (;;)
 	{
@@ -587,6 +593,12 @@ int main(int argc, char** argv)
 			cameraTransform.rotation = yawQuat * pitchQuat;
 		}
 
+		VkExtent2D currentExtent = context.GetSwapchainExtent();
+		const uint32_t barHeightPixels =
+			std::min<uint32_t>(static_cast<uint32_t>(kBarHeight), currentExtent.height - 1u);
+		const uint32_t sceneWidth = currentExtent.width;
+		const uint32_t sceneHeight = currentExtent.height - barHeightPixels;
+
 		{
 			const virasa::math::Transform& cameraTransform =
 				world.GetTransformComponent(cameraEntity);
@@ -596,11 +608,10 @@ int main(int argc, char** argv)
 			viewMatrix = virasa::math::LookAtRH_ZUp(
 				cameraTransform.translation, cameraTransform.translation + forward);
 
-			VkExtent2D currentExtent = context.GetSwapchainExtent();
 			float aspect = cameraComponent.aspect > 0.0f
 						   ? cameraComponent.aspect
-						   : static_cast<float>(currentExtent.width) /
-							     static_cast<float>(currentExtent.height);
+						   : static_cast<float>(sceneWidth) /
+							     static_cast<float>(sceneHeight);
 			projectionMatrix = virasa::math::PerspectiveRH_ZO(cameraComponent.fovY,
 				aspect,
 				cameraComponent.nearPlane,
@@ -682,18 +693,30 @@ int main(int argc, char** argv)
 				context.GetSwapchainExtent(),
 				virasa::renderer::graph::ResourceUsage::Undefined);
 
-		virasa::renderer::graph::ImageHandle depthHandle =
-			graph.ImportImage(context.GetDepthImage(),
-				context.GetDepthImageView(),
-				context.GetDepthFormat(),
-				context.GetSwapchainExtent(),
-				virasa::renderer::graph::ResourceUsage::Undefined);
+		virasa::renderer::graph::GraphImageDesc sceneColorDesc{};
+		sceneColorDesc.width = sceneWidth;
+		sceneColorDesc.height = sceneHeight;
+		sceneColorDesc.format = context.GetSwapchainFormat();
+		sceneColorDesc.usage =
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		sceneColorDesc.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		virasa::renderer::graph::ImageHandle sceneColorHandle =
+			graph.DeclareImage(sceneColorDesc);
+
+		virasa::renderer::graph::GraphImageDesc sceneDepthDesc{};
+		sceneDepthDesc.width = sceneWidth;
+		sceneDepthDesc.height = sceneHeight;
+		sceneDepthDesc.format = context.GetDepthFormat();
+		sceneDepthDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		sceneDepthDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		virasa::renderer::graph::ImageHandle sceneDepthHandle =
+			graph.DeclareImage(sceneDepthDesc);
 
 		graph.AddPass("forward")
-			.ColorAttachment(swapchainHandle,
+			.ColorAttachment(sceneColorHandle,
 				virasa::renderer::graph::LoadOp::Clear,
 				virasa::renderer::graph::ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
-			.DepthAttachment(depthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
+			.DepthAttachment(sceneDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
 			.Record(
 				[&world,
 					&meshRegistry,
@@ -788,17 +811,52 @@ int main(int argc, char** argv)
 
 		drawList.Clear();
 		VkExtent2D swapchainExtent = context.GetSwapchainExtent();
+
+		VkImageView sceneView = imageRegistry.Get(sceneColorHandle).GetView();
+		uint32_t sceneSlot = 0u;
+		auto cacheIt = sceneSlotCache.find(sceneView);
+		if (cacheIt != sceneSlotCache.end())
+		{
+			sceneSlot = cacheIt->second;
+		}
+		else
+		{
+			sceneSlot =
+				bindlessTextureArray.RegisterTexture(sceneView, sampler.GetHandle());
+			if (sceneSlot == 0xFFFFFFFFu)
+			{
+				LOG_ERROR(logger, "RegisterTexture failed for scene target view.");
+				return -1;
+			}
+			sceneSlotCache.emplace(sceneView, sceneSlot);
+		}
+
+		virasa::ui::ImageQuadCommand sceneQuad{};
+		sceneQuad.x = 0.0f;
+		sceneQuad.y = 0.0f;
+		sceneQuad.width = static_cast<float>(sceneWidth);
+		sceneQuad.height = static_cast<float>(sceneHeight);
+		sceneQuad.u0 = 0.0f;
+		sceneQuad.v0 = 0.0f;
+		sceneQuad.u1 = 1.0f;
+		sceneQuad.v1 = 1.0f;
+		sceneQuad.textureSlot = sceneSlot;
+		drawList.AddImageQuad(sceneQuad);
+
 		commandBar.Render(drawList,
 			commandBuffer,
 			commandCursor,
 			fontAtlas,
 			swapchainExtent.width,
 			swapchainExtent.height);
+
+		const virasa::renderer::graph::ImageHandle sampledHandles[1] = {sceneColorHandle};
 		uiPass.Submit(graph,
 			swapchainHandle,
 			drawList,
 			fontAtlas,
-			context.GetCurrentFrameIndex(),
+			std::span<const virasa::renderer::graph::ImageHandle>(sampledHandles, 1),
+			bindlessTextureArray.GetDescriptorSet(),
 			swapchainExtent.width,
 			swapchainExtent.height);
 
