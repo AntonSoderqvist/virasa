@@ -61,7 +61,21 @@ void EditorView::Render(
 	float width,
 	float height) const
 {
-	_panel.Render(out, _buffer.GetText(), x, y, width, height, atlas);
+	virasa::ui::CursorStyle cursorStyle = virasa::ui::CursorStyle::None;
+	switch (_motionState.GetMode())
+	{
+		case virasa::editor::Mode::Normal:
+			cursorStyle = virasa::ui::CursorStyle::Block;
+			break;
+		case virasa::editor::Mode::Insert:
+			cursorStyle = virasa::ui::CursorStyle::Insertion;
+			break;
+		default:
+			cursorStyle = virasa::ui::CursorStyle::None;
+			break;
+	}
+
+	_panel.Render(out, _buffer.GetText(), x, y, width, height, atlas, cursorStyle, _buffer.GetCursorByte());
 }
 
 } // namespace virasa::editor

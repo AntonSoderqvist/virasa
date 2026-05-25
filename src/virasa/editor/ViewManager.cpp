@@ -127,7 +127,7 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 	return EventResult::Consumed;
 }
 
-EventResult ViewManager::ApplyCommandResult(CommandResult cmd)
+EventResult ViewManager::ApplyCommandResult(CommandResult cmd) noexcept
 {
 	switch (cmd)
 	{

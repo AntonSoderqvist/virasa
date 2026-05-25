@@ -127,7 +127,7 @@ public:
 	);
 
 private:
-	EventResult ApplyCommandResult(CommandResult cmd);
+	[[nodiscard]] EventResult ApplyCommandResult(CommandResult cmd) noexcept;
 
 	virasa::editor::CommandBarView _commandBarView = {};
 	virasa::editor::EditorView _editorView = {};

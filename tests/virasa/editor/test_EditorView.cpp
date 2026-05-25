@@ -188,18 +188,22 @@ TEST(EditorView, test_render_delegates_to_owned_text_panel)
 {
 	EditorView view;
 	view.GetBuffer().SetText("first\n\nsecond");
+	view.GetBuffer().SetCursorByte(0u);
 
 	TextPanelConfig config = view.GetPanel().GetConfig();
 	config.background = {0.2f, 0.3f, 0.4f, 0.5f};
 	config.foreground = {0.8f, 0.7f, 0.6f, 1.0f};
+	config.cursor = {0.1f, 0.9f, 0.2f, 0.75f};
 	config.paddingX = 9.0f;
 	config.paddingY = 3.0f;
 	config.lineSpacing = 1.25f;
 	view.GetPanel().SetConfig(config);
+	view.GetMotionState().SetMode(Mode::Normal);
 
 	const std::string_view textBefore = view.GetBuffer().GetText();
 	const std::size_t cursorBefore = view.GetBuffer().GetCursorByte();
 	const Mode modeBefore = view.GetMotionState().GetMode();
+	const TextPanelConfig panelConfigBefore = view.GetPanel().GetConfig();
 
 	DrawList out;
 	QuadCommand existingQuad;
@@ -216,8 +220,12 @@ TEST(EditorView, test_render_delegates_to_owned_text_panel)
 	EXPECT_EQ(view.GetBuffer().GetText(), textBefore);
 	EXPECT_EQ(view.GetBuffer().GetCursorByte(), cursorBefore);
 	EXPECT_EQ(view.GetMotionState().GetMode(), modeBefore);
+	EXPECT_TRUE(FloatEq(view.GetPanel().GetConfig().paddingX, panelConfigBefore.paddingX));
+	EXPECT_TRUE(FloatEq(view.GetPanel().GetConfig().paddingY, panelConfigBefore.paddingY));
+	EXPECT_TRUE(FloatEq(view.GetPanel().GetConfig().lineSpacing, panelConfigBefore.lineSpacing));
+	EXPECT_TRUE(FloatEq(view.GetPanel().GetConfig().cursorBarWidth, panelConfigBefore.cursorBarWidth));
 
-	ASSERT_EQ(out.GetQuads().size(), 2u);
+	ASSERT_EQ(out.GetQuads().size(), 3u);
 	EXPECT_TRUE(FloatEq(out.GetQuads()[1].x, 10.0f));
 	EXPECT_TRUE(FloatEq(out.GetQuads()[1].y, 20.0f));
 	EXPECT_TRUE(FloatEq(out.GetQuads()[1].width, 300.0f));
@@ -238,6 +246,7 @@ TEST(EditorView, test_render_delegates_to_owned_text_panel)
 	const float descender = atlas.GetDescender();
 	const float lineHeight = ascender - descender;
 	const float advance = lineHeight * config.lineSpacing;
+	const float expectedCursorWidth = atlas.GetGlyph(0x66u).advance;
 
 	EXPECT_TRUE(FloatEq(firstLine.x, 19.0f));
 	EXPECT_TRUE(FloatEq(firstLine.y, 23.0f + ascender));
@@ -254,4 +263,43 @@ TEST(EditorView, test_render_delegates_to_owned_text_panel)
 	EXPECT_TRUE(FloatEq(secondLine.color.g, 0.7f));
 	EXPECT_TRUE(FloatEq(secondLine.color.b, 0.6f));
 	EXPECT_TRUE(FloatEq(secondLine.color.a, 1.0f));
+
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].x, 19.0f));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].y, 23.0f));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].width, expectedCursorWidth));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].height, lineHeight));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].color.r, 0.1f));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].color.g, 0.9f));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].color.b, 0.2f));
+	EXPECT_TRUE(FloatEq(out.GetQuads()[2].color.a, 0.75f));
+}
+
+TEST(EditorView, test_render_maps_mode_to_cursor_style)
+{
+	EditorView normalView;
+	normalView.GetBuffer().SetText("abc");
+	normalView.GetBuffer().SetCursorByte(1u);
+	normalView.GetMotionState().SetMode(Mode::Normal);
+
+	EditorView insertView;
+	insertView.GetBuffer().SetText("abc");
+	insertView.GetBuffer().SetCursorByte(1u);
+	insertView.GetMotionState().SetMode(Mode::Insert);
+
+	FontAtlas atlas;
+	DrawList normalOut;
+	DrawList insertOut;
+
+	normalView.Render(normalOut, atlas, 0.0f, 0.0f, 100.0f, 50.0f);
+	insertView.Render(insertOut, atlas, 0.0f, 0.0f, 100.0f, 50.0f);
+
+	ASSERT_EQ(normalOut.GetQuads().size(), 2u);
+	ASSERT_EQ(insertOut.GetQuads().size(), 2u);
+
+	const float expectedBlockWidth = atlas.GetGlyph(static_cast<uint32_t>('b')).advance;
+	const float expectedInsertionWidth = insertView.GetPanel().GetConfig().cursorBarWidth;
+
+	EXPECT_TRUE(FloatEq(normalOut.GetQuads()[1].width, expectedBlockWidth));
+	EXPECT_TRUE(FloatEq(insertOut.GetQuads()[1].width, expectedInsertionWidth));
+	EXPECT_FALSE(FloatEq(normalOut.GetQuads()[1].width, expectedInsertionWidth));
 }
