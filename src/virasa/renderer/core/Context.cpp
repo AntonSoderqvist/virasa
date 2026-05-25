@@ -25,6 +25,7 @@ Context::Context(Context&& other) noexcept
 	_swapchain(std::move(other._swapchain)), _depthImage(std::move(other._depthImage)),
 	_commandPool(other._commandPool), _transferCommandPool(other._transferCommandPool),
 	_commandBuffers(std::move(other._commandBuffers)), _frameData(std::move(other._frameData)),
+	_renderFinishedSemaphores(std::move(other._renderFinishedSemaphores)),
 	_currentFrameIndex(other._currentFrameIndex), _acquiredImageIndex(other._acquiredImageIndex),
 	_isReady(other._isReady)
 {
@@ -54,6 +55,7 @@ Context& Context::operator=(Context&& other) noexcept
 		_transferCommandPool = other._transferCommandPool;
 		_commandBuffers = std::move(other._commandBuffers);
 		_frameData = std::move(other._frameData);
+		_renderFinishedSemaphores = std::move(other._renderFinishedSemaphores);
 		_currentFrameIndex = other._currentFrameIndex;
 		_acquiredImageIndex = other._acquiredImageIndex;
 		_isReady = other._isReady;
@@ -206,14 +208,24 @@ RenderError Context::Initialize(virasa::window::Platform& platform, const Render
 				&semaphoreInfo,
 				nullptr,
 				&_frameData[i].imageAvailableSemaphore);
-			VkResult r2 = vkCreateSemaphore(_device.GetHandle(),
-				&semaphoreInfo,
-				nullptr,
-				&_frameData[i].renderFinishedSemaphore);
 			VkResult r3 = vkCreateFence(
 				_device.GetHandle(), &fenceInfo, nullptr, &_frameData[i].inFlightFence);
 
-			if (r1 != VK_SUCCESS || r2 != VK_SUCCESS || r3 != VK_SUCCESS)
+			if (r1 != VK_SUCCESS || r3 != VK_SUCCESS)
+			{
+				return RenderError::FenceCreateFailed;
+			}
+		}
+
+		const uint32_t imageCount = _swapchain.GetImageCount();
+		_renderFinishedSemaphores.resize(imageCount, VK_NULL_HANDLE);
+		for (uint32_t i = 0; i < imageCount; ++i)
+		{
+			VkResult r = vkCreateSemaphore(_device.GetHandle(),
+				&semaphoreInfo,
+				nullptr,
+				&_renderFinishedSemaphores[i]);
+			if (r != VK_SUCCESS)
 			{
 				return RenderError::FenceCreateFailed;
 			}
@@ -248,11 +260,6 @@ void Context::DestroyPerFrameResources()
 			vkDestroyFence(device, frame.inFlightFence, nullptr);
 			frame.inFlightFence = VK_NULL_HANDLE;
 		}
-		if (frame.renderFinishedSemaphore != VK_NULL_HANDLE)
-		{
-			vkDestroySemaphore(device, frame.renderFinishedSemaphore, nullptr);
-			frame.renderFinishedSemaphore = VK_NULL_HANDLE;
-		}
 		if (frame.imageAvailableSemaphore != VK_NULL_HANDLE)
 		{
 			vkDestroySemaphore(device, frame.imageAvailableSemaphore, nullptr);
@@ -260,6 +267,16 @@ void Context::DestroyPerFrameResources()
 		}
 	}
 	_frameData.clear();
+
+	for (VkSemaphore& sem : _renderFinishedSemaphores)
+	{
+		if (sem != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(device, sem, nullptr);
+			sem = VK_NULL_HANDLE;
+		}
+	}
+	_renderFinishedSemaphores.clear();
 
 	if (_transferCommandPool != VK_NULL_HANDLE && _transferCommandPool != _commandPool)
 	{
@@ -325,6 +342,34 @@ void Context::RecreateSwapchain()
 	{
 		auto* logger = Logger::GetLogger("renderer");
 		LOG_ERROR(logger, "Depth image resize failed after swapchain recreation.");
+		return;
+	}
+
+	VkDevice device = _device.GetHandle();
+	for (VkSemaphore& sem : _renderFinishedSemaphores)
+	{
+		if (sem != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(device, sem, nullptr);
+			sem = VK_NULL_HANDLE;
+		}
+	}
+	const uint32_t imageCount = _swapchain.GetImageCount();
+	_renderFinishedSemaphores.assign(imageCount, VK_NULL_HANDLE);
+
+	VkSemaphoreCreateInfo semaphoreInfo{};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		VkResult r =
+			vkCreateSemaphore(device, &semaphoreInfo, nullptr, &_renderFinishedSemaphores[i]);
+		if (r != VK_SUCCESS)
+		{
+			auto* logger = Logger::GetLogger("renderer");
+			LOG_ERROR(logger,
+				"Failed to recreate render-finished semaphore after swapchain recreation.");
+			return;
+		}
 	}
 }
 
@@ -341,6 +386,9 @@ SwapchainStatus Context::BeginFrame()
 	}
 
 	const FrameData& frame = _frameData[_currentFrameIndex];
+
+	auto* logger = Logger::GetLogger("renderer");
+	LOG_INFO(logger, "Current frame index: {}", _currentFrameIndex);
 
 	// Step 2: fence wait
 	vkWaitForFences(_device.GetHandle(), 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
@@ -412,8 +460,9 @@ SwapchainStatus Context::EndFrame()
 	submitInfo.pWaitDstStageMask = &waitStage;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &cmd;
+	VkSemaphore renderFinished = _renderFinishedSemaphores[_acquiredImageIndex];
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &frame.renderFinishedSemaphore;
+	submitInfo.pSignalSemaphores = &renderFinished;
 
 	VkResult submitResult =
 		vkQueueSubmit(_device.GetGraphicsQueue(), 1, &submitInfo, frame.inFlightFence);
@@ -426,8 +475,8 @@ SwapchainStatus Context::EndFrame()
 	}
 
 	// Step 3: present
-	SwapchainStatus presentStatus = _swapchain.Present(
-		_device.GetPresentQueue(), frame.renderFinishedSemaphore, _acquiredImageIndex);
+	SwapchainStatus presentStatus =
+		_swapchain.Present(_device.GetPresentQueue(), renderFinished, _acquiredImageIndex);
 
 	if (presentStatus == SwapchainStatus::Recreated)
 	{

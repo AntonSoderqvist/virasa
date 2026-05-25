@@ -186,7 +186,6 @@ class Context final
 	struct FrameData
 	{
 		VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-		VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
 		VkFence inFlightFence = VK_NULL_HANDLE;
 	};
 
@@ -206,6 +205,7 @@ class Context final
 	VkCommandPool _transferCommandPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> _commandBuffers{};
 	std::vector<FrameData> _frameData{};
+	std::vector<VkSemaphore> _renderFinishedSemaphores{}; ///< Per-swapchain-image.
 
 	uint32_t _currentFrameIndex = 0;
 	uint32_t _acquiredImageIndex = 0;

@@ -2,6 +2,7 @@
 #define VIRASA_ECS_COMPONENTS_H
 
 #include <cstdint>
+#include "virasa/math/Types.h"
 
 namespace virasa::ecs
 {
@@ -28,6 +29,61 @@ struct VisualComponent
 {
 	public:
 	uint32_t materialId = 0xFFFFFFFFu;
+};
+
+/**
+ * @brief Component describing an infinitely distant directional light source.
+ *
+ * The direction field is the world-space vector along which photons travel.
+ * Color and intensity are used by the upload step to build the GPU light record.
+ */
+struct DirectionalLightComponent
+{
+public:
+	/// World-space direction of the light rays (expected to be normalized).
+	virasa::math::Vec3 direction = virasa::math::Vec3(0.0f, 0.0f, -1.0f);
+	/// Linear-space RGB color of the light.
+	virasa::math::Vec3 color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+	/// Scalar intensity multiplier applied to color at upload time.
+	float intensity = 1.0f;
+};
+
+/**
+ * @brief Component describing an omnidirectional point light source.
+ *
+ * Position is read from the entity's TransformComponent at upload time.
+ * Color, intensity, and range describe the light's appearance and falloff.
+ */
+struct PointLightComponent
+{
+public:
+	/// Linear-space RGB color of the light.
+	virasa::math::Vec3 color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+	/// Scalar intensity multiplier applied to color at upload time.
+	float intensity = 1.0f;
+	/// World-space radius beyond which the light's contribution is zero.
+	float range = 10.0f;
+};
+
+/**
+ * @brief Component describing a cone-restricted spot light source.
+ *
+ * Position and cone axis are read from the entity's TransformComponent at upload time.
+ * innerConeCos and outerConeCos are cosines of the inner and outer half-angles.
+ */
+struct SpotLightComponent
+{
+public:
+	/// Linear-space RGB color of the light.
+	virasa::math::Vec3 color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+	/// Scalar intensity multiplier applied to color at upload time.
+	float intensity = 1.0f;
+	/// World-space radius beyond which the light's contribution is zero.
+	float range = 10.0f;
+	/// Cosine of the inner cone half-angle (~18 degrees by default).
+	float innerConeCos = 0.95f;
+	/// Cosine of the outer cone half-angle (~32 degrees by default).
+	float outerConeCos = 0.85f;
 };
 
 } // namespace virasa::ecs

@@ -96,6 +96,9 @@ void World::DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromPar
 	RemoveTransformComponentInternal(entity);
 	RemoveMeshComponentInternal(entity);
 	RemoveVisualComponentInternal(entity);
+	RemoveDirectionalLightComponentInternal(entity);
+	RemovePointLightComponentInternal(entity);
+	RemoveSpotLightComponentInternal(entity);
 
 	// (b) Hierarchy detachment
 	if (detachFromParent)
@@ -145,6 +148,15 @@ World::World(World&& other) noexcept
 	, _visualValues(std::move(other._visualValues))
 	, _visualEntities(std::move(other._visualEntities))
 	, _visualSparse(std::move(other._visualSparse))
+	, _directionalLightValues(std::move(other._directionalLightValues))
+	, _directionalLightEntities(std::move(other._directionalLightEntities))
+	, _directionalLightSparse(std::move(other._directionalLightSparse))
+	, _pointLightValues(std::move(other._pointLightValues))
+	, _pointLightEntities(std::move(other._pointLightEntities))
+	, _pointLightSparse(std::move(other._pointLightSparse))
+	, _spotLightValues(std::move(other._spotLightValues))
+	, _spotLightEntities(std::move(other._spotLightEntities))
+	, _spotLightSparse(std::move(other._spotLightSparse))
 {
 	other._entityCount = 0u;
 }
@@ -165,10 +177,19 @@ World& World::operator=(World&& other) noexcept
 		_meshValues        = std::move(other._meshValues);
 		_meshEntities      = std::move(other._meshEntities);
 		_meshSparse        = std::move(other._meshSparse);
-		_visualValues      = std::move(other._visualValues);
-		_visualEntities    = std::move(other._visualEntities);
-		_visualSparse      = std::move(other._visualSparse);
-		other._entityCount = 0u;
+		_visualValues               = std::move(other._visualValues);
+		_visualEntities             = std::move(other._visualEntities);
+		_visualSparse               = std::move(other._visualSparse);
+		_directionalLightValues     = std::move(other._directionalLightValues);
+		_directionalLightEntities   = std::move(other._directionalLightEntities);
+		_directionalLightSparse     = std::move(other._directionalLightSparse);
+		_pointLightValues           = std::move(other._pointLightValues);
+		_pointLightEntities         = std::move(other._pointLightEntities);
+		_pointLightSparse           = std::move(other._pointLightSparse);
+		_spotLightValues            = std::move(other._spotLightValues);
+		_spotLightEntities          = std::move(other._spotLightEntities);
+		_spotLightSparse            = std::move(other._spotLightSparse);
+		other._entityCount          = 0u;
 	}
 	return *this;
 }
@@ -432,6 +453,204 @@ virasa::ecs::VisualComponent& World::GetVisualComponent(virasa::ecs::Entity enti
 const std::vector<virasa::ecs::Entity>& World::GetVisualComponentEntities() const noexcept
 {
 	return _visualEntities;
+}
+
+// ---------------------------------------------------------------------------
+// DirectionalLightComponent
+// ---------------------------------------------------------------------------
+
+void World::RemoveDirectionalLightComponentInternal(virasa::ecs::Entity entity)
+{
+	if (!HasDirectionalLightComponent(entity))
+		return;
+
+	const uint32_t denseIdx = _directionalLightSparse[entity.index];
+	const uint32_t lastIdx  = static_cast<uint32_t>(_directionalLightValues.size()) - 1u;
+
+	if (denseIdx != lastIdx)
+	{
+		_directionalLightValues[denseIdx]   = _directionalLightValues[lastIdx];
+		_directionalLightEntities[denseIdx] = _directionalLightEntities[lastIdx];
+		_directionalLightSparse[_directionalLightEntities[denseIdx].index] = denseIdx;
+	}
+
+	_directionalLightValues.pop_back();
+	_directionalLightEntities.pop_back();
+	_directionalLightSparse[entity.index] = kSparseNone;
+}
+
+void World::AddDirectionalLightComponent(virasa::ecs::Entity entity, virasa::ecs::DirectionalLightComponent component)
+{
+	EnsureSparseCapacity(_directionalLightSparse, entity.index);
+
+	const uint32_t denseIdx = static_cast<uint32_t>(_directionalLightValues.size());
+	_directionalLightValues.push_back(component);
+	_directionalLightEntities.push_back(entity);
+	_directionalLightSparse[entity.index] = denseIdx;
+}
+
+void World::RemoveDirectionalLightComponent(virasa::ecs::Entity entity)
+{
+	RemoveDirectionalLightComponentInternal(entity);
+}
+
+bool World::HasDirectionalLightComponent(virasa::ecs::Entity entity) const noexcept
+{
+	if (!IsValid(entity))
+		return false;
+	if (entity.index >= static_cast<uint32_t>(_directionalLightSparse.size()))
+		return false;
+	const uint32_t denseIdx = _directionalLightSparse[entity.index];
+	if (denseIdx == kSparseNone)
+		return false;
+	return _directionalLightEntities[denseIdx] == entity;
+}
+
+const virasa::ecs::DirectionalLightComponent& World::GetDirectionalLightComponent(virasa::ecs::Entity entity) const
+{
+	return _directionalLightValues[_directionalLightSparse[entity.index]];
+}
+
+virasa::ecs::DirectionalLightComponent& World::GetDirectionalLightComponent(virasa::ecs::Entity entity)
+{
+	return _directionalLightValues[_directionalLightSparse[entity.index]];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetDirectionalLightComponentEntities() const noexcept
+{
+	return _directionalLightEntities;
+}
+
+// ---------------------------------------------------------------------------
+// PointLightComponent
+// ---------------------------------------------------------------------------
+
+void World::RemovePointLightComponentInternal(virasa::ecs::Entity entity)
+{
+	if (!HasPointLightComponent(entity))
+		return;
+
+	const uint32_t denseIdx = _pointLightSparse[entity.index];
+	const uint32_t lastIdx  = static_cast<uint32_t>(_pointLightValues.size()) - 1u;
+
+	if (denseIdx != lastIdx)
+	{
+		_pointLightValues[denseIdx]   = _pointLightValues[lastIdx];
+		_pointLightEntities[denseIdx] = _pointLightEntities[lastIdx];
+		_pointLightSparse[_pointLightEntities[denseIdx].index] = denseIdx;
+	}
+
+	_pointLightValues.pop_back();
+	_pointLightEntities.pop_back();
+	_pointLightSparse[entity.index] = kSparseNone;
+}
+
+void World::AddPointLightComponent(virasa::ecs::Entity entity, virasa::ecs::PointLightComponent component)
+{
+	EnsureSparseCapacity(_pointLightSparse, entity.index);
+
+	const uint32_t denseIdx = static_cast<uint32_t>(_pointLightValues.size());
+	_pointLightValues.push_back(component);
+	_pointLightEntities.push_back(entity);
+	_pointLightSparse[entity.index] = denseIdx;
+}
+
+void World::RemovePointLightComponent(virasa::ecs::Entity entity)
+{
+	RemovePointLightComponentInternal(entity);
+}
+
+bool World::HasPointLightComponent(virasa::ecs::Entity entity) const noexcept
+{
+	if (!IsValid(entity))
+		return false;
+	if (entity.index >= static_cast<uint32_t>(_pointLightSparse.size()))
+		return false;
+	const uint32_t denseIdx = _pointLightSparse[entity.index];
+	if (denseIdx == kSparseNone)
+		return false;
+	return _pointLightEntities[denseIdx] == entity;
+}
+
+const virasa::ecs::PointLightComponent& World::GetPointLightComponent(virasa::ecs::Entity entity) const
+{
+	return _pointLightValues[_pointLightSparse[entity.index]];
+}
+
+virasa::ecs::PointLightComponent& World::GetPointLightComponent(virasa::ecs::Entity entity)
+{
+	return _pointLightValues[_pointLightSparse[entity.index]];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetPointLightComponentEntities() const noexcept
+{
+	return _pointLightEntities;
+}
+
+// ---------------------------------------------------------------------------
+// SpotLightComponent
+// ---------------------------------------------------------------------------
+
+void World::RemoveSpotLightComponentInternal(virasa::ecs::Entity entity)
+{
+	if (!HasSpotLightComponent(entity))
+		return;
+
+	const uint32_t denseIdx = _spotLightSparse[entity.index];
+	const uint32_t lastIdx  = static_cast<uint32_t>(_spotLightValues.size()) - 1u;
+
+	if (denseIdx != lastIdx)
+	{
+		_spotLightValues[denseIdx]   = _spotLightValues[lastIdx];
+		_spotLightEntities[denseIdx] = _spotLightEntities[lastIdx];
+		_spotLightSparse[_spotLightEntities[denseIdx].index] = denseIdx;
+	}
+
+	_spotLightValues.pop_back();
+	_spotLightEntities.pop_back();
+	_spotLightSparse[entity.index] = kSparseNone;
+}
+
+void World::AddSpotLightComponent(virasa::ecs::Entity entity, virasa::ecs::SpotLightComponent component)
+{
+	EnsureSparseCapacity(_spotLightSparse, entity.index);
+
+	const uint32_t denseIdx = static_cast<uint32_t>(_spotLightValues.size());
+	_spotLightValues.push_back(component);
+	_spotLightEntities.push_back(entity);
+	_spotLightSparse[entity.index] = denseIdx;
+}
+
+void World::RemoveSpotLightComponent(virasa::ecs::Entity entity)
+{
+	RemoveSpotLightComponentInternal(entity);
+}
+
+bool World::HasSpotLightComponent(virasa::ecs::Entity entity) const noexcept
+{
+	if (!IsValid(entity))
+		return false;
+	if (entity.index >= static_cast<uint32_t>(_spotLightSparse.size()))
+		return false;
+	const uint32_t denseIdx = _spotLightSparse[entity.index];
+	if (denseIdx == kSparseNone)
+		return false;
+	return _spotLightEntities[denseIdx] == entity;
+}
+
+const virasa::ecs::SpotLightComponent& World::GetSpotLightComponent(virasa::ecs::Entity entity) const
+{
+	return _spotLightValues[_spotLightSparse[entity.index]];
+}
+
+virasa::ecs::SpotLightComponent& World::GetSpotLightComponent(virasa::ecs::Entity entity)
+{
+	return _spotLightValues[_spotLightSparse[entity.index]];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetSpotLightComponentEntities() const noexcept
+{
+	return _spotLightEntities;
 }
 
 } // namespace virasa::ecs

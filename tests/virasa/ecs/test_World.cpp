@@ -636,6 +636,239 @@ TEST(World, test_world_visual_component_storage_is_sparse_set)
 }
 
 // ===========================================================================
+// world_directional_light_component_storage_is_sparse_set
+// ===========================================================================
+TEST(World, test_world_directional_light_component_storage_is_sparse_set)
+{
+	World w;
+	Entity e1 = w.CreateEntity();
+	Entity e2 = w.CreateEntity();
+	Entity e3 = w.CreateEntity();
+
+	// Initially no components.
+	EXPECT_FALSE(w.HasDirectionalLightComponent(e1));
+	EXPECT_TRUE(w.GetDirectionalLightComponentEntities().empty());
+
+	// Add components.
+	DirectionalLightComponent dl1;
+	dl1.direction = {0.f, 0.f, -1.f};
+	dl1.color     = {1.f, 0.f, 0.f};
+	dl1.intensity = 2.f;
+
+	DirectionalLightComponent dl2;
+	dl2.direction = {1.f, 0.f, 0.f};
+	dl2.color     = {0.f, 1.f, 0.f};
+	dl2.intensity = 3.f;
+
+	DirectionalLightComponent dl3;
+	dl3.direction = {0.f, 1.f, 0.f};
+	dl3.color     = {0.f, 0.f, 1.f};
+	dl3.intensity = 4.f;
+
+	w.AddDirectionalLightComponent(e1, dl1);
+	w.AddDirectionalLightComponent(e2, dl2);
+	w.AddDirectionalLightComponent(e3, dl3);
+
+	EXPECT_TRUE(w.HasDirectionalLightComponent(e1));
+	EXPECT_TRUE(w.HasDirectionalLightComponent(e2));
+	EXPECT_TRUE(w.HasDirectionalLightComponent(e3));
+	EXPECT_EQ(w.GetDirectionalLightComponentEntities().size(), 3u);
+
+	// Const overload.
+	const World& cw = w;
+	EXPECT_FLOAT_EQ(cw.GetDirectionalLightComponent(e1).intensity, 2.f);
+	EXPECT_FLOAT_EQ(cw.GetDirectionalLightComponent(e2).intensity, 3.f);
+	EXPECT_FLOAT_EQ(cw.GetDirectionalLightComponent(e3).intensity, 4.f);
+
+	// Non-const overload allows mutation.
+	w.GetDirectionalLightComponent(e1).intensity = 99.f;
+	EXPECT_FLOAT_EQ(cw.GetDirectionalLightComponent(e1).intensity, 99.f);
+
+	// Remove (swap-and-pop).
+	w.RemoveDirectionalLightComponent(e2);
+	EXPECT_FALSE(w.HasDirectionalLightComponent(e2));
+	EXPECT_TRUE(w.HasDirectionalLightComponent(e1));
+	EXPECT_TRUE(w.HasDirectionalLightComponent(e3));
+	EXPECT_EQ(w.GetDirectionalLightComponentEntities().size(), 2u);
+
+	w.RemoveDirectionalLightComponent(e1);
+	w.RemoveDirectionalLightComponent(e3);
+	EXPECT_TRUE(w.GetDirectionalLightComponentEntities().empty());
+
+	// GetDirectionalLightComponentEntities lists exactly the entities with components.
+	w.AddDirectionalLightComponent(e1, dl1);
+	w.AddDirectionalLightComponent(e3, dl3);
+	const auto& ents = w.GetDirectionalLightComponentEntities();
+	EXPECT_EQ(ents.size(), 2u);
+	bool hasE1 = false, hasE3 = false;
+	for (const Entity& e : ents)
+	{
+		if (e == e1) hasE1 = true;
+		if (e == e3) hasE3 = true;
+	}
+	EXPECT_TRUE(hasE1);
+	EXPECT_TRUE(hasE3);
+}
+
+// ===========================================================================
+// world_point_light_component_storage_is_sparse_set
+// ===========================================================================
+TEST(World, test_world_point_light_component_storage_is_sparse_set)
+{
+	World w;
+	Entity e1 = w.CreateEntity();
+	Entity e2 = w.CreateEntity();
+	Entity e3 = w.CreateEntity();
+
+	// Initially no components.
+	EXPECT_FALSE(w.HasPointLightComponent(e1));
+	EXPECT_TRUE(w.GetPointLightComponentEntities().empty());
+
+	// Add components.
+	PointLightComponent pl1;
+	pl1.color     = {1.f, 0.f, 0.f};
+	pl1.intensity = 5.f;
+	pl1.range     = 20.f;
+
+	PointLightComponent pl2;
+	pl2.color     = {0.f, 1.f, 0.f};
+	pl2.intensity = 6.f;
+	pl2.range     = 30.f;
+
+	PointLightComponent pl3;
+	pl3.color     = {0.f, 0.f, 1.f};
+	pl3.intensity = 7.f;
+	pl3.range     = 40.f;
+
+	w.AddPointLightComponent(e1, pl1);
+	w.AddPointLightComponent(e2, pl2);
+	w.AddPointLightComponent(e3, pl3);
+
+	EXPECT_TRUE(w.HasPointLightComponent(e1));
+	EXPECT_TRUE(w.HasPointLightComponent(e2));
+	EXPECT_TRUE(w.HasPointLightComponent(e3));
+	EXPECT_EQ(w.GetPointLightComponentEntities().size(), 3u);
+
+	// Const overload.
+	const World& cw = w;
+	EXPECT_FLOAT_EQ(cw.GetPointLightComponent(e1).range, 20.f);
+	EXPECT_FLOAT_EQ(cw.GetPointLightComponent(e2).range, 30.f);
+	EXPECT_FLOAT_EQ(cw.GetPointLightComponent(e3).range, 40.f);
+
+	// Non-const overload allows mutation.
+	w.GetPointLightComponent(e1).intensity = 50.f;
+	EXPECT_FLOAT_EQ(cw.GetPointLightComponent(e1).intensity, 50.f);
+
+	// Remove (swap-and-pop).
+	w.RemovePointLightComponent(e2);
+	EXPECT_FALSE(w.HasPointLightComponent(e2));
+	EXPECT_TRUE(w.HasPointLightComponent(e1));
+	EXPECT_TRUE(w.HasPointLightComponent(e3));
+	EXPECT_EQ(w.GetPointLightComponentEntities().size(), 2u);
+
+	w.RemovePointLightComponent(e1);
+	w.RemovePointLightComponent(e3);
+	EXPECT_TRUE(w.GetPointLightComponentEntities().empty());
+
+	// GetPointLightComponentEntities lists exactly the entities with components.
+	w.AddPointLightComponent(e2, pl2);
+	w.AddPointLightComponent(e3, pl3);
+	const auto& ents = w.GetPointLightComponentEntities();
+	EXPECT_EQ(ents.size(), 2u);
+	bool hasE2 = false, hasE3 = false;
+	for (const Entity& e : ents)
+	{
+		if (e == e2) hasE2 = true;
+		if (e == e3) hasE3 = true;
+	}
+	EXPECT_TRUE(hasE2);
+	EXPECT_TRUE(hasE3);
+}
+
+// ===========================================================================
+// world_spot_light_component_storage_is_sparse_set
+// ===========================================================================
+TEST(World, test_world_spot_light_component_storage_is_sparse_set)
+{
+	World w;
+	Entity e1 = w.CreateEntity();
+	Entity e2 = w.CreateEntity();
+	Entity e3 = w.CreateEntity();
+
+	// Initially no components.
+	EXPECT_FALSE(w.HasSpotLightComponent(e1));
+	EXPECT_TRUE(w.GetSpotLightComponentEntities().empty());
+
+	// Add components.
+	SpotLightComponent sl1;
+	sl1.color        = {1.f, 1.f, 0.f};
+	sl1.intensity    = 8.f;
+	sl1.range        = 15.f;
+	sl1.innerConeCos = 0.95f;
+	sl1.outerConeCos = 0.85f;
+
+	SpotLightComponent sl2;
+	sl2.color        = {0.f, 1.f, 1.f};
+	sl2.intensity    = 9.f;
+	sl2.range        = 25.f;
+	sl2.innerConeCos = 0.90f;
+	sl2.outerConeCos = 0.80f;
+
+	SpotLightComponent sl3;
+	sl3.color        = {1.f, 0.f, 1.f};
+	sl3.intensity    = 10.f;
+	sl3.range        = 35.f;
+	sl3.innerConeCos = 0.98f;
+	sl3.outerConeCos = 0.92f;
+
+	w.AddSpotLightComponent(e1, sl1);
+	w.AddSpotLightComponent(e2, sl2);
+	w.AddSpotLightComponent(e3, sl3);
+
+	EXPECT_TRUE(w.HasSpotLightComponent(e1));
+	EXPECT_TRUE(w.HasSpotLightComponent(e2));
+	EXPECT_TRUE(w.HasSpotLightComponent(e3));
+	EXPECT_EQ(w.GetSpotLightComponentEntities().size(), 3u);
+
+	// Const overload.
+	const World& cw = w;
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e1).range, 15.f);
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e2).range, 25.f);
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e3).range, 35.f);
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e1).innerConeCos, 0.95f);
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e1).outerConeCos, 0.85f);
+
+	// Non-const overload allows mutation.
+	w.GetSpotLightComponent(e1).intensity = 88.f;
+	EXPECT_FLOAT_EQ(cw.GetSpotLightComponent(e1).intensity, 88.f);
+
+	// Remove (swap-and-pop).
+	w.RemoveSpotLightComponent(e2);
+	EXPECT_FALSE(w.HasSpotLightComponent(e2));
+	EXPECT_TRUE(w.HasSpotLightComponent(e1));
+	EXPECT_TRUE(w.HasSpotLightComponent(e3));
+	EXPECT_EQ(w.GetSpotLightComponentEntities().size(), 2u);
+
+	w.RemoveSpotLightComponent(e1);
+	w.RemoveSpotLightComponent(e3);
+	EXPECT_TRUE(w.GetSpotLightComponentEntities().empty());
+
+	// GetSpotLightComponentEntities lists exactly the entities with components.
+	w.AddSpotLightComponent(e1, sl1);
+	w.AddSpotLightComponent(e3, sl3);
+	const auto& ents = w.GetSpotLightComponentEntities();
+	EXPECT_EQ(ents.size(), 2u);
+	bool hasE1 = false, hasE3 = false;
+	for (const Entity& e : ents)
+	{
+		if (e == e1) hasE1 = true;
+		if (e == e3) hasE3 = true;
+	}
+	EXPECT_TRUE(hasE1);
+	EXPECT_TRUE(hasE3);
+}
+
+// ===========================================================================
 // world_iteration_forbids_concurrent_mutation
 // ===========================================================================
 // This semantic is a contract-level prohibition (undefined behaviour if
