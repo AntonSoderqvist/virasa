@@ -47,6 +47,7 @@ add_subdirectory(src/virasa/renderer)
 add_subdirectory(src/virasa/ecs)
 add_subdirectory(src/virasa/ui)
 add_subdirectory(src/virasa/renderer/text)
+add_subdirectory(src/virasa/editor)
 
 # --- Shaders ---
 add_subdirectory(shaders)
@@ -72,6 +73,7 @@ if(VIRASA_BUILD_TESTS)
     add_subdirectory(tests/virasa/ecs)
     add_subdirectory(tests/virasa/ui)
     add_subdirectory(tests/virasa/renderer/text)
+    add_subdirectory(tests/virasa/editor)
 endif()
 
 # --- Editor executable ---
@@ -86,4 +88,5 @@ target_link_libraries(virasa_editor
         virasa_ecs_lib
         virasa_ui_lib
         virasa_renderer_text_lib
+        virasa_editor_lib
 )

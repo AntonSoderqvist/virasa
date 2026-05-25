@@ -38,6 +38,8 @@
 #include "virasa/renderer/resources/Pipeline.h"
 #include "virasa/renderer/resources/Sampler.h"
 #include "virasa/renderer/resources/ShaderModule.h"
+#include "virasa/editor/Buffer.h"
+#include "virasa/editor/Motions.h"
 #include "virasa/renderer/text/UiPass.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
@@ -491,7 +493,17 @@ int main(int argc, char** argv)
 	std::string commandBuffer;
 	std::size_t commandCursor = 0;
 	bool ideOpen = false;
-	const std::string idePanelText = "// scratch\nhello editor\n";
+
+	virasa::editor::Buffer editorBuffer;
+	editorBuffer.SetText("// scratch\nhello editor\n");
+	virasa::editor::MotionState motionState;
+
+	enum class Focus
+	{
+		CommandBar,
+		Editor
+	};
+	Focus focus = Focus::CommandBar;
 
 	const float kBarLineHeight = fontAtlas.GetAscender() - fontAtlas.GetDescender();
 	const float kBarHeight = kBarLineHeight + 2.0f * commandBarConfig.paddingY;
@@ -503,54 +515,100 @@ int main(int argc, char** argv)
 		bool shouldExit = false;
 		for (const virasa::Event& event : events)
 		{
-			if (event.type == virasa::EventType::TextInput)
-			{
-				commandBuffer.append(event.textInput.utf8, event.textInput.length);
-				commandCursor += event.textInput.length;
-			}
-			else if (event.type == virasa::EventType::KeyDown)
-			{
-				if (event.keyboard.key == virasa::KeyCode::Backspace)
-				{
-					if (!commandBuffer.empty())
-					{
-						std::size_t eraseIndex = commandBuffer.size() - 1;
-						while (eraseIndex > 0 &&
-							 (static_cast<unsigned char>(commandBuffer[eraseIndex]) &
-								 0xC0u) == 0x80u)
-						{
-							--eraseIndex;
-						}
-						std::size_t removedBytes = commandBuffer.size() - eraseIndex;
-						commandBuffer.erase(eraseIndex);
-						commandCursor = commandCursor > removedBytes
-									    ? commandCursor - removedBytes
-									    : 0;
-					}
-				}
-				else if (event.keyboard.key == virasa::KeyCode::Enter)
-				{
-					if (commandBuffer == ":ide")
-					{
-						ideOpen = !ideOpen;
-					}
-					commandBuffer.clear();
-					commandCursor = 0;
-				}
-			}
-
 			if (event.type == virasa::EventType::Quit)
 			{
 				LOG_INFO(logger, "Quit event received, exiting.");
 				shouldExit = true;
 				break;
 			}
-			if (event.type == virasa::EventType::KeyDown &&
-				event.keyboard.key == virasa::KeyCode::Escape)
+
+			if (focus == Focus::Editor)
 			{
-				LOG_INFO(logger, "Escape key pressed, exiting.");
-				shouldExit = true;
-				break;
+				if (event.type == virasa::EventType::TextInput)
+				{
+					std::string_view utf8(
+						event.textInput.utf8, event.textInput.length);
+					virasa::editor::KeyResult kr =
+						motionState.HandleTextInput(utf8, editorBuffer);
+					if (kr == virasa::editor::KeyResult::RequestCommandBar)
+					{
+						commandBuffer = ":";
+						commandCursor = 1;
+						focus = Focus::CommandBar;
+					}
+				}
+				else if (event.type == virasa::EventType::KeyDown)
+				{
+					(void)motionState.HandleKey(event.keyboard.key, editorBuffer);
+				}
+			}
+			else
+			{
+				if (event.type == virasa::EventType::TextInput)
+				{
+					commandBuffer.append(
+						event.textInput.utf8, event.textInput.length);
+					commandCursor += event.textInput.length;
+				}
+				else if (event.type == virasa::EventType::KeyDown)
+				{
+					if (event.keyboard.key == virasa::KeyCode::Backspace)
+					{
+						if (!commandBuffer.empty())
+						{
+							std::size_t eraseIndex = commandBuffer.size() - 1;
+							while (eraseIndex > 0 &&
+								 (static_cast<unsigned char>(
+									  commandBuffer[eraseIndex]) &
+									 0xC0u) == 0x80u)
+							{
+								--eraseIndex;
+							}
+							std::size_t removedBytes =
+								commandBuffer.size() - eraseIndex;
+							commandBuffer.erase(eraseIndex);
+							commandCursor = commandCursor > removedBytes
+										    ? commandCursor - removedBytes
+										    : 0;
+						}
+					}
+					else if (event.keyboard.key == virasa::KeyCode::Enter)
+					{
+						if (commandBuffer == ":ide")
+						{
+							ideOpen = !ideOpen;
+							if (ideOpen)
+							{
+								motionState.SetMode(
+									virasa::editor::Mode::Normal);
+								focus = Focus::Editor;
+							}
+						}
+						else if (commandBuffer == ":q")
+						{
+							ideOpen = false;
+							focus = Focus::CommandBar;
+						}
+						commandBuffer.clear();
+						commandCursor = 0;
+					}
+					else if (event.keyboard.key == virasa::KeyCode::Escape)
+					{
+						if (commandBuffer.empty() && !ideOpen)
+						{
+							LOG_INFO(logger,
+								"Escape key pressed, exiting.");
+							shouldExit = true;
+							break;
+						}
+						commandBuffer.clear();
+						commandCursor = 0;
+						if (ideOpen)
+						{
+							focus = Focus::Editor;
+						}
+					}
+				}
 			}
 		}
 
@@ -858,7 +916,7 @@ int main(int argc, char** argv)
 		if (ideOpen)
 		{
 			textPanel.Render(drawList,
-				idePanelText,
+				editorBuffer.GetText(),
 				static_cast<float>(panelX),
 				0.0f,
 				static_cast<float>(panelWidth),

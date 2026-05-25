@@ -1,4 +1,6 @@
 add_library(virasa_editor_lib STATIC
+    Buffer.cpp
+    Motions.cpp
 )
 
 target_include_directories(virasa_editor_lib
@@ -8,5 +10,5 @@ target_include_directories(virasa_editor_lib
 
 target_link_libraries(virasa_editor_lib
     PUBLIC
-    PRIVATE
+        virasa_window_lib
 )
