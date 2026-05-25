@@ -18,7 +18,7 @@ namespace ui
  */
 struct CommandBarConfig
 {
-public:
+	public:
 	virasa::ui::Color background = {0.039f, 0.165f, 0.200f, 0.7f};
 	virasa::ui::Color foreground = {0.9f, 0.9f, 0.9f, 1.0f};
 	virasa::ui::Color cursorColor = {0.9f, 0.9f, 0.9f, 1.0f};
@@ -31,7 +31,7 @@ public:
  */
 class CommandBar final
 {
-public:
+	public:
 	/**
 	 * @brief Replace the stored command bar configuration.
 	 * @param config Configuration to copy into the command bar.
@@ -53,19 +53,14 @@ public:
 	 * @param windowWidth Window width in framebuffer pixels.
 	 * @param windowHeight Window height in framebuffer pixels.
 	 */
-	void Render(
-		virasa::ui::DrawList& out,
-		std::string_view text,
-		std::size_t cursorByteIndex,
-		const virasa::ui::FontAtlas& atlas,
-		uint32_t windowWidth,
-		uint32_t windowHeight) const;
+	void Render(virasa::ui::DrawList& out, std::string_view text, std::size_t cursorByteIndex,
+		const virasa::ui::FontAtlas& atlas, uint32_t windowWidth, uint32_t windowHeight) const;
 
-private:
+	private:
 	CommandBarConfig _config = {};
 };
 
-}
-}
+} // namespace ui
+} // namespace virasa
 
 #endif

@@ -1,6 +1,10 @@
 add_executable(virasa_editor_tests
     test_Buffer.cpp
     test_Motions.cpp
+    test_CommandBarView.cpp
+    test_EditorView.cpp
+    test_HierarchyView.cpp
+    test_ViewManager.cpp
 )
 
 target_link_libraries(virasa_editor_tests

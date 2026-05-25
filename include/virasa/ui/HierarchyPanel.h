@@ -3,14 +3,11 @@
 
 #include "virasa/ui/Types.h"
 #include "virasa/ui/FontAtlas.h"
-#include "virasa/ecs/Types.h"
-#include "virasa/ecs/World.h"
-#include "virasa/window/Events.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
-#include <unordered_set>
 
 namespace virasa::ui
 {
@@ -47,23 +44,27 @@ public:
 };
 
 /**
- * @brief Result returned by HierarchyPanel key and text-input handlers.
+ * @brief A single visible row supplied to HierarchyPanel::Render.
  *
- * Consumed indicates that the HierarchyPanel handled the input and the
- * caller should not propagate it further.
+ * Holds a non-owning name view and the row's depth in the hierarchy.
+ * Copyable, movable, default-constructible, and trivially destructible.
  */
-enum class HierarchyPanelKeyResult : uint8_t
+struct HierarchyPanelRow
 {
-	Consumed
+public:
+	/// Non-owning UTF-8 name view; must remain valid for the duration of Render.
+	std::string_view name = {};
+
+	/// Depth in the hierarchy: 0 for roots, 1 for direct children, etc.
+	uint32_t depth = 0u;
 };
 
 /**
- * @brief A UI panel that displays the ECS entity hierarchy and supports
- *        vim-style keyboard navigation.
+ * @brief A stateless UI panel that renders a flat list of hierarchy rows.
  *
- * HierarchyPanel renders a depth-first pre-order view of the World's
- * entity hierarchy. It supports 'h', 'l', 'j', 'k', 'gg', and 'G'
- * bindings for navigation and collapse/expand.
+ * HierarchyPanel holds only a HierarchyPanelConfig. The caller supplies
+ * the visible rows, cursor position, atlas, and panel rectangle to Render
+ * each frame.
  */
 class HierarchyPanel final
 {
@@ -81,53 +82,28 @@ public:
 	[[nodiscard]] const HierarchyPanelConfig& GetConfig() const noexcept;
 
 	/**
-	 * @brief Handle a non-printable key-down event.
-	 * @param key    The physical key code.
-	 * @param world  The ECS world (accepted for forward-compatibility).
-	 * @return HierarchyPanelKeyResult::Consumed always.
-	 */
-	HierarchyPanelKeyResult HandleKey(virasa::KeyCode key, const virasa::ecs::World& world);
-
-	/**
-	 * @brief Handle a text-input event carrying one or more UTF-8 codepoints.
-	 * @param utf8   The UTF-8 byte sequence produced by the platform.
-	 * @param world  The ECS world used to query the hierarchy.
-	 * @return HierarchyPanelKeyResult::Consumed always.
-	 */
-	HierarchyPanelKeyResult HandleTextInput(std::string_view utf8, const virasa::ecs::World& world);
-
-	/**
-	 * @brief Return the entity at the current cursor row.
-	 * @param world  The ECS world used to compute the visible-rows list.
-	 * @return The Entity at _cursorRow, or Entity::Invalid() if the list is
-	 *         empty or _cursorRow is out of range.
-	 */
-	[[nodiscard]] virasa::ecs::Entity GetCursorEntity(const virasa::ecs::World& world) const;
-
-	/**
 	 * @brief Render the panel into the supplied DrawList.
-	 * @param out     DrawList to append commands to.
-	 * @param world   The ECS world used to compute the visible-rows list.
-	 * @param atlas   Font atlas used for glyph metrics.
-	 * @param x       Left edge of the panel in framebuffer pixels.
-	 * @param y       Top edge of the panel in framebuffer pixels.
-	 * @param width   Width of the panel in framebuffer pixels.
-	 * @param height  Height of the panel in framebuffer pixels.
+	 * @param out       DrawList to append commands to.
+	 * @param rows      Visible rows to render, in display order.
+	 * @param cursorRow Zero-based index of the cursor row (clamped internally).
+	 * @param atlas     Font atlas used for glyph metrics.
+	 * @param x         Left edge of the panel in framebuffer pixels.
+	 * @param y         Top edge of the panel in framebuffer pixels.
+	 * @param width     Width of the panel in framebuffer pixels.
+	 * @param height    Height of the panel in framebuffer pixels.
 	 */
 	void Render(
 		virasa::ui::DrawList& out,
-		const virasa::ecs::World& world,
+		std::span<const HierarchyPanelRow> rows,
+		std::size_t cursorRow,
 		const virasa::ui::FontAtlas& atlas,
 		float x,
 		float y,
 		float width,
-		float height);
+		float height) const;
 
 private:
 	HierarchyPanelConfig _config = {};
-	std::size_t _cursorRow = 0u;
-	std::unordered_set<uint32_t> _expanded = {};
-	bool _pendingG = false;
 };
 
 } // namespace virasa::ui

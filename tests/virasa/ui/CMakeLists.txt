@@ -3,6 +3,7 @@ add_executable(virasa_ui_tests
     test_FontAtlas.cpp
     test_CommandBar.cpp
     test_TextPanel.cpp
+    test_HierarchyPanel.cpp
 )
 
 target_link_libraries(virasa_ui_tests

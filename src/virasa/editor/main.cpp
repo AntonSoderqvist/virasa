@@ -38,13 +38,10 @@
 #include "virasa/renderer/resources/Pipeline.h"
 #include "virasa/renderer/resources/Sampler.h"
 #include "virasa/renderer/resources/ShaderModule.h"
-#include "virasa/editor/Buffer.h"
-#include "virasa/editor/Motions.h"
+#include "virasa/editor/ViewManager.h"
 #include "virasa/renderer/text/UiPass.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
-#include "virasa/ui/HierarchyPanel.h"
-#include "virasa/ui/TextPanel.h"
 #include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
 #include "virasa/window/InputState.h"
@@ -485,38 +482,18 @@ int main(int argc, char** argv)
 		}
 	}
 
-	virasa::ui::CommandBar commandBar;
-	virasa::ui::CommandBarConfig commandBarConfig{};
-	commandBarConfig.paddingY = 2.0f;
-	commandBar.SetConfig(commandBarConfig);
-	virasa::ui::TextPanel textPanel;
+	virasa::editor::ViewManager viewManager;
+	{
+		virasa::ui::CommandBarConfig commandBarConfig{};
+		commandBarConfig.paddingY = 2.0f;
+		viewManager.GetCommandBarView().GetPanel().SetConfig(commandBarConfig);
+		viewManager.GetEditorView().GetBuffer().SetText("// scratch\nhello editor\n");
+	}
 	virasa::ui::DrawList drawList;
-	std::string commandBuffer;
-	std::size_t commandCursor = 0;
-
-	enum class RightPanelMode
-	{
-		Closed,
-		Editor,
-		Hierarchy
-	};
-	RightPanelMode rightPanelMode = RightPanelMode::Closed;
-
-	virasa::editor::Buffer editorBuffer;
-	editorBuffer.SetText("// scratch\nhello editor\n");
-	virasa::editor::MotionState motionState;
-	virasa::ui::HierarchyPanel hierarchyPanel;
-
-	enum class Focus
-	{
-		CommandBar,
-		Editor,
-		Hierarchy
-	};
-	Focus focus = Focus::CommandBar;
 
 	const float kBarLineHeight = fontAtlas.GetAscender() - fontAtlas.GetDescender();
-	const float kBarHeight = kBarLineHeight + 2.0f * commandBarConfig.paddingY;
+	const float kBarHeight = kBarLineHeight +
+		2.0f * viewManager.GetCommandBarView().GetPanel().GetConfig().paddingY;
 	std::unordered_map<VkImageView, uint32_t> sceneSlotCache;
 
 	for (;;)
@@ -532,137 +509,23 @@ int main(int argc, char** argv)
 				break;
 			}
 
-			if (focus == Focus::Editor)
+			if (event.type == virasa::EventType::KeyDown &&
+				event.keyboard.key == virasa::KeyCode::Escape &&
+				viewManager.GetRightPanelMode() ==
+					virasa::editor::RightPanelMode::Closed &&
+				viewManager.GetCommandBarView().GetText().empty())
 			{
-				if (event.type == virasa::EventType::TextInput)
-				{
-					std::string_view utf8(
-						event.textInput.utf8, event.textInput.length);
-					virasa::editor::KeyResult kr =
-						motionState.HandleTextInput(utf8, editorBuffer);
-					if (kr == virasa::editor::KeyResult::RequestCommandBar)
-					{
-						commandBuffer = ":";
-						commandCursor = 1;
-						focus = Focus::CommandBar;
-					}
-				}
-				else if (event.type == virasa::EventType::KeyDown)
-				{
-					(void)motionState.HandleKey(event.keyboard.key, editorBuffer);
-				}
+				LOG_INFO(logger, "Escape key pressed, exiting.");
+				shouldExit = true;
+				break;
 			}
-			else if (focus == Focus::Hierarchy)
+
+			virasa::editor::EventResult result = viewManager.HandleEvent(event, world);
+			if (result == virasa::editor::EventResult::QuitRequested)
 			{
-				if (event.type == virasa::EventType::TextInput)
-				{
-					std::string_view utf8(
-						event.textInput.utf8, event.textInput.length);
-					if (utf8.find(':') != std::string_view::npos)
-					{
-						commandBuffer = ":";
-						commandCursor = 1;
-						focus = Focus::CommandBar;
-					}
-					else
-					{
-						(void)hierarchyPanel.HandleTextInput(utf8, world);
-					}
-				}
-				else if (event.type == virasa::EventType::KeyDown)
-				{
-					(void)hierarchyPanel.HandleKey(event.keyboard.key, world);
-				}
-			}
-			else
-			{
-				if (event.type == virasa::EventType::TextInput)
-				{
-					commandBuffer.append(
-						event.textInput.utf8, event.textInput.length);
-					commandCursor += event.textInput.length;
-				}
-				else if (event.type == virasa::EventType::KeyDown)
-				{
-					if (event.keyboard.key == virasa::KeyCode::Backspace)
-					{
-						if (!commandBuffer.empty())
-						{
-							std::size_t eraseIndex = commandBuffer.size() - 1;
-							while (eraseIndex > 0 &&
-								 (static_cast<unsigned char>(
-									  commandBuffer[eraseIndex]) &
-									 0xC0u) == 0x80u)
-							{
-								--eraseIndex;
-							}
-							std::size_t removedBytes =
-								commandBuffer.size() - eraseIndex;
-							commandBuffer.erase(eraseIndex);
-							commandCursor = commandCursor > removedBytes
-										    ? commandCursor - removedBytes
-										    : 0;
-						}
-					}
-					else if (event.keyboard.key == virasa::KeyCode::Enter)
-					{
-						if (commandBuffer == ":ide")
-						{
-							if (rightPanelMode == RightPanelMode::Editor)
-							{
-								rightPanelMode = RightPanelMode::Closed;
-								focus = Focus::CommandBar;
-							}
-							else
-							{
-								rightPanelMode = RightPanelMode::Editor;
-								motionState.SetMode(
-									virasa::editor::Mode::Normal);
-								focus = Focus::Editor;
-							}
-						}
-						else if (commandBuffer == ":tree")
-						{
-							if (rightPanelMode == RightPanelMode::Hierarchy)
-							{
-								rightPanelMode = RightPanelMode::Closed;
-								focus = Focus::CommandBar;
-							}
-							else
-							{
-								rightPanelMode = RightPanelMode::Hierarchy;
-								focus = Focus::Hierarchy;
-							}
-						}
-						else if (commandBuffer == ":q")
-						{
-							rightPanelMode = RightPanelMode::Closed;
-							focus = Focus::CommandBar;
-						}
-						commandBuffer.clear();
-						commandCursor = 0;
-					}
-					else if (event.keyboard.key == virasa::KeyCode::Escape)
-					{
-						if (commandBuffer.empty() && rightPanelMode == RightPanelMode::Closed)
-						{
-							LOG_INFO(logger,
-								"Escape key pressed, exiting.");
-							shouldExit = true;
-							break;
-						}
-						commandBuffer.clear();
-						commandCursor = 0;
-						if (rightPanelMode == RightPanelMode::Editor)
-						{
-							focus = Focus::Editor;
-						}
-						else if (rightPanelMode == RightPanelMode::Hierarchy)
-						{
-							focus = Focus::Hierarchy;
-						}
-					}
-				}
+				LOG_INFO(logger, "Quit command submitted, exiting.");
+				shouldExit = true;
+				break;
 			}
 		}
 
@@ -717,13 +580,10 @@ int main(int argc, char** argv)
 		const uint32_t barHeightPixels =
 			std::min<uint32_t>(static_cast<uint32_t>(kBarHeight), currentExtent.height - 1u);
 		const uint32_t sceneWidth =
-			rightPanelMode != RightPanelMode::Closed
+			viewManager.GetRightPanelMode() != virasa::editor::RightPanelMode::Closed
 				? currentExtent.width / 2u
 				: currentExtent.width;
 		const uint32_t sceneHeight = currentExtent.height - barHeightPixels;
-		const uint32_t panelX = sceneWidth;
-		const uint32_t panelWidth = currentExtent.width - sceneWidth;
-		const uint32_t panelHeight = sceneHeight;
 
 		{
 			const virasa::math::Transform& cameraTransform =
@@ -969,30 +829,8 @@ int main(int argc, char** argv)
 		sceneQuad.textureSlot = sceneSlot;
 		drawList.AddImageQuad(sceneQuad);
 
-		if (rightPanelMode == RightPanelMode::Editor)
-		{
-			textPanel.Render(drawList,
-				editorBuffer.GetText(),
-				static_cast<float>(panelX),
-				0.0f,
-				static_cast<float>(panelWidth),
-				static_cast<float>(panelHeight),
-				fontAtlas);
-		}
-		else if (rightPanelMode == RightPanelMode::Hierarchy)
-		{
-			hierarchyPanel.Render(drawList,
-				world,
-				fontAtlas,
-				static_cast<float>(panelX),
-				0.0f,
-				static_cast<float>(panelWidth),
-				static_cast<float>(panelHeight));
-		}
-
-		commandBar.Render(drawList,
-			commandBuffer,
-			commandCursor,
+		viewManager.Render(drawList,
+			world,
 			fontAtlas,
 			swapchainExtent.width,
 			swapchainExtent.height);
