@@ -6,6 +6,7 @@
 #include "virasa/math/Transform.h"
 
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 using namespace virasa::ecs;
@@ -46,31 +47,53 @@ TEST(World, test_world_is_movable_non_copyable_owns_entity_state)
 
 	// Build a world with some state.
 	World src;
-	Entity e1 = src.CreateEntity();
-	Entity e2 = src.CreateEntity();
+	Entity e1 = src.CreateEntity("MoveA");
+	Entity e2 = src.CreateEntity("MoveB");
 	src.AddTransformComponent(e1, MakeTransform(1.f, 2.f, 3.f));
 	src.AddMeshComponent(e2, MeshComponent{42u});
 	src.AddVisualComponent(e2, VisualComponent{7u});
+	src.AddDirectionalLightComponent(e1, DirectionalLightComponent{});
+	src.AddPointLightComponent(e2, PointLightComponent{});
+	src.AddSpotLightComponent(e1, SpotLightComponent{});
+	src.AddCameraComponent(e2, CameraComponent{});
 	EXPECT_EQ(src.GetEntityCount(), 2u);
+	ASSERT_EQ(src.GetRoots().size(), 2u);
+	EXPECT_TRUE(src.HasNameComponent(e1));
+	EXPECT_TRUE(src.HasNameComponent(e2));
 
 	// Move-construct.
 	World dst(std::move(src));
 	EXPECT_EQ(dst.GetEntityCount(), 2u);
 	EXPECT_TRUE(dst.IsValid(e1));
 	EXPECT_TRUE(dst.IsValid(e2));
+	EXPECT_TRUE(dst.HasNameComponent(e1));
+	EXPECT_TRUE(dst.HasNameComponent(e2));
 	EXPECT_TRUE(dst.HasTransformComponent(e1));
 	EXPECT_TRUE(dst.HasMeshComponent(e2));
 	EXPECT_TRUE(dst.HasVisualComponent(e2));
+	EXPECT_TRUE(dst.HasDirectionalLightComponent(e1));
+	EXPECT_TRUE(dst.HasPointLightComponent(e2));
+	EXPECT_TRUE(dst.HasSpotLightComponent(e1));
+	EXPECT_TRUE(dst.HasCameraComponent(e2));
+	EXPECT_EQ(dst.GetNameComponent(e1).name, "MoveA");
+	EXPECT_EQ(dst.GetNameComponent(e2).name, "MoveB");
+	EXPECT_EQ(dst.GetRoots().size(), 2u);
 
 	// Source is left in a moved-from (default-constructed-equivalent) state.
 	EXPECT_EQ(src.GetEntityCount(), 0u);
+	EXPECT_TRUE(src.GetRoots().empty());
+	EXPECT_TRUE(src.GetNameComponentEntities().empty());
 	EXPECT_TRUE(src.GetTransformComponentEntities().empty());
 	EXPECT_TRUE(src.GetMeshComponentEntities().empty());
 	EXPECT_TRUE(src.GetVisualComponentEntities().empty());
+	EXPECT_TRUE(src.GetDirectionalLightComponentEntities().empty());
+	EXPECT_TRUE(src.GetPointLightComponentEntities().empty());
+	EXPECT_TRUE(src.GetSpotLightComponentEntities().empty());
+	EXPECT_TRUE(src.GetCameraComponentEntities().empty());
 
 	// Move-assign into a world that already owns state.
 	World dst2;
-	Entity e3 = dst2.CreateEntity();
+	Entity e3 = dst2.CreateEntity("OldState");
 	dst2.AddVisualComponent(e3, VisualComponent{99u});
 	EXPECT_EQ(dst2.GetEntityCount(), 1u);
 
@@ -78,12 +101,31 @@ TEST(World, test_world_is_movable_non_copyable_owns_entity_state)
 	EXPECT_EQ(dst2.GetEntityCount(), 2u);
 	EXPECT_TRUE(dst2.IsValid(e1));
 	EXPECT_TRUE(dst2.IsValid(e2));
+	EXPECT_TRUE(dst2.HasNameComponent(e1));
+	EXPECT_TRUE(dst2.HasNameComponent(e2));
+	EXPECT_TRUE(dst2.HasTransformComponent(e1));
+	EXPECT_TRUE(dst2.HasMeshComponent(e2));
+	EXPECT_TRUE(dst2.HasVisualComponent(e2));
+	EXPECT_TRUE(dst2.HasDirectionalLightComponent(e1));
+	EXPECT_TRUE(dst2.HasPointLightComponent(e2));
+	EXPECT_TRUE(dst2.HasSpotLightComponent(e1));
+	EXPECT_TRUE(dst2.HasCameraComponent(e2));
+	EXPECT_EQ(dst2.GetRoots().size(), 2u);
+	EXPECT_EQ(dst2.FindEntityByName("MoveA"), e1);
+	EXPECT_EQ(dst2.FindEntityByName("MoveB"), e2);
+	EXPECT_EQ(dst2.FindEntityByName("OldState"), Entity::Invalid());
 
 	// dst is now moved-from.
 	EXPECT_EQ(dst.GetEntityCount(), 0u);
+	EXPECT_TRUE(dst.GetRoots().empty());
+	EXPECT_TRUE(dst.GetNameComponentEntities().empty());
 	EXPECT_TRUE(dst.GetTransformComponentEntities().empty());
 	EXPECT_TRUE(dst.GetMeshComponentEntities().empty());
 	EXPECT_TRUE(dst.GetVisualComponentEntities().empty());
+	EXPECT_TRUE(dst.GetDirectionalLightComponentEntities().empty());
+	EXPECT_TRUE(dst.GetPointLightComponentEntities().empty());
+	EXPECT_TRUE(dst.GetSpotLightComponentEntities().empty());
+	EXPECT_TRUE(dst.GetCameraComponentEntities().empty());
 
 	// Destroying a moved-from World is well-defined (implicit at scope exit).
 }
@@ -99,13 +141,16 @@ TEST(World, test_world_default_constructed_is_ready)
 	EXPECT_EQ(w.GetEntityCount(), 0u);
 	EXPECT_FALSE(w.IsValid(Entity::Invalid()));
 	EXPECT_FALSE(w.IsValid(Entity{}));
+	EXPECT_TRUE(w.GetRoots().empty());
+	EXPECT_EQ(w.FindEntityByName("anything"), Entity::Invalid());
+	EXPECT_TRUE(w.GetNameComponentEntities().empty());
 	EXPECT_TRUE(w.GetTransformComponentEntities().empty());
 	EXPECT_TRUE(w.GetMeshComponentEntities().empty());
 	EXPECT_TRUE(w.GetVisualComponentEntities().empty());
 
 	// Reserve and CreateEntity are callable without prior Init.
 	w.Reserve(64u);
-	Entity e = w.CreateEntity();
+	Entity e = w.CreateEntity("Ready");
 	EXPECT_TRUE(w.IsValid(e));
 	EXPECT_EQ(w.GetEntityCount(), 1u);
 }
@@ -118,30 +163,40 @@ TEST(World, test_world_create_entity_allocates_index_and_generation)
 	World w;
 
 	// First entity: growth path — index should be 0, generation 0.
-	Entity e0 = w.CreateEntity();
+	Entity e0 = w.CreateEntity("Alpha");
 	EXPECT_EQ(e0.index, 0u);
 	EXPECT_EQ(e0.generation, 0u);
 	EXPECT_TRUE(w.IsValid(e0));
 	EXPECT_EQ(w.GetEntityCount(), 1u);
+	EXPECT_TRUE(w.HasNameComponent(e0));
+	EXPECT_EQ(w.GetNameComponent(e0).name, "Alpha");
+	ASSERT_EQ(w.GetRoots().size(), 1u);
+	EXPECT_EQ(w.GetRoots()[0], e0);
 
 	// Second entity: growth path — index should be 1.
-	Entity e1 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("Beta");
 	EXPECT_EQ(e1.index, 1u);
 	EXPECT_EQ(e1.generation, 0u);
 	EXPECT_TRUE(w.IsValid(e1));
 	EXPECT_EQ(w.GetEntityCount(), 2u);
+	EXPECT_TRUE(w.HasNameComponent(e1));
+	EXPECT_EQ(w.GetNameComponent(e1).name, "Beta");
+	ASSERT_EQ(w.GetRoots().size(), 2u);
 
 	// Destroy e0 to push its slot onto the free-list.
 	w.DestroyEntity(e0);
 	EXPECT_EQ(w.GetEntityCount(), 1u);
 
 	// Next CreateEntity should reuse slot 0 with bumped generation.
-	Entity e0b = w.CreateEntity();
+	Entity e0b = w.CreateEntity("Gamma");
 	EXPECT_EQ(e0b.index, 0u);
 	EXPECT_EQ(e0b.generation, 1u); // generation was bumped by DestroyEntity
 	EXPECT_TRUE(w.IsValid(e0b));
 	EXPECT_FALSE(w.IsValid(e0)); // stale handle
 	EXPECT_EQ(w.GetEntityCount(), 2u);
+	EXPECT_TRUE(w.HasNameComponent(e0b));
+	EXPECT_EQ(w.GetNameComponent(e0b).name, "Gamma");
+	EXPECT_EQ(w.FindEntityByName("Gamma"), e0b);
 
 	// New entity has no parent, no children, no components.
 	EXPECT_EQ(w.GetParent(e0b), Entity::Invalid());
@@ -167,10 +222,10 @@ TEST(World, test_world_destroy_entity_cascades_to_descendants)
 	//   ├── child1
 	//   │   └── grandchild
 	//   └── child2
-	Entity root       = w.CreateEntity();
-	Entity child1     = w.CreateEntity();
-	Entity grandchild = w.CreateEntity();
-	Entity child2     = w.CreateEntity();
+	Entity root       = w.CreateEntity("root");
+	Entity child1     = w.CreateEntity("child1");
+	Entity grandchild = w.CreateEntity("grandchild");
+	Entity child2     = w.CreateEntity("child2");
 
 	EXPECT_EQ(w.SetParent(child1, root),     EcsError::None);
 	EXPECT_EQ(w.SetParent(grandchild, child1), EcsError::None);
@@ -193,15 +248,21 @@ TEST(World, test_world_destroy_entity_cascades_to_descendants)
 	EXPECT_FALSE(w.IsValid(grandchild));
 	EXPECT_FALSE(w.IsValid(child2));
 
-	// Component storages must be empty.
+	// Component storages and roots must be empty.
+	EXPECT_TRUE(w.GetRoots().empty());
+	EXPECT_TRUE(w.GetNameComponentEntities().empty());
 	EXPECT_TRUE(w.GetTransformComponentEntities().empty());
 	EXPECT_TRUE(w.GetMeshComponentEntities().empty());
 	EXPECT_TRUE(w.GetVisualComponentEntities().empty());
+	EXPECT_EQ(w.FindEntityByName("root"), Entity::Invalid());
+	EXPECT_EQ(w.FindEntityByName("child1"), Entity::Invalid());
+	EXPECT_EQ(w.FindEntityByName("grandchild"), Entity::Invalid());
+	EXPECT_EQ(w.FindEntityByName("child2"), Entity::Invalid());
 
 	// Verify that destroying a non-root entity detaches it from its parent.
-	Entity parent = w.CreateEntity();
-	Entity childA = w.CreateEntity();
-	Entity childB = w.CreateEntity();
+	Entity parent = w.CreateEntity("parent");
+	Entity childA = w.CreateEntity("childA");
+	Entity childB = w.CreateEntity("childB");
 	EXPECT_EQ(w.SetParent(childA, parent), EcsError::None);
 	EXPECT_EQ(w.SetParent(childB, parent), EcsError::None);
 	EXPECT_EQ(w.GetChildren(parent).size(), 2u);
@@ -334,9 +395,9 @@ TEST(World, test_world_get_entity_count_returns_live_count)
 TEST(World, test_world_set_parent_manages_hierarchy_and_rejects_cycles)
 {
 	World w;
-	Entity a = w.CreateEntity();
-	Entity b = w.CreateEntity();
-	Entity c = w.CreateEntity();
+	Entity a = w.CreateEntity("a");
+	Entity b = w.CreateEntity("b");
+	Entity c = w.CreateEntity("c");
 
 	// (1) Invalid child → EcsError::InvalidEntity.
 	EXPECT_EQ(w.SetParent(Entity::Invalid(), a), EcsError::InvalidEntity);
@@ -344,7 +405,7 @@ TEST(World, test_world_set_parent_manages_hierarchy_and_rejects_cycles)
 	// (2) Invalid parent (non-Invalid but not live) → EcsError::InvalidEntity.
 	Entity dead = a;
 	w.DestroyEntity(dead); // dead is now invalid
-	Entity aNew = w.CreateEntity(); // reuses slot
+	Entity aNew = w.CreateEntity("a2"); // reuses slot
 	(void)aNew;
 	// dead.generation is stale
 	EXPECT_EQ(w.SetParent(b, dead), EcsError::InvalidEntity);
@@ -390,8 +451,8 @@ TEST(World, test_world_set_parent_manages_hierarchy_and_rejects_cycles)
 TEST(World, test_world_get_parent_returns_invalid_for_roots)
 {
 	World w;
-	Entity root  = w.CreateEntity();
-	Entity child = w.CreateEntity();
+	Entity root  = w.CreateEntity("root");
+	Entity child = w.CreateEntity("child");
 
 	// A freshly created entity is a root.
 	EXPECT_EQ(w.GetParent(root),  Entity::Invalid());
@@ -416,10 +477,10 @@ TEST(World, test_world_get_parent_returns_invalid_for_roots)
 TEST(World, test_world_get_children_returns_stable_reference)
 {
 	World w;
-	Entity parent = w.CreateEntity();
-	Entity c1     = w.CreateEntity();
-	Entity c2     = w.CreateEntity();
-	Entity c3     = w.CreateEntity();
+	Entity parent = w.CreateEntity("parent");
+	Entity c1     = w.CreateEntity("c1");
+	Entity c2     = w.CreateEntity("c2");
+	Entity c3     = w.CreateEntity("c3");
 
 	// No children initially.
 	EXPECT_TRUE(w.GetChildren(parent).empty());
@@ -457,9 +518,9 @@ TEST(World, test_world_get_children_returns_stable_reference)
 TEST(World, test_world_transform_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasTransformComponent(e1));
@@ -521,9 +582,9 @@ TEST(World, test_world_transform_component_storage_is_sparse_set)
 TEST(World, test_world_mesh_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasMeshComponent(e1));
@@ -581,9 +642,9 @@ TEST(World, test_world_mesh_component_storage_is_sparse_set)
 TEST(World, test_world_visual_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasVisualComponent(e1));
@@ -641,9 +702,9 @@ TEST(World, test_world_visual_component_storage_is_sparse_set)
 TEST(World, test_world_directional_light_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasDirectionalLightComponent(e1));
@@ -716,9 +777,9 @@ TEST(World, test_world_directional_light_component_storage_is_sparse_set)
 TEST(World, test_world_point_light_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasPointLightComponent(e1));
@@ -791,9 +852,9 @@ TEST(World, test_world_point_light_component_storage_is_sparse_set)
 TEST(World, test_world_spot_light_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasSpotLightComponent(e1));
@@ -879,9 +940,9 @@ TEST(World, test_world_spot_light_component_storage_is_sparse_set)
 TEST(World, test_world_iteration_forbids_concurrent_mutation)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 	w.AddTransformComponent(e1, MakeTransform(1.f, 0.f, 0.f));
 	w.AddTransformComponent(e2, MakeTransform(2.f, 0.f, 0.f));
 	w.AddTransformComponent(e3, MakeTransform(3.f, 0.f, 0.f));
@@ -909,9 +970,9 @@ TEST(World, test_world_iteration_forbids_concurrent_mutation)
 	EXPECT_FALSE(w.HasTransformComponent(e3));
 
 	// Same pattern for GetChildren.
-	Entity parent = w.CreateEntity();
-	Entity ca     = w.CreateEntity();
-	Entity cb     = w.CreateEntity();
+	Entity parent = w.CreateEntity("parent");
+	Entity ca     = w.CreateEntity("ca");
+	Entity cb     = w.CreateEntity("cb");
 	w.SetParent(ca, parent);
 	w.SetParent(cb, parent);
 
@@ -941,9 +1002,9 @@ TEST(World, test_world_is_not_thread_safe_per_instance)
 	World w1;
 	World w2;
 
-	Entity e1a = w1.CreateEntity();
-	Entity e1b = w1.CreateEntity();
-	Entity e2a = w2.CreateEntity();
+	Entity e1a = w1.CreateEntity("w1a");
+	Entity e1b = w1.CreateEntity("w1b");
+	Entity e2a = w2.CreateEntity("w2a");
 
 	w1.AddTransformComponent(e1a, MakeTransform(1.f, 0.f, 0.f));
 	w2.AddMeshComponent(e2a, MeshComponent{55u});
@@ -974,9 +1035,9 @@ TEST(World, test_world_is_not_thread_safe_per_instance)
 TEST(World, test_world_camera_component_storage_is_sparse_set)
 {
 	World w;
-	Entity e1 = w.CreateEntity();
-	Entity e2 = w.CreateEntity();
-	Entity e3 = w.CreateEntity();
+	Entity e1 = w.CreateEntity("e1");
+	Entity e2 = w.CreateEntity("e2");
+	Entity e3 = w.CreateEntity("e3");
 
 	// Initially no components.
 	EXPECT_FALSE(w.HasCameraComponent(e1));
@@ -1062,4 +1123,133 @@ TEST(World, test_world_camera_component_storage_is_sparse_set)
 	EXPECT_FALSE(w.HasCameraComponent(e1));
 	EXPECT_EQ(w.GetCameraComponentEntities().size(), 1u);
 	EXPECT_TRUE(w.HasCameraComponent(e3));
+}
+
+// ===========================================================================
+// world_name_component_storage_is_readonly_sparse_set
+// ===========================================================================
+TEST(World, test_world_name_component_storage_is_readonly_sparse_set)
+{
+	World w;
+	Entity e1 = w.CreateEntity("Alpha");
+	Entity e2 = w.CreateEntity("Beta");
+
+	EXPECT_TRUE(w.HasNameComponent(e1));
+	EXPECT_TRUE(w.HasNameComponent(e2));
+	EXPECT_EQ(w.GetNameComponent(e1).name, "Alpha");
+	EXPECT_EQ(w.GetNameComponent(e2).name, "Beta");
+
+	const auto& entities = w.GetNameComponentEntities();
+	ASSERT_EQ(entities.size(), 2u);
+	bool hasE1 = false;
+	bool hasE2 = false;
+	for (const Entity& entity : entities)
+	{
+		if (entity == e1)
+		{
+			hasE1 = true;
+		}
+		if (entity == e2)
+		{
+			hasE2 = true;
+		}
+	}
+	EXPECT_TRUE(hasE1);
+	EXPECT_TRUE(hasE2);
+
+	w.DestroyEntity(e1);
+	EXPECT_FALSE(w.IsValid(e1));
+	EXPECT_FALSE(w.HasNameComponent(e1));
+	EXPECT_EQ(w.GetNameComponentEntities().size(), 1u);
+	EXPECT_TRUE(w.HasNameComponent(e2));
+}
+
+// ===========================================================================
+// world_create_entity_resolves_name_collision_with_dot_suffix
+// ===========================================================================
+TEST(World, test_world_create_entity_resolves_name_collision_with_dot_suffix)
+{
+	World w;
+
+	Entity a = w.CreateEntity("Cube");
+	Entity b = w.CreateEntity("Cube");
+	Entity c = w.CreateEntity("Cube");
+	Entity d = w.CreateEntity("");
+	Entity e = w.CreateEntity("");
+	Entity f = w.CreateEntity("Cube.001");
+	Entity g = w.CreateEntity("cube");
+
+	EXPECT_EQ(w.GetNameComponent(a).name, "Cube");
+	EXPECT_EQ(w.GetNameComponent(b).name, "Cube.001");
+	EXPECT_EQ(w.GetNameComponent(c).name, "Cube.002");
+	EXPECT_EQ(w.GetNameComponent(d).name, "Entity");
+	EXPECT_EQ(w.GetNameComponent(e).name, "Entity.001");
+	EXPECT_EQ(w.GetNameComponent(f).name, "Cube.001.001");
+	EXPECT_EQ(w.GetNameComponent(g).name, "cube");
+
+	EXPECT_EQ(w.FindEntityByName("Cube"), a);
+	EXPECT_EQ(w.FindEntityByName("Cube.001"), b);
+	EXPECT_EQ(w.FindEntityByName("Cube.002"), c);
+	EXPECT_EQ(w.FindEntityByName("Entity"), d);
+	EXPECT_EQ(w.FindEntityByName("Entity.001"), e);
+	EXPECT_EQ(w.FindEntityByName("Cube.001.001"), f);
+	EXPECT_EQ(w.FindEntityByName("cube"), g);
+}
+
+// ===========================================================================
+// world_get_roots_returns_root_entity_list
+// ===========================================================================
+TEST(World, test_world_get_roots_returns_root_entity_list)
+{
+	World w;
+	Entity a = w.CreateEntity("a");
+	Entity b = w.CreateEntity("b");
+	Entity c = w.CreateEntity("c");
+
+	ASSERT_EQ(w.GetRoots().size(), 3u);
+	EXPECT_EQ(w.GetRoots()[0], a);
+	EXPECT_EQ(w.GetRoots()[1], b);
+	EXPECT_EQ(w.GetRoots()[2], c);
+
+	EXPECT_EQ(w.SetParent(b, a), EcsError::None);
+	EXPECT_EQ(w.GetRoots().size(), 2u);
+	for (const Entity& root : w.GetRoots())
+	{
+		EXPECT_NE(root, b);
+	}
+
+	EXPECT_EQ(w.SetParent(b, Entity::Invalid()), EcsError::None);
+	ASSERT_EQ(w.GetRoots().size(), 3u);
+	EXPECT_EQ(w.GetRoots().back(), b);
+
+	w.DestroyEntity(a);
+	EXPECT_FALSE(w.IsValid(a));
+	EXPECT_EQ(w.GetRoots().size(), 2u);
+	for (const Entity& root : w.GetRoots())
+	{
+		EXPECT_NE(root, a);
+	}
+	EXPECT_TRUE(w.IsValid(b));
+	EXPECT_TRUE(w.IsValid(c));
+}
+
+// ===========================================================================
+// world_find_entity_by_name_returns_first_match_or_invalid
+// ===========================================================================
+TEST(World, test_world_find_entity_by_name_returns_first_match_or_invalid)
+{
+	World w;
+	Entity alpha = w.CreateEntity("Alpha");
+	Entity beta = w.CreateEntity("Beta");
+	Entity alphaDuplicate = w.CreateEntity("Alpha");
+
+	EXPECT_EQ(w.FindEntityByName("Alpha"), alpha);
+	EXPECT_EQ(w.FindEntityByName("Alpha.001"), alphaDuplicate);
+	EXPECT_EQ(w.FindEntityByName("Beta"), beta);
+	EXPECT_EQ(w.FindEntityByName("alpha"), Entity::Invalid());
+	EXPECT_EQ(w.FindEntityByName("Missing"), Entity::Invalid());
+
+	w.DestroyEntity(alpha);
+	EXPECT_EQ(w.FindEntityByName("Alpha"), Entity::Invalid());
+	EXPECT_EQ(w.FindEntityByName("Alpha.001"), alphaDuplicate);
 }

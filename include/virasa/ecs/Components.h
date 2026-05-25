@@ -2,12 +2,27 @@
 #define VIRASA_ECS_COMPONENTS_H
 
 #include <cstdint>
+#include <string>
 
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 
 namespace virasa::ecs
 {
+
+/**
+ * @brief Component that holds an owned UTF-8 string name for an entity.
+ *
+ * The name field stores a UTF-8 byte sequence by value. A default-constructed
+ * NameComponent has an empty name. NameComponent does not enforce uniqueness;
+ * that is the responsibility of the surrounding World storage.
+ */
+struct NameComponent
+{
+public:
+	/// Owned UTF-8 name string.
+	std::string name = {};
+};
 
 /**
  * @brief Component that holds a non-owning reference to a Mesh in a MeshRegistry.
@@ -17,7 +32,7 @@ namespace virasa::ecs
  */
 struct MeshComponent
 {
-	public:
+public:
 	uint32_t meshId = 0xFFFFFFFFu;
 };
 
@@ -29,7 +44,7 @@ struct MeshComponent
  */
 struct VisualComponent
 {
-	public:
+public:
 	uint32_t materialId = 0xFFFFFFFFu;
 };
 

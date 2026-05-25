@@ -43,6 +43,7 @@
 #include "virasa/renderer/text/UiPass.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
+#include "virasa/ui/HierarchyPanel.h"
 #include "virasa/ui/TextPanel.h"
 #include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
@@ -338,7 +339,7 @@ int main(int argc, char** argv)
 
 	virasa::ecs::World world;
 	{
-		virasa::ecs::Entity cubeEntity = world.CreateEntity();
+		virasa::ecs::Entity cubeEntity = world.CreateEntity("Cube");
 		world.AddTransformComponent(cubeEntity, virasa::math::Transform::Identity());
 		world.AddMeshComponent(cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
 		world.AddVisualComponent(cubeEntity, virasa::ecs::VisualComponent{cubeMaterialId});
@@ -353,7 +354,7 @@ int main(int argc, char** argv)
 			return -1;
 		}
 
-		virasa::ecs::Entity lightEntity = world.CreateEntity();
+		virasa::ecs::Entity lightEntity = world.CreateEntity("DirectionalLight");
 		virasa::ecs::DirectionalLightComponent lightComponent;
 		lightComponent.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
 		lightComponent.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
@@ -410,7 +411,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	virasa::ecs::Entity cameraEntity = world.CreateEntity();
+	virasa::ecs::Entity cameraEntity = world.CreateEntity("Camera");
 	float cameraYaw = glm::radians(-135.0f);
 	float cameraPitch = glm::radians(-30.0f);
 	virasa::math::Vec3 cameraPosition(4.0f, 4.0f, 3.0f);
@@ -492,16 +493,25 @@ int main(int argc, char** argv)
 	virasa::ui::DrawList drawList;
 	std::string commandBuffer;
 	std::size_t commandCursor = 0;
-	bool ideOpen = false;
+
+	enum class RightPanelMode
+	{
+		Closed,
+		Editor,
+		Hierarchy
+	};
+	RightPanelMode rightPanelMode = RightPanelMode::Closed;
 
 	virasa::editor::Buffer editorBuffer;
 	editorBuffer.SetText("// scratch\nhello editor\n");
 	virasa::editor::MotionState motionState;
+	virasa::ui::HierarchyPanel hierarchyPanel;
 
 	enum class Focus
 	{
 		CommandBar,
-		Editor
+		Editor,
+		Hierarchy
 	};
 	Focus focus = Focus::CommandBar;
 
@@ -542,6 +552,28 @@ int main(int argc, char** argv)
 					(void)motionState.HandleKey(event.keyboard.key, editorBuffer);
 				}
 			}
+			else if (focus == Focus::Hierarchy)
+			{
+				if (event.type == virasa::EventType::TextInput)
+				{
+					std::string_view utf8(
+						event.textInput.utf8, event.textInput.length);
+					if (utf8.find(':') != std::string_view::npos)
+					{
+						commandBuffer = ":";
+						commandCursor = 1;
+						focus = Focus::CommandBar;
+					}
+					else
+					{
+						(void)hierarchyPanel.HandleTextInput(utf8, world);
+					}
+				}
+				else if (event.type == virasa::EventType::KeyDown)
+				{
+					(void)hierarchyPanel.HandleKey(event.keyboard.key, world);
+				}
+			}
 			else
 			{
 				if (event.type == virasa::EventType::TextInput)
@@ -576,17 +608,35 @@ int main(int argc, char** argv)
 					{
 						if (commandBuffer == ":ide")
 						{
-							ideOpen = !ideOpen;
-							if (ideOpen)
+							if (rightPanelMode == RightPanelMode::Editor)
 							{
+								rightPanelMode = RightPanelMode::Closed;
+								focus = Focus::CommandBar;
+							}
+							else
+							{
+								rightPanelMode = RightPanelMode::Editor;
 								motionState.SetMode(
 									virasa::editor::Mode::Normal);
 								focus = Focus::Editor;
 							}
 						}
+						else if (commandBuffer == ":tree")
+						{
+							if (rightPanelMode == RightPanelMode::Hierarchy)
+							{
+								rightPanelMode = RightPanelMode::Closed;
+								focus = Focus::CommandBar;
+							}
+							else
+							{
+								rightPanelMode = RightPanelMode::Hierarchy;
+								focus = Focus::Hierarchy;
+							}
+						}
 						else if (commandBuffer == ":q")
 						{
-							ideOpen = false;
+							rightPanelMode = RightPanelMode::Closed;
 							focus = Focus::CommandBar;
 						}
 						commandBuffer.clear();
@@ -594,7 +644,7 @@ int main(int argc, char** argv)
 					}
 					else if (event.keyboard.key == virasa::KeyCode::Escape)
 					{
-						if (commandBuffer.empty() && !ideOpen)
+						if (commandBuffer.empty() && rightPanelMode == RightPanelMode::Closed)
 						{
 							LOG_INFO(logger,
 								"Escape key pressed, exiting.");
@@ -603,9 +653,13 @@ int main(int argc, char** argv)
 						}
 						commandBuffer.clear();
 						commandCursor = 0;
-						if (ideOpen)
+						if (rightPanelMode == RightPanelMode::Editor)
 						{
 							focus = Focus::Editor;
+						}
+						else if (rightPanelMode == RightPanelMode::Hierarchy)
+						{
+							focus = Focus::Hierarchy;
 						}
 					}
 				}
@@ -663,7 +717,9 @@ int main(int argc, char** argv)
 		const uint32_t barHeightPixels =
 			std::min<uint32_t>(static_cast<uint32_t>(kBarHeight), currentExtent.height - 1u);
 		const uint32_t sceneWidth =
-			ideOpen ? currentExtent.width / 2u : currentExtent.width;
+			rightPanelMode != RightPanelMode::Closed
+				? currentExtent.width / 2u
+				: currentExtent.width;
 		const uint32_t sceneHeight = currentExtent.height - barHeightPixels;
 		const uint32_t panelX = sceneWidth;
 		const uint32_t panelWidth = currentExtent.width - sceneWidth;
@@ -913,7 +969,7 @@ int main(int argc, char** argv)
 		sceneQuad.textureSlot = sceneSlot;
 		drawList.AddImageQuad(sceneQuad);
 
-		if (ideOpen)
+		if (rightPanelMode == RightPanelMode::Editor)
 		{
 			textPanel.Render(drawList,
 				editorBuffer.GetText(),
@@ -922,6 +978,16 @@ int main(int argc, char** argv)
 				static_cast<float>(panelWidth),
 				static_cast<float>(panelHeight),
 				fontAtlas);
+		}
+		else if (rightPanelMode == RightPanelMode::Hierarchy)
+		{
+			hierarchyPanel.Render(drawList,
+				world,
+				fontAtlas,
+				static_cast<float>(panelX),
+				0.0f,
+				static_cast<float>(panelWidth),
+				static_cast<float>(panelHeight));
 		}
 
 		commandBar.Render(drawList,

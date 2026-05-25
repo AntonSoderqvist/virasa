@@ -2,6 +2,7 @@
 #define VIRASA_ECS_WORLD_H
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include "virasa/ecs/Components.h"
@@ -37,10 +38,11 @@ class World final
 
 	/**
 	 * @brief Allocates a new live entity and returns its handle.
+	 * @param name Requested entity name. Empty input resolves to "Entity".
 	 * @return A valid Entity handle whose index and generation identify
 	 *         the new slot in the entity table.
 	 */
-	[[nodiscard]] virasa::ecs::Entity CreateEntity();
+	[[nodiscard]] virasa::ecs::Entity CreateEntity(std::string_view name = "");
 
 	/**
 	 * @brief Destroys a live entity and every descendant in its hierarchy subtree.
@@ -90,6 +92,40 @@ class World final
 	 */
 	[[nodiscard]] const std::vector<virasa::ecs::Entity>& GetChildren(
 		virasa::ecs::Entity entity) const;
+
+	/**
+	 * @brief Returns the list of root entities.
+	 * @return Const reference to the vector of live entities whose parent is Entity::Invalid().
+	 */
+	[[nodiscard]] const std::vector<virasa::ecs::Entity>& GetRoots() const noexcept;
+
+	/**
+	 * @brief Finds an entity by its attached NameComponent.
+	 * @param name Name to compare bytewise against stored entity names.
+	 * @return The matching entity, or Entity::Invalid() if no match exists.
+	 */
+	[[nodiscard]] virasa::ecs::Entity FindEntityByName(std::string_view name) const;
+
+	/**
+	 * @brief Returns true if entity currently has a NameComponent.
+	 * @param entity Any entity value.
+	 * @return true if the entity is valid and has a NameComponent.
+	 */
+	[[nodiscard]] bool HasNameComponent(virasa::ecs::Entity entity) const noexcept;
+
+	/**
+	 * @brief Returns a const reference to entity's NameComponent.
+	 * @param entity A valid entity with a NameComponent.
+	 * @return Const reference to the stored NameComponent.
+	 */
+	[[nodiscard]] const virasa::ecs::NameComponent& GetNameComponent(
+		virasa::ecs::Entity entity) const;
+
+	/**
+	 * @brief Returns the dense-entities vector for the NameComponent storage.
+	 * @return Const reference to the vector of entities with NameComponents.
+	 */
+	[[nodiscard]] const std::vector<virasa::ecs::Entity>& GetNameComponentEntities() const noexcept;
 
 	// --- Transform component ---
 
@@ -418,8 +454,16 @@ class World final
 	// Free-list of recyclable slot indices
 	std::vector<uint32_t> _freeList;
 
+	// Root entities
+	std::vector<virasa::ecs::Entity> _roots;
+
 	// Live entity count
 	uint32_t _entityCount = 0;
+
+	// NameComponent sparse-set
+	std::vector<virasa::ecs::NameComponent> _nameValues;
+	std::vector<virasa::ecs::Entity> _nameEntities;
+	std::vector<uint32_t> _nameSparse;
 
 	// Transform sparse-set
 	std::vector<virasa::math::Transform> _transformValues;
@@ -453,6 +497,7 @@ class World final
 
 	// Internal helpers
 	void DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromParent);
+	void RemoveNameComponentInternal(virasa::ecs::Entity entity);
 	void RemoveTransformComponentInternal(virasa::ecs::Entity entity);
 	void RemoveMeshComponentInternal(virasa::ecs::Entity entity);
 	void RemoveVisualComponentInternal(virasa::ecs::Entity entity);
@@ -462,6 +507,9 @@ class World final
 	void RemoveCameraComponentInternal(virasa::ecs::Entity entity);
 
 	void EnsureSparseCapacity(std::vector<uint32_t>& sparse, uint32_t index);
+	void RemoveFromRoots(virasa::ecs::Entity entity) noexcept;
+	void RemoveFromChildren(std::vector<virasa::ecs::Entity>& children, virasa::ecs::Entity entity) noexcept;
+	[[nodiscard]] std::string MakeUniqueEntityName(std::string_view name) const;
 
 	// CameraComponent sparse-set
 	std::vector<virasa::ecs::CameraComponent> _cameraValues;

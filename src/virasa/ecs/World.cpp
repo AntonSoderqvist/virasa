@@ -1,7 +1,8 @@
 #include "virasa/ecs/World.h"
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <string>
 
 namespace virasa::ecs
 {
@@ -18,6 +19,92 @@ void World::EnsureSparseCapacity(std::vector<uint32_t>& sparse, uint32_t index)
 	{
 		sparse.resize(static_cast<size_t>(index) + 1u, kSparseNone);
 	}
+}
+
+void World::RemoveFromRoots(virasa::ecs::Entity entity) noexcept
+{
+	auto it = std::find(_roots.begin(), _roots.end(), entity);
+	if (it != _roots.end())
+	{
+		*it = _roots.back();
+		_roots.pop_back();
+	}
+}
+
+void World::RemoveFromChildren(
+	std::vector<virasa::ecs::Entity>& children, virasa::ecs::Entity entity) noexcept
+{
+	auto it = std::find(children.begin(), children.end(), entity);
+	if (it != children.end())
+	{
+		*it = children.back();
+		children.pop_back();
+	}
+}
+
+std::string World::MakeUniqueEntityName(std::string_view name) const
+{
+	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
+
+	auto nameExists = [this](std::string_view candidate) -> bool
+	{
+		for (size_t i = 0; i < _nameValues.size(); ++i)
+		{
+			if (_nameValues[i].name == candidate)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	if (!nameExists(baseName))
+	{
+		return baseName;
+	}
+
+	for (uint32_t suffix = 1u;; ++suffix)
+	{
+		std::string candidate = baseName;
+		candidate.push_back('.');
+		if (suffix <= 999u)
+		{
+			if (suffix < 10u)
+			{
+				candidate.append("00");
+			}
+			else if (suffix < 100u)
+			{
+				candidate.push_back('0');
+			}
+		}
+		candidate += std::to_string(suffix);
+
+		if (!nameExists(candidate))
+		{
+			return candidate;
+		}
+	}
+}
+
+void World::RemoveNameComponentInternal(virasa::ecs::Entity entity)
+{
+	if (!HasNameComponent(entity))
+		return;
+
+	const uint32_t denseIdx = _nameSparse[entity.index];
+	const uint32_t lastIdx = static_cast<uint32_t>(_nameValues.size()) - 1u;
+
+	if (denseIdx != lastIdx)
+	{
+		_nameValues[denseIdx] = std::move(_nameValues[lastIdx]);
+		_nameEntities[denseIdx] = _nameEntities[lastIdx];
+		_nameSparse[_nameEntities[denseIdx].index] = denseIdx;
+	}
+
+	_nameValues.pop_back();
+	_nameEntities.pop_back();
+	_nameSparse[entity.index] = kSparseNone;
 }
 
 void World::RemoveTransformComponentInternal(virasa::ecs::Entity entity)
@@ -93,6 +180,7 @@ void World::DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromPar
 	}
 
 	// (a) Remove components
+	RemoveNameComponentInternal(entity);
 	RemoveTransformComponentInternal(entity);
 	RemoveMeshComponentInternal(entity);
 	RemoveVisualComponentInternal(entity);
@@ -108,10 +196,11 @@ void World::DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromPar
 		if (parentEntity != virasa::ecs::Entity::Invalid())
 		{
 			auto& parentChildren = _children[parentEntity.index];
-			parentChildren.erase(
-				std::remove(parentChildren.begin(), parentChildren.end(), entity),
-				parentChildren.end()
-			);
+			RemoveFromChildren(parentChildren, entity);
+		}
+		else
+		{
+			RemoveFromRoots(entity);
 		}
 	}
 
@@ -139,7 +228,11 @@ World::World(World&& other) noexcept
 	, _parents(std::move(other._parents))
 	, _children(std::move(other._children))
 	, _freeList(std::move(other._freeList))
+	, _roots(std::move(other._roots))
 	, _entityCount(other._entityCount)
+	, _nameValues(std::move(other._nameValues))
+	, _nameEntities(std::move(other._nameEntities))
+	, _nameSparse(std::move(other._nameSparse))
 	, _transformValues(std::move(other._transformValues))
 	, _transformEntities(std::move(other._transformEntities))
 	, _transformSparse(std::move(other._transformSparse))
@@ -172,9 +265,13 @@ World& World::operator=(World&& other) noexcept
 		_generations       = std::move(other._generations);
 		_alive             = std::move(other._alive);
 		_freeList          = std::move(other._freeList);
+		_roots             = std::move(other._roots);
 		_parents           = std::move(other._parents);
 		_children          = std::move(other._children);
 		_entityCount       = other._entityCount;
+		_nameValues        = std::move(other._nameValues);
+		_nameEntities      = std::move(other._nameEntities);
+		_nameSparse        = std::move(other._nameSparse);
 		_transformValues   = std::move(other._transformValues);
 		_transformEntities = std::move(other._transformEntities);
 		_transformSparse   = std::move(other._transformSparse);
@@ -205,7 +302,7 @@ World& World::operator=(World&& other) noexcept
 // Public API
 // ---------------------------------------------------------------------------
 
-virasa::ecs::Entity World::CreateEntity()
+virasa::ecs::Entity World::CreateEntity(std::string_view name)
 {
 	uint32_t slotIndex = 0u;
 	uint32_t generation = 0u;
@@ -229,11 +326,18 @@ virasa::ecs::Entity World::CreateEntity()
 		_children.emplace_back();
 	}
 
-	++_entityCount;
-
 	virasa::ecs::Entity entity;
-	entity.index      = slotIndex;
+	entity.index = slotIndex;
 	entity.generation = generation;
+
+	EnsureSparseCapacity(_nameSparse, entity.index);
+	const uint32_t denseIdx = static_cast<uint32_t>(_nameValues.size());
+	_nameValues.push_back(virasa::ecs::NameComponent{MakeUniqueEntityName(name)});
+	_nameEntities.push_back(entity);
+	_nameSparse[entity.index] = denseIdx;
+
+	_roots.push_back(entity);
+	++_entityCount;
 	return entity;
 }
 
@@ -266,19 +370,15 @@ uint32_t World::GetEntityCount() const noexcept
 
 virasa::ecs::EcsError World::SetParent(virasa::ecs::Entity child, virasa::ecs::Entity parent)
 {
-	// (1) Validate child
 	if (child == virasa::ecs::Entity::Invalid() || !IsValid(child))
 		return virasa::ecs::EcsError::InvalidEntity;
 
-	// (2) Validate parent (if not Invalid)
 	if (parent != virasa::ecs::Entity::Invalid() && !IsValid(parent))
 		return virasa::ecs::EcsError::InvalidEntity;
 
-	// (3) Self-parent check
 	if (parent == child)
 		return virasa::ecs::EcsError::SelfParent;
 
-	// (4) Cycle detection: walk up from parent, check if child appears
 	if (parent != virasa::ecs::Entity::Invalid())
 	{
 		virasa::ecs::Entity ancestor = parent;
@@ -290,25 +390,31 @@ virasa::ecs::EcsError World::SetParent(virasa::ecs::Entity child, virasa::ecs::E
 		}
 	}
 
-	// (5) Perform reparent
-	// Detach from current parent
 	virasa::ecs::Entity currentParent = _parents[child.index];
+	if (currentParent == parent)
+	{
+		return virasa::ecs::EcsError::None;
+	}
+
 	if (currentParent != virasa::ecs::Entity::Invalid())
 	{
 		auto& siblings = _children[currentParent.index];
-		siblings.erase(
-			std::remove(siblings.begin(), siblings.end(), child),
-			siblings.end()
-		);
+		RemoveFromChildren(siblings, child);
+	}
+	else if (parent != virasa::ecs::Entity::Invalid())
+	{
+		RemoveFromRoots(child);
 	}
 
-	// Set new parent
 	_parents[child.index] = parent;
 
-	// Attach to new parent
 	if (parent != virasa::ecs::Entity::Invalid())
 	{
 		_children[parent.index].push_back(child);
+	}
+	else if (currentParent != virasa::ecs::Entity::Invalid())
+	{
+		_roots.push_back(child);
 	}
 
 	return virasa::ecs::EcsError::None;
@@ -322,6 +428,46 @@ virasa::ecs::Entity World::GetParent(virasa::ecs::Entity entity) const noexcept
 const std::vector<virasa::ecs::Entity>& World::GetChildren(virasa::ecs::Entity entity) const
 {
 	return _children[entity.index];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetRoots() const noexcept
+{
+	return _roots;
+}
+
+virasa::ecs::Entity World::FindEntityByName(std::string_view name) const
+{
+	for (size_t i = 0; i < _nameEntities.size(); ++i)
+	{
+		if (_nameValues[i].name == name)
+		{
+			return _nameEntities[i];
+		}
+	}
+
+	return virasa::ecs::Entity::Invalid();
+}
+
+bool World::HasNameComponent(virasa::ecs::Entity entity) const noexcept
+{
+	if (!IsValid(entity))
+		return false;
+	if (entity.index >= static_cast<uint32_t>(_nameSparse.size()))
+		return false;
+	const uint32_t denseIdx = _nameSparse[entity.index];
+	if (denseIdx == kSparseNone)
+		return false;
+	return _nameEntities[denseIdx] == entity;
+}
+
+const virasa::ecs::NameComponent& World::GetNameComponent(virasa::ecs::Entity entity) const
+{
+	return _nameValues[_nameSparse[entity.index]];
+}
+
+const std::vector<virasa::ecs::Entity>& World::GetNameComponentEntities() const noexcept
+{
+	return _nameEntities;
 }
 
 // ---------------------------------------------------------------------------

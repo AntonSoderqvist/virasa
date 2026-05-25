@@ -2,6 +2,7 @@ add_library(virasa_ui_lib STATIC
     FontAtlas.cpp
     CommandBar.cpp
     TextPanel.cpp
+    HierarchyPanel.cpp
 )
 
 target_include_directories(virasa_ui_lib
@@ -12,4 +13,6 @@ target_include_directories(virasa_ui_lib
 target_link_libraries(virasa_ui_lib
     PUBLIC
         freetype
+        virasa_ecs_lib
+        virasa_window_lib
 )
