@@ -362,7 +362,7 @@ TEST(CommandBar, test_render_appends_cursor_block_at_cumulative_advance)
 	ASSERT_EQ(out.GetQuads().size(), 2u);
 	const QuadCommand& cursor = out.GetQuads()[1];
 	EXPECT_FLOAT_EQ(cursor.x, config.paddingX + expectedCursorX);
-	EXPECT_FLOAT_EQ(cursor.y, barTop + config.paddingY);
+	EXPECT_FLOAT_EQ(cursor.y, barTop + (barHeight - lineHeight) * 0.5f);
 	EXPECT_FLOAT_EQ(cursor.width, expectedCursorWidth);
 	EXPECT_FLOAT_EQ(cursor.height, lineHeight);
 	ExpectColorEq(cursor.color, config.cursorColor);
@@ -424,9 +424,11 @@ TEST(CommandBar, test_render_consumes_atlas_by_reference_for_duration_of_call)
 	EXPECT_EQ(textCommand.textLength, text.size());
 	ExpectColorEq(textCommand.color, config.foreground);
 
+	const float lineHeight2 = atlas.GetAscender() - atlas.GetDescender();
+	const float barHeight2 = lineHeight2 + 2.0f * config.paddingY;
 	EXPECT_FLOAT_EQ(cursor.x, config.paddingX + ComputeCursorAdvance(text, cursorByteIndex, atlas));
-	EXPECT_FLOAT_EQ(cursor.y, barTop + config.paddingY);
+	EXPECT_FLOAT_EQ(cursor.y, barTop + (barHeight2 - lineHeight2) * 0.5f);
 	EXPECT_FLOAT_EQ(cursor.width, ComputeExpectedCursorWidth(text, cursorByteIndex, atlas));
-	EXPECT_FLOAT_EQ(cursor.height, lineHeight);
+	EXPECT_FLOAT_EQ(cursor.height, lineHeight2);
 	ExpectColorEq(cursor.color, config.cursorColor);
 }

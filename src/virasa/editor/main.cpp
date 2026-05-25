@@ -481,7 +481,7 @@ int main(int argc, char** argv)
 
 	virasa::ui::CommandBar commandBar;
 	virasa::ui::CommandBarConfig commandBarConfig{};
-	commandBarConfig.paddingY = 4.0f;
+	commandBarConfig.paddingY = 2.0f;
 	commandBar.SetConfig(commandBarConfig);
 	virasa::ui::DrawList drawList;
 	std::string commandBuffer;

@@ -160,7 +160,7 @@ void CommandBar::Render(DrawList& out, std::string_view text, std::size_t cursor
 	}
 
 	out.AddQuad({_config.paddingX + cursorX,
-		barTop + _config.paddingY,
+		barTop + (barHeight - lineHeight) * 0.5f,
 		cursorWidth,
 		lineHeight,
 		_config.cursorColor});
