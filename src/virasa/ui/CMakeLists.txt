@@ -1,6 +1,7 @@
 add_library(virasa_ui_lib STATIC
     FontAtlas.cpp
     CommandBar.cpp
+    TextPanel.cpp
 )
 
 target_include_directories(virasa_ui_lib

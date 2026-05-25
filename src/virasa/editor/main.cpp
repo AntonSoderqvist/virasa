@@ -41,6 +41,7 @@
 #include "virasa/renderer/text/UiPass.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
+#include "virasa/ui/TextPanel.h"
 #include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
 #include "virasa/window/InputState.h"
@@ -485,9 +486,12 @@ int main(int argc, char** argv)
 	virasa::ui::CommandBarConfig commandBarConfig{};
 	commandBarConfig.paddingY = 2.0f;
 	commandBar.SetConfig(commandBarConfig);
+	virasa::ui::TextPanel textPanel;
 	virasa::ui::DrawList drawList;
 	std::string commandBuffer;
 	std::size_t commandCursor = 0;
+	bool ideOpen = false;
+	const std::string idePanelText = "// scratch\nhello editor\n";
 
 	const float kBarLineHeight = fontAtlas.GetAscender() - fontAtlas.GetDescender();
 	const float kBarHeight = kBarLineHeight + 2.0f * commandBarConfig.paddingY;
@@ -526,6 +530,10 @@ int main(int argc, char** argv)
 				}
 				else if (event.keyboard.key == virasa::KeyCode::Enter)
 				{
+					if (commandBuffer == ":ide")
+					{
+						ideOpen = !ideOpen;
+					}
 					commandBuffer.clear();
 					commandCursor = 0;
 				}
@@ -596,8 +604,12 @@ int main(int argc, char** argv)
 		VkExtent2D currentExtent = context.GetSwapchainExtent();
 		const uint32_t barHeightPixels =
 			std::min<uint32_t>(static_cast<uint32_t>(kBarHeight), currentExtent.height - 1u);
-		const uint32_t sceneWidth = currentExtent.width;
+		const uint32_t sceneWidth =
+			ideOpen ? currentExtent.width / 2u : currentExtent.width;
 		const uint32_t sceneHeight = currentExtent.height - barHeightPixels;
+		const uint32_t panelX = sceneWidth;
+		const uint32_t panelWidth = currentExtent.width - sceneWidth;
+		const uint32_t panelHeight = sceneHeight;
 
 		{
 			const virasa::math::Transform& cameraTransform =
@@ -842,6 +854,17 @@ int main(int argc, char** argv)
 		sceneQuad.v1 = 1.0f;
 		sceneQuad.textureSlot = sceneSlot;
 		drawList.AddImageQuad(sceneQuad);
+
+		if (ideOpen)
+		{
+			textPanel.Render(drawList,
+				idePanelText,
+				static_cast<float>(panelX),
+				0.0f,
+				static_cast<float>(panelWidth),
+				static_cast<float>(panelHeight),
+				fontAtlas);
+		}
 
 		commandBar.Render(drawList,
 			commandBuffer,
