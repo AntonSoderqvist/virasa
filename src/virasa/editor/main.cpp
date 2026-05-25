@@ -8,6 +8,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "virasa/core/Logger.h"
@@ -36,6 +37,10 @@
 #include "virasa/renderer/resources/Pipeline.h"
 #include "virasa/renderer/resources/Sampler.h"
 #include "virasa/renderer/resources/ShaderModule.h"
+#include "virasa/renderer/text/UiPass.h"
+#include "virasa/ui/CommandBar.h"
+#include "virasa/ui/FontAtlas.h"
+#include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
 #include "virasa/window/InputState.h"
 #include "virasa/window/Platform.h"
@@ -452,12 +457,74 @@ int main(int argc, char** argv)
 		}
 	}
 
+	virasa::ui::FontAtlas fontAtlas;
+	{
+		virasa::ui::FontAtlasError error =
+			fontAtlas.Initialize("fonts/JetBrainsMono-Regular.ttf", 20u);
+		if (error != virasa::ui::FontAtlasError::None)
+		{
+			LOG_ERROR(
+				logger, "FontAtlas::Initialize failed: {}", static_cast<uint32_t>(error));
+			return -1;
+		}
+	}
+
+	virasa::renderer::text::UiPass uiPass;
+	{
+		virasa::RenderError error = uiPass.Initialize(device, context, fontAtlas);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(logger, "UiPass::Initialize failed: {}", static_cast<int>(error));
+			return -1;
+		}
+	}
+
+	virasa::ui::CommandBar commandBar;
+	virasa::ui::CommandBarConfig commandBarConfig{};
+	commandBarConfig.paddingY = 4.0f;
+	commandBar.SetConfig(commandBarConfig);
+	virasa::ui::DrawList drawList;
+	std::string commandBuffer;
+	std::size_t commandCursor = 0;
+
 	for (;;)
 	{
 		std::span<const virasa::Event> events = platform.PollEvents();
 		bool shouldExit = false;
 		for (const virasa::Event& event : events)
 		{
+			if (event.type == virasa::EventType::TextInput)
+			{
+				commandBuffer.append(event.textInput.utf8, event.textInput.length);
+				commandCursor += event.textInput.length;
+			}
+			else if (event.type == virasa::EventType::KeyDown)
+			{
+				if (event.keyboard.key == virasa::KeyCode::Backspace)
+				{
+					if (!commandBuffer.empty())
+					{
+						std::size_t eraseIndex = commandBuffer.size() - 1;
+						while (eraseIndex > 0 &&
+							 (static_cast<unsigned char>(commandBuffer[eraseIndex]) &
+								 0xC0u) == 0x80u)
+						{
+							--eraseIndex;
+						}
+						std::size_t removedBytes = commandBuffer.size() - eraseIndex;
+						commandBuffer.erase(eraseIndex);
+						commandCursor = commandCursor > removedBytes
+									    ? commandCursor - removedBytes
+									    : 0;
+					}
+				}
+				else if (event.keyboard.key == virasa::KeyCode::Enter)
+				{
+					commandBuffer.clear();
+					commandCursor = 0;
+				}
+			}
+
 			if (event.type == virasa::EventType::Quit)
 			{
 				LOG_INFO(logger, "Quit event received, exiting.");
@@ -718,6 +785,22 @@ int main(int argc, char** argv)
 						vkCmdDraw(commandBuffer, mesh.GetIndexCount(), 1, 0, 0);
 					}
 				});
+
+		drawList.Clear();
+		VkExtent2D swapchainExtent = context.GetSwapchainExtent();
+		commandBar.Render(drawList,
+			commandBuffer,
+			commandCursor,
+			fontAtlas,
+			swapchainExtent.width,
+			swapchainExtent.height);
+		uiPass.Submit(graph,
+			swapchainHandle,
+			drawList,
+			fontAtlas,
+			context.GetCurrentFrameIndex(),
+			swapchainExtent.width,
+			swapchainExtent.height);
 
 		virasa::RenderError compileError = graph.Compile();
 		if (compileError != virasa::RenderError::None)

@@ -10,6 +10,10 @@ set(SHADERS
     triangle.frag
     cube.vert
     cube.frag
+    ui_quad.vert
+    ui_quad.frag
+    ui_text.vert
+    ui_text.frag
 )
 
 set(SPV_FILES)

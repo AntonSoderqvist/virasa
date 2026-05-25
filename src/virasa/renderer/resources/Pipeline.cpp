@@ -1,5 +1,6 @@
 #include "virasa/renderer/resources/Pipeline.h"
 
+#include <algorithm>
 #include <cassert>
 #include <vector>
 
@@ -444,7 +445,10 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 	dynamicStates.push_back(VK_DYNAMIC_STATE_SCISSOR);
 	for (VkDynamicState s : _dynamicStates)
 	{
-		dynamicStates.push_back(s);
+		if (std::find(dynamicStates.begin(), dynamicStates.end(), s) == dynamicStates.end())
+		{
+			dynamicStates.push_back(s);
+		}
 	}
 
 	VkPipelineDynamicStateCreateInfo dynamicStateInfo{};

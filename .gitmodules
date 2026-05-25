@@ -13,6 +13,8 @@
 [submodule "vendor/freetype"]
 	path = vendor/freetype
 	url = https://gitlab.freedesktop.org/freetype/freetype.git
+	ignore = dirty
 [submodule "vendor/JetBrainsMono"]
 	path = vendor/JetBrainsMono
 	url = https://github.com/JetBrains/JetBrainsMono.git
+	ignore = dirty
