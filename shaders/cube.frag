@@ -40,11 +40,13 @@ layout(set = 0, binding = 0) uniform sampler2D textures[];
 
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
+    mat4 model;
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
     uint64_t materialBufferAddress;
+    uint64_t lightBufferAddress;
     uint materialId;
-    uint _pad;
+    uint lightCount;
 } pc;
 
 layout(location = 0) in vec2 fragUV;

@@ -387,9 +387,6 @@ SwapchainStatus Context::BeginFrame()
 
 	const FrameData& frame = _frameData[_currentFrameIndex];
 
-	auto* logger = Logger::GetLogger("renderer");
-	LOG_INFO(logger, "Current frame index: {}", _currentFrameIndex);
-
 	// Step 2: fence wait
 	vkWaitForFences(_device.GetHandle(), 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
 

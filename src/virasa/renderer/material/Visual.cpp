@@ -131,9 +131,9 @@ RenderError VisualMaterialTable::Initialize(const Device& device, uint32_t max_m
 	// Step 3: size raster-state vector.
 	_rasterStates.resize(max_materials);
 
-	// Step 4: initialize free-slot list in ascending order.
+	// Step 4: initialize free-slot list in descending order so pop_back yields id 0 first.
 	_freeSlots.reserve(max_materials);
-	for (uint32_t i = 0; i < max_materials; ++i)
+	for (uint32_t i = max_materials; i-- > 0;)
 	{
 		_freeSlots.push_back(i);
 	}

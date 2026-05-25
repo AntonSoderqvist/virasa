@@ -2,8 +2,10 @@
 
 #include <quill/LogMacros.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <glm/trigonometric.hpp>
 #include <span>
 #include <vector>
 
@@ -16,6 +18,7 @@
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
+#include "virasa/renderer/core/Device.h"
 #include "virasa/renderer/geometry/Primitives.h"
 #include "virasa/renderer/graph/BufferRegistry.h"
 #include "virasa/renderer/graph/Graph.h"
@@ -25,6 +28,7 @@
 #include "virasa/renderer/lighting/LightTable.h"
 #include "virasa/renderer/material/Visual.h"
 #include "virasa/renderer/resources/BindlessTextureArray.h"
+#include "virasa/renderer/resources/Buffer.h"
 #include "virasa/renderer/resources/Image.h"
 #include "virasa/renderer/resources/Mesh.h"
 #include "virasa/renderer/resources/MeshRegistry.h"
@@ -35,561 +39,527 @@
 #include "virasa/window/Platform.h"
 #include "virasa/window/Types.h"
 
-using namespace virasa;
-using namespace virasa::math;
-using namespace virasa::ecs;
-using namespace virasa::renderer;
-using namespace virasa::renderer::graph;
+namespace
+{
+struct PushConstants
+{
+	virasa::math::Mat4 mvp;
+	virasa::math::Mat4 model;
+	uint64_t vertexBufferAddress;
+	uint64_t indexBufferAddress;
+	uint64_t materialBufferAddress;
+	uint64_t lightBufferAddress;
+	uint32_t materialId;
+	uint32_t lightCount;
+};
+
+static_assert(sizeof(PushConstants) == 168);
+} // namespace
 
 int main(int argc, char** argv)
 {
-	// -------------------------------------------------------------------------
-	// Logger
-	// -------------------------------------------------------------------------
-	auto* logger = Logger::GetLogger("Main");
-	LOG_INFO(logger, "Main entry point reached.");
+	(void)argc;
+	(void)argv;
 
-	// -------------------------------------------------------------------------
-	// Platform
-	// -------------------------------------------------------------------------
+	auto* logger = virasa::Logger::GetLogger("Main");
+	LOG_INFO(logger, "Entry point reached.");
+
 	virasa::window::Platform platform;
 	{
-		auto err = platform.Initialize("Virasa Editor", 800, 800);
-		if (err != ErrorCode::None)
+		virasa::ErrorCode error = platform.Initialize("VirasaEditor", 800, 800);
+		if (error != virasa::ErrorCode::None)
 		{
-			LOG_ERROR(logger, "Platform::Initialize failed.");
+			LOG_ERROR(logger, "Platform::Initialize failed: {}", static_cast<int>(error));
 			return -1;
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Renderer Context
-	// -------------------------------------------------------------------------
-	RendererConfig rendererConfig;
+	virasa::Context context;
 	{
-		uint32_t extCount = 0;
-		const char* const* exts =
-			virasa::window::Platform::GetRequiredVulkanExtensions(&extCount);
-		rendererConfig.requiredInstanceExtensions = exts;
-		rendererConfig.requiredInstanceExtensionCount = extCount;
-		// depthFormat defaults to VK_FORMAT_D32_SFLOAT
-	}
+		uint32_t requiredExtensionCount = 0;
+		const char* const* requiredExtensions =
+			virasa::window::Platform::GetRequiredVulkanExtensions(&requiredExtensionCount);
 
-	Context context;
-	{
-		auto err = context.Initialize(platform, rendererConfig);
-		if (err != RenderError::None)
+		virasa::RendererConfig rendererConfig;
+		rendererConfig.requiredInstanceExtensions = requiredExtensions;
+		rendererConfig.requiredInstanceExtensionCount = requiredExtensionCount;
+
+		virasa::RenderError error = context.Initialize(platform, rendererConfig);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "Context::Initialize failed.");
+			LOG_ERROR(logger, "Context::Initialize failed: {}", static_cast<int>(error));
 			return -1;
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Mesh Registry + Cube Mesh
-	// -------------------------------------------------------------------------
-	MeshRegistry meshRegistry;
+	const virasa::Device& device = context.GetDevice();
+
+	virasa::renderer::MeshRegistry meshRegistry;
 	uint32_t cubeMeshId = 0xFFFFFFFFu;
 	{
-		MeshData cubeData = CreateCube(0.5f);
+		virasa::MeshData cubeData = virasa::CreateCube();
+		virasa::Mesh localMesh;
 
-		Mesh cubeMesh;
+		virasa::RenderError error = localMesh.Initialize(device, context, cubeData);
+		if (error != virasa::RenderError::None)
 		{
-			auto err = cubeMesh.Initialize(context.GetDevice(), context, cubeData);
-			if (err != RenderError::None)
-			{
-				LOG_ERROR(logger, "Mesh::Initialize failed for cube.");
-				return -1;
-			}
+			LOG_ERROR(logger, "Mesh::Initialize failed: {}", static_cast<int>(error));
+			return -1;
 		}
 
-		cubeMeshId = meshRegistry.Allocate(std::move(cubeMesh));
+		cubeMeshId = meshRegistry.Allocate(std::move(localMesh));
 		if (cubeMeshId == 0xFFFFFFFFu)
 		{
-			LOG_ERROR(logger, "MeshRegistry::Allocate failed for cube.");
+			LOG_ERROR(logger, "MeshRegistry::Allocate failed.");
 			return -1;
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Default White Image
-	// -------------------------------------------------------------------------
-	Image whiteImage;
+	virasa::Image whiteImage;
 	{
-		ImageConfig cfg;
-		cfg.width = 1;
-		cfg.height = 1;
-		cfg.format = VK_FORMAT_R8G8B8A8_UNORM;
-		cfg.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-		cfg.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-		cfg.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+		virasa::ImageConfig imageConfig;
+		imageConfig.width = 1;
+		imageConfig.height = 1;
+		imageConfig.format = VK_FORMAT_R8G8B8A8_UNORM;
+		imageConfig.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		imageConfig.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		imageConfig.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-		auto err = whiteImage.Initialize(context.GetDevice(), cfg);
-		if (err != RenderError::None)
+		virasa::RenderError error = whiteImage.Initialize(device, imageConfig);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "Image::Initialize failed for default white texture.");
+			LOG_ERROR(logger, "Image::Initialize failed: {}", static_cast<int>(error));
 			return -1;
 		}
 
-		// Upload 0xFF,0xFF,0xFF,0xFF via staging
 		const uint8_t whitePixel[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-		// We need a staging buffer to upload the pixel data
-		{
-			Buffer stagingBuf;
-			BufferConfig stagingCfg;
-			stagingCfg.size = 4;
-			stagingCfg.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-			stagingCfg.memoryProperties =
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-			auto serr = stagingBuf.Initialize(context.GetDevice(), stagingCfg);
-			if (serr != RenderError::None)
-			{
-				LOG_ERROR(logger, "Staging buffer init failed for white image.");
-				return -1;
-			}
-			serr = stagingBuf.Upload(whitePixel, 4);
-			if (serr != RenderError::None)
-			{
-				LOG_ERROR(logger, "Staging buffer upload failed for white image.");
-				return -1;
-			}
+		virasa::Buffer stagingBuffer;
+		virasa::BufferConfig stagingConfig;
+		stagingConfig.size = 4;
+		stagingConfig.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		stagingConfig.memoryProperties =
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-			// Record a one-time command buffer to transition + copy
-			VkCommandPool graphicsPool = context.GetGraphicsCommandPool();
-			VkQueue graphicsQueue = context.GetDevice().GetGraphicsQueue();
-			VkDevice vkDevice = context.GetDevice().GetHandle();
-
-			VkCommandBufferAllocateInfo allocInfo{};
-			allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-			allocInfo.commandPool = graphicsPool;
-			allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-			allocInfo.commandBufferCount = 1;
-
-			VkCommandBuffer cmd = VK_NULL_HANDLE;
-			vkAllocateCommandBuffers(vkDevice, &allocInfo, &cmd);
-
-			VkCommandBufferBeginInfo beginInfo{};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-			vkBeginCommandBuffer(cmd, &beginInfo);
-
-			// Transition UNDEFINED -> TRANSFER_DST
-			VkImageMemoryBarrier barrier{};
-			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			barrier.image = whiteImage.GetHandle();
-			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			barrier.subresourceRange.baseMipLevel = 0;
-			barrier.subresourceRange.levelCount = 1;
-			barrier.subresourceRange.baseArrayLayer = 0;
-			barrier.subresourceRange.layerCount = 1;
-			barrier.srcAccessMask = 0;
-			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-				VK_PIPELINE_STAGE_TRANSFER_BIT,
-				0,
-				0,
-				nullptr,
-				0,
-				nullptr,
-				1,
-				&barrier);
-
-			// Copy buffer to image
-			VkBufferImageCopy region{};
-			region.bufferOffset = 0;
-			region.bufferRowLength = 0;
-			region.bufferImageHeight = 0;
-			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			region.imageSubresource.mipLevel = 0;
-			region.imageSubresource.baseArrayLayer = 0;
-			region.imageSubresource.layerCount = 1;
-			region.imageOffset = {0, 0, 0};
-			region.imageExtent = {1, 1, 1};
-			vkCmdCopyBufferToImage(cmd,
-				stagingBuf.GetHandle(),
-				whiteImage.GetHandle(),
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				1,
-				&region);
-
-			// Transition TRANSFER_DST -> SHADER_READ_ONLY
-			barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_TRANSFER_BIT,
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				0,
-				0,
-				nullptr,
-				0,
-				nullptr,
-				1,
-				&barrier);
-
-			vkEndCommandBuffer(cmd);
-
-			VkSubmitInfo submitInfo{};
-			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-			submitInfo.commandBufferCount = 1;
-			submitInfo.pCommandBuffers = &cmd;
-			vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-			vkQueueWaitIdle(graphicsQueue);
-			vkFreeCommandBuffers(vkDevice, graphicsPool, 1, &cmd);
-		}
-	}
-
-	// -------------------------------------------------------------------------
-	// Default Sampler
-	// -------------------------------------------------------------------------
-	Sampler defaultSampler;
-	{
-		SamplerConfig samplerCfg;
-		samplerCfg.magFilter = VK_FILTER_LINEAR;
-		samplerCfg.minFilter = VK_FILTER_LINEAR;
-		samplerCfg.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		samplerCfg.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		samplerCfg.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		samplerCfg.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-
-		auto err = defaultSampler.Initialize(context.GetDevice(), samplerCfg);
-		if (err != RenderError::None)
-		{
-			LOG_ERROR(logger, "Sampler::Initialize failed for default sampler.");
-			return -1;
-		}
-	}
-
-	// -------------------------------------------------------------------------
-	// Bindless Texture Array
-	// -------------------------------------------------------------------------
-	BindlessTextureArray bindlessTextures;
-	{
-		auto err = bindlessTextures.Initialize(context.GetDevice(), 256);
-		if (err != RenderError::None)
-		{
-			LOG_ERROR(logger, "BindlessTextureArray::Initialize failed.");
-			return -1;
-		}
-
-		uint32_t slot = bindlessTextures.RegisterTexture(
-			whiteImage.GetView(), defaultSampler.GetHandle());
-		if (slot == 0xFFFFFFFFu)
+		error = stagingBuffer.Initialize(device, stagingConfig);
+		if (error != virasa::RenderError::None)
 		{
 			LOG_ERROR(logger,
-				"BindlessTextureArray::RegisterTexture failed for default white texture.");
+				"White texture staging buffer initialization failed: {}",
+				static_cast<int>(error));
 			return -1;
 		}
-		// slot must be 0
+
+		error = stagingBuffer.Upload(whitePixel, 4);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(
+				logger, "White texture staging upload failed: {}", static_cast<int>(error));
+			return -1;
+		}
+
+		VkCommandBufferAllocateInfo allocateInfo{};
+		allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocateInfo.commandPool = context.GetGraphicsCommandPool();
+		allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocateInfo.commandBufferCount = 1;
+
+		VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+		if (vkAllocateCommandBuffers(device.GetHandle(), &allocateInfo, &commandBuffer) !=
+			VK_SUCCESS)
+		{
+			LOG_ERROR(logger, "Failed to allocate white texture upload command buffer.");
+			return -1;
+		}
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+		VkImageMemoryBarrier toTransfer{};
+		toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		toTransfer.image = whiteImage.GetHandle();
+		toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		toTransfer.subresourceRange.baseMipLevel = 0;
+		toTransfer.subresourceRange.levelCount = 1;
+		toTransfer.subresourceRange.baseArrayLayer = 0;
+		toTransfer.subresourceRange.layerCount = 1;
+		toTransfer.srcAccessMask = 0;
+		toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		vkCmdPipelineBarrier(commandBuffer,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0,
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&toTransfer);
+
+		VkBufferImageCopy copyRegion{};
+		copyRegion.bufferOffset = 0;
+		copyRegion.bufferRowLength = 0;
+		copyRegion.bufferImageHeight = 0;
+		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.imageSubresource.mipLevel = 0;
+		copyRegion.imageSubresource.baseArrayLayer = 0;
+		copyRegion.imageSubresource.layerCount = 1;
+		copyRegion.imageOffset = {0, 0, 0};
+		copyRegion.imageExtent = {1, 1, 1};
+		vkCmdCopyBufferToImage(commandBuffer,
+			stagingBuffer.GetHandle(),
+			whiteImage.GetHandle(),
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1,
+			&copyRegion);
+
+		VkImageMemoryBarrier toShaderRead{};
+		toShaderRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		toShaderRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		toShaderRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		toShaderRead.image = whiteImage.GetHandle();
+		toShaderRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		toShaderRead.subresourceRange.baseMipLevel = 0;
+		toShaderRead.subresourceRange.levelCount = 1;
+		toShaderRead.subresourceRange.baseArrayLayer = 0;
+		toShaderRead.subresourceRange.layerCount = 1;
+		toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(commandBuffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			0,
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&toShaderRead);
+
+		vkEndCommandBuffer(commandBuffer);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+		vkQueueSubmit(device.GetGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(device.GetGraphicsQueue());
+		vkFreeCommandBuffers(
+			device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
 	}
 
-	// -------------------------------------------------------------------------
-	// Visual Material Table + Default Material
-	// -------------------------------------------------------------------------
-	VisualMaterialTable materialTable;
+	virasa::Sampler sampler;
+	{
+		virasa::SamplerConfig samplerConfig;
+		samplerConfig.magFilter = VK_FILTER_LINEAR;
+		samplerConfig.minFilter = VK_FILTER_LINEAR;
+		samplerConfig.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerConfig.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerConfig.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerConfig.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+		virasa::RenderError error = sampler.Initialize(device, samplerConfig);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(logger, "Sampler::Initialize failed: {}", static_cast<int>(error));
+			return -1;
+		}
+	}
+
+	virasa::BindlessTextureArray bindlessTextureArray;
+	{
+		virasa::RenderError error = bindlessTextureArray.Initialize(device, 256);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(logger,
+				"BindlessTextureArray::Initialize failed: {}",
+				static_cast<int>(error));
+			return -1;
+		}
+
+		uint32_t slot =
+			bindlessTextureArray.RegisterTexture(whiteImage.GetView(), sampler.GetHandle());
+		if (slot == 0xFFFFFFFFu)
+		{
+			LOG_ERROR(logger, "RegisterTexture failed for default white texture.");
+			return -1;
+		}
+		if (slot != 0u)
+		{
+			LOG_ERROR(logger, "Default white texture was not registered at slot 0.");
+			return -1;
+		}
+	}
+
+	virasa::VisualMaterialTable materialTable;
 	uint32_t cubeMaterialId = 0xFFFFFFFFu;
 	{
-		auto err = materialTable.Initialize(context.GetDevice(), 64);
-		if (err != RenderError::None)
+		virasa::RenderError error = materialTable.Initialize(device, 64);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "VisualMaterialTable::Initialize failed.");
+			LOG_ERROR(logger,
+				"VisualMaterialTable::Initialize failed: {}",
+				static_cast<int>(error));
 			return -1;
 		}
 
-		VisualMaterial mat;
-		mat.factors.baseColorFactor = Vec4(0.9f, 0.3f, 0.2f, 1.0f);
-		// All other fields at defaults (roughness 1.0, metallic 0.0, etc.)
-
-		cubeMaterialId = materialTable.Allocate(mat);
+		virasa::VisualMaterial material;
+		material.factors.baseColorFactor = virasa::math::Vec4(0.9f, 0.3f, 0.2f, 1.0f);
+		cubeMaterialId = materialTable.Allocate(material);
 		if (cubeMaterialId == 0xFFFFFFFFu)
 		{
-			LOG_ERROR(logger, "VisualMaterialTable::Allocate failed for default material.");
+			LOG_ERROR(logger, "VisualMaterialTable::Allocate failed.");
 			return -1;
 		}
-	}
-
-	// -------------------------------------------------------------------------
-	// ECS World + Cube Entity
-	// -------------------------------------------------------------------------
-	World world;
-	{
-		Entity cubeEntity = world.CreateEntity();
-
-		world.AddTransformComponent(cubeEntity, Transform::Identity());
-
-		MeshComponent meshComp;
-		meshComp.meshId = cubeMeshId;
-		world.AddMeshComponent(cubeEntity, meshComp);
-
-		VisualComponent visualComp;
-		visualComp.materialId = cubeMaterialId;
-		world.AddVisualComponent(cubeEntity, visualComp);
-	}
-
-	// -------------------------------------------------------------------------
-	// Light Table
-	// -------------------------------------------------------------------------
-	LightTable lightTable;
-	{
-		auto err = lightTable.Initialize(context.GetDevice(), 256);
-		if (err != RenderError::None)
+		if (cubeMaterialId != 0u)
 		{
-			LOG_ERROR(logger, "LightTable::Initialize failed.");
+			LOG_ERROR(logger, "Default material was not allocated at id 0.");
 			return -1;
 		}
 	}
 
-	// Directional light entity
+	virasa::ecs::World world;
 	{
-		Entity lightEntity = world.CreateEntity();
-		DirectionalLightComponent dlc;
-		dlc.direction = Vec3(0.0f, 0.0f, -1.0f);
-		dlc.color = Vec3(1.0f, 1.0f, 1.0f);
-		dlc.intensity = 1.0f;
-		world.AddDirectionalLightComponent(lightEntity, dlc);
+		virasa::ecs::Entity cubeEntity = world.CreateEntity();
+		world.AddTransformComponent(cubeEntity, virasa::math::Transform::Identity());
+		world.AddMeshComponent(cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
+		world.AddVisualComponent(cubeEntity, virasa::ecs::VisualComponent{cubeMaterialId});
 	}
 
-	// -------------------------------------------------------------------------
-	// Render Graph Registries + Graph
-	// -------------------------------------------------------------------------
-	ImageRegistry imageRegistry;
+	virasa::LightTable lightTable;
 	{
-		auto err = imageRegistry.Initialize(context.GetDevice());
-		if (err != RenderError::None)
+		virasa::RenderError error = lightTable.Initialize(device, 256);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "ImageRegistry::Initialize failed.");
+			LOG_ERROR(logger, "LightTable::Initialize failed: {}", static_cast<int>(error));
 			return -1;
 		}
+
+		virasa::ecs::Entity lightEntity = world.CreateEntity();
+		virasa::ecs::DirectionalLightComponent lightComponent;
+		lightComponent.direction = virasa::math::Vec3(0.0f, 0.0f, -1.0f);
+		lightComponent.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+		lightComponent.intensity = 1.0f;
+		world.AddDirectionalLightComponent(lightEntity, lightComponent);
 	}
 
-	BufferRegistry bufferRegistry;
+	virasa::renderer::graph::ImageRegistry imageRegistry;
+	virasa::renderer::graph::BufferRegistry bufferRegistry;
+	virasa::renderer::graph::Graph graph;
 	{
-		auto err = bufferRegistry.Initialize(context.GetDevice());
-		if (err != RenderError::None)
+		virasa::RenderError error = imageRegistry.Initialize(device);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "BufferRegistry::Initialize failed.");
+			LOG_ERROR(
+				logger, "ImageRegistry::Initialize failed: {}", static_cast<int>(error));
+			return -1;
+		}
+
+		error = bufferRegistry.Initialize(device);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(
+				logger, "BufferRegistry::Initialize failed: {}", static_cast<int>(error));
+			return -1;
+		}
+
+		error = graph.Initialize(device, imageRegistry, bufferRegistry);
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(logger, "Graph::Initialize failed: {}", static_cast<int>(error));
 			return -1;
 		}
 	}
 
-	Graph graph;
+	virasa::ShaderModule vertexShader;
+	virasa::ShaderModule fragmentShader;
 	{
-		auto err = graph.Initialize(context.GetDevice(), imageRegistry, bufferRegistry);
-		if (err != RenderError::None)
+		virasa::RenderError error = vertexShader.Initialize(device, "shaders/cube.vert.spv");
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "Graph::Initialize failed.");
+			LOG_ERROR(
+				logger, "Vertex shader initialization failed: {}", static_cast<int>(error));
+			return -1;
+		}
+
+		error = fragmentShader.Initialize(device, "shaders/cube.frag.spv");
+		if (error != virasa::RenderError::None)
+		{
+			LOG_ERROR(logger,
+				"Fragment shader initialization failed: {}",
+				static_cast<int>(error));
 			return -1;
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Shader Modules
-	// -------------------------------------------------------------------------
-	ShaderModule vertShader;
-	{
-		auto err = vertShader.Initialize(context.GetDevice(), "shaders/cube.vert.spv");
-		if (err != RenderError::None)
-		{
-			LOG_ERROR(logger, "ShaderModule::Initialize failed for cube.vert.spv.");
-			return -1;
-		}
-	}
-
-	ShaderModule fragShader;
-	{
-		auto err = fragShader.Initialize(context.GetDevice(), "shaders/cube.frag.spv");
-		if (err != RenderError::None)
-		{
-			LOG_ERROR(logger, "ShaderModule::Initialize failed for cube.frag.spv.");
-			return -1;
-		}
-	}
-
-	// -------------------------------------------------------------------------
-	// View / Projection matrices (static, precomputed once)
-	// -------------------------------------------------------------------------
-	Mat4 viewMatrix = LookAtRH_ZUp(Vec3(2.0f, 2.0f, 2.0f), Vec3(0.0f, 0.0f, 0.0f));
-
-	VkExtent2D swapExtent = context.GetSwapchainExtent();
-	Mat4 projMatrix = PerspectiveRH_ZO(glm::radians(45.0f),
-		static_cast<float>(swapExtent.width) / static_cast<float>(swapExtent.height),
+	virasa::math::Mat4 viewMatrix = virasa::math::LookAtRH_ZUp(
+		virasa::math::Vec3(2.0f, 2.0f, 2.0f), virasa::math::Vec3(0.0f, 0.0f, 0.0f));
+	VkExtent2D swapchainExtent = context.GetSwapchainExtent();
+	virasa::math::Mat4 projectionMatrix = virasa::math::PerspectiveRH_ZO(glm::radians(45.0f),
+		static_cast<float>(swapchainExtent.width) / static_cast<float>(swapchainExtent.height),
 		0.1f,
 		10.0f);
 
-	// -------------------------------------------------------------------------
-	// Pipeline
-	// -------------------------------------------------------------------------
-	Pipeline cubePipeline;
+	virasa::Pipeline cubePipeline;
 	{
-		PipelineBuilder builder;
-		builder.SetVertexShader(vertShader);
-		builder.SetFragmentShader(fragShader);
-		builder.SetColorFormat(context.GetSwapchainFormat());
-		builder.SetDepthFormat(context.GetDepthFormat());
-		builder.SetExtent(context.GetSwapchainExtent());
-		builder.SetCullMode(VK_CULL_MODE_BACK_BIT);
-		builder.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE);
-		builder.SetDepthTest(true);
-		builder.SetDepthWrite(true);
-		builder.SetDepthCompareOp(VK_COMPARE_OP_LESS);
-		builder.AddPushConstantRange(
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168);
-		builder.AddDescriptorSetLayout(bindlessTextures.GetLayout());
+		virasa::PipelineBuilder builder;
+		builder.SetVertexShader(vertexShader)
+			.SetFragmentShader(fragmentShader)
+			.SetColorFormat(context.GetSwapchainFormat())
+			.SetDepthFormat(context.GetDepthFormat())
+			.SetExtent(context.GetSwapchainExtent())
+			.SetCullMode(VK_CULL_MODE_BACK_BIT)
+			.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+			.SetDepthTest(true)
+			.SetDepthWrite(true)
+			.SetDepthCompareOp(VK_COMPARE_OP_LESS)
+			.AddPushConstantRange(
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168)
+			.AddDescriptorSetLayout(bindlessTextureArray.GetLayout());
 
-		auto err = builder.Build(context.GetDevice(), cubePipeline);
-		if (err != RenderError::None)
+		virasa::RenderError error = builder.Build(device, cubePipeline);
+		if (error != virasa::RenderError::None)
 		{
-			LOG_ERROR(logger, "PipelineBuilder::Build failed for cube pipeline.");
+			LOG_ERROR(logger, "PipelineBuilder::Build failed: {}", static_cast<int>(error));
 			return -1;
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Render Loop
-	// -------------------------------------------------------------------------
-	while (true)
+	for (;;)
 	{
-		// Poll events and check exit conditions
-		std::span<const Event> events = platform.PollEvents();
+		std::span<const virasa::Event> events = platform.PollEvents();
 		bool shouldExit = false;
-		for (const auto& ev : events)
+		for (const virasa::Event& event : events)
 		{
-			if (ev.type == EventType::Quit)
+			if (event.type == virasa::EventType::Quit)
 			{
-				LOG_INFO(logger, "Exit: Quit event received.");
+				LOG_INFO(logger, "Quit event received, exiting.");
 				shouldExit = true;
 				break;
 			}
-			if (ev.type == EventType::KeyDown && ev.keyboard.key == KeyCode::Escape)
+			if (event.type == virasa::EventType::KeyDown &&
+				event.keyboard.key == virasa::KeyCode::Escape)
 			{
-				LOG_INFO(logger, "Exit: Escape key pressed.");
+				LOG_INFO(logger, "Escape key pressed, exiting.");
 				shouldExit = true;
 				break;
 			}
-		}
-		if (shouldExit)
-		{
-			break;
 		}
 
-		// Begin frame
-		SwapchainStatus beginStatus = context.BeginFrame();
-		if (beginStatus == SwapchainStatus::NotReady)
+		if (shouldExit)
+		{
+			context.GetDevice().WaitIdle();
+			return 0;
+		}
+
+		virasa::SwapchainStatus frameStatus = context.BeginFrame();
+		if (frameStatus == virasa::SwapchainStatus::NotReady)
 		{
 			continue;
 		}
-		if (beginStatus == SwapchainStatus::Error)
+		if (frameStatus == virasa::SwapchainStatus::Error)
 		{
 			LOG_ERROR(logger, "Context::BeginFrame returned Error.");
 			return -1;
 		}
 
-		// ---- Step 0: Per-frame light upload ----
-		std::vector<LightGPU> gpuLights;
-
-		// Directional lights
-		for (const Entity& entity : world.GetDirectionalLightComponentEntities())
+		std::vector<virasa::LightGPU> frameLights;
+		for (const virasa::ecs::Entity& entity : world.GetDirectionalLightComponentEntities())
 		{
-			const DirectionalLightComponent& dlc = world.GetDirectionalLightComponent(entity);
-			LightGPU lg;
-			lg.type = static_cast<uint32_t>(LightType::Directional);
-			lg.direction = glm::normalize(dlc.direction);
-			lg.color = dlc.color * dlc.intensity;
-			gpuLights.push_back(lg);
+			const virasa::ecs::DirectionalLightComponent& component =
+				world.GetDirectionalLightComponent(entity);
+			virasa::LightGPU light{};
+			light.type = static_cast<uint32_t>(virasa::LightType::Directional);
+			light.direction = glm::normalize(component.direction);
+			light.color = component.color * component.intensity;
+			frameLights.push_back(light);
 		}
 
-		// Point lights
-		for (const Entity& entity : world.GetPointLightComponentEntities())
+		for (const virasa::ecs::Entity& entity : world.GetPointLightComponentEntities())
 		{
 			if (!world.HasTransformComponent(entity))
 			{
 				continue;
 			}
-			const PointLightComponent& plc = world.GetPointLightComponent(entity);
-			const Transform& xform = world.GetTransformComponent(entity);
-			LightGPU lg;
-			lg.type = static_cast<uint32_t>(LightType::Point);
-			lg.position = xform.translation;
-			lg.range = plc.range;
-			lg.color = plc.color * plc.intensity;
-			gpuLights.push_back(lg);
+
+			const virasa::ecs::PointLightComponent& component =
+				world.GetPointLightComponent(entity);
+			const virasa::math::Transform& transform = world.GetTransformComponent(entity);
+			virasa::LightGPU light{};
+			light.type = static_cast<uint32_t>(virasa::LightType::Point);
+			light.position = transform.translation;
+			light.range = component.range;
+			light.color = component.color * component.intensity;
+			frameLights.push_back(light);
 		}
 
-		// Spot lights
-		for (const Entity& entity : world.GetSpotLightComponentEntities())
+		for (const virasa::ecs::Entity& entity : world.GetSpotLightComponentEntities())
 		{
 			if (!world.HasTransformComponent(entity))
 			{
 				continue;
 			}
-			const SpotLightComponent& slc = world.GetSpotLightComponent(entity);
-			const Transform& xform = world.GetTransformComponent(entity);
-			LightGPU lg;
-			lg.type = static_cast<uint32_t>(LightType::Spot);
-			lg.position = xform.translation;
-			// Y-forward convention: forward = rotation * (0,1,0)
-			lg.direction = glm::normalize(xform.rotation * Vec3(0.0f, 1.0f, 0.0f));
-			lg.range = slc.range;
-			lg.color = slc.color * slc.intensity;
-			lg.innerConeCos = slc.innerConeCos;
-			lg.outerConeCos = slc.outerConeCos;
-			gpuLights.push_back(lg);
+
+			const virasa::ecs::SpotLightComponent& component =
+				world.GetSpotLightComponent(entity);
+			const virasa::math::Transform& transform = world.GetTransformComponent(entity);
+			virasa::LightGPU light{};
+			light.type = static_cast<uint32_t>(virasa::LightType::Spot);
+			light.position = transform.translation;
+			light.direction =
+				glm::normalize(transform.rotation * virasa::math::Vec3(0.0f, 1.0f, 0.0f));
+			light.range = component.range;
+			light.color = component.color * component.intensity;
+			light.innerConeCos = component.innerConeCos;
+			light.outerConeCos = component.outerConeCos;
+			frameLights.push_back(light);
 		}
 
-		lightTable.UploadFrame(std::span<const LightGPU>(gpuLights.data(), gpuLights.size()));
+		lightTable.UploadFrame(
+			std::span<const virasa::LightGPU>(frameLights.data(), frameLights.size()));
 
-		// ---- Step 1: Begin graph ----
 		graph.Begin();
 
-		// ---- Step 2: Import swapchain image ----
-		ImageHandle swapchainHandle = graph.ImportImage(context.GetCurrentImage(),
-			context.GetCurrentImageView(),
-			context.GetSwapchainFormat(),
-			context.GetSwapchainExtent(),
-			ResourceUsage::Undefined);
+		virasa::renderer::graph::ImageHandle swapchainHandle =
+			graph.ImportImage(context.GetCurrentImage(),
+				context.GetCurrentImageView(),
+				context.GetSwapchainFormat(),
+				context.GetSwapchainExtent(),
+				virasa::renderer::graph::ResourceUsage::Undefined);
 
-		// ---- Step 3: Import depth image ----
-		ImageHandle depthHandle = graph.ImportImage(context.GetDepthImage(),
-			context.GetDepthImageView(),
-			context.GetDepthFormat(),
-			context.GetSwapchainExtent(),
-			ResourceUsage::Undefined);
-
-		// ---- Step 4: Declare forward pass ----
-		// Capture everything the record callback needs
-		const Device& capturedDevice = context.GetDevice();
-		Mat4 capturedView = viewMatrix;
-		Mat4 capturedProj = projMatrix;
-		VkDeviceAddress matBufAddr = materialTable.GetBufferAddress();
-		VkDeviceAddress lightBufAddr = lightTable.GetBufferAddress();
-		uint32_t lightCount = lightTable.GetLightCount();
+		virasa::renderer::graph::ImageHandle depthHandle =
+			graph.ImportImage(context.GetDepthImage(),
+				context.GetDepthImageView(),
+				context.GetDepthFormat(),
+				context.GetSwapchainExtent(),
+				virasa::renderer::graph::ResourceUsage::Undefined);
 
 		graph.AddPass("forward")
-			.ColorAttachment(
-				swapchainHandle, LoadOp::Clear, ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
-			.DepthAttachment(depthHandle, LoadOp::Clear, 1.0f)
+			.ColorAttachment(swapchainHandle,
+				virasa::renderer::graph::LoadOp::Clear,
+				virasa::renderer::graph::ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
+			.DepthAttachment(depthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
 			.Record(
 				[&world,
 					&meshRegistry,
-					&bindlessTextures,
+					&materialTable,
+					&lightTable,
+					&bindlessTextureArray,
 					&cubePipeline,
-					capturedView,
-					capturedProj,
-					matBufAddr,
-					lightBufAddr,
-					lightCount,
-					&capturedDevice](const GraphContext& gc)
+					&viewMatrix,
+					&projectionMatrix,
+					&device](const virasa::renderer::graph::GraphContext& graphContext)
 				{
-					VkCommandBuffer cmd = gc.GetCommandBuffer();
-					VkExtent2D renderExtent = gc.GetRenderExtent();
+					VkCommandBuffer commandBuffer = graphContext.GetCommandBuffer();
+					VkExtent2D renderExtent = graphContext.GetRenderExtent();
 
-					// (i) Dynamic viewport/scissor
 					VkViewport viewport{};
 					viewport.x = 0.0f;
 					viewport.y = 0.0f;
@@ -597,134 +567,98 @@ int main(int argc, char** argv)
 					viewport.height = static_cast<float>(renderExtent.height);
 					viewport.minDepth = 0.0f;
 					viewport.maxDepth = 1.0f;
-					vkCmdSetViewport(cmd, 0, 1, &viewport);
+					vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
 					VkRect2D scissor{};
 					scissor.offset = {0, 0};
 					scissor.extent = renderExtent;
-					vkCmdSetScissor(cmd, 0, 1, &scissor);
+					vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-					// (ii) Bind pipeline
-					cubePipeline.Bind(cmd);
+					cubePipeline.Bind(commandBuffer);
 
-					// (iii) Bind bindless descriptor set at set 0
-					VkDescriptorSet bindlessSet = bindlessTextures.GetDescriptorSet();
-					vkCmdBindDescriptorSets(cmd,
+					VkDescriptorSet descriptorSet =
+						bindlessTextureArray.GetDescriptorSet();
+					vkCmdBindDescriptorSets(commandBuffer,
 						VK_PIPELINE_BIND_POINT_GRAPHICS,
 						cubePipeline.GetLayout(),
 						0,
 						1,
-						&bindlessSet,
+						&descriptorSet,
 						0,
 						nullptr);
 
-					// (iv) Per-entity draw loop
-					const std::vector<Entity>& visualEntities =
-						world.GetVisualComponentEntities();
-					for (const Entity& entity : visualEntities)
+					for (const virasa::ecs::Entity& entity :
+						world.GetVisualComponentEntities())
 					{
-						// (a) Check mesh component
 						if (!world.HasMeshComponent(entity))
 						{
 							continue;
 						}
-						const MeshComponent& meshComp = world.GetMeshComponent(entity);
 
-						// (b) Check mesh registry
-						if (!meshRegistry.IsAllocated(meshComp.meshId))
+						const virasa::ecs::MeshComponent& meshComponent =
+							world.GetMeshComponent(entity);
+						if (!meshRegistry.IsAllocated(meshComponent.meshId))
 						{
 							continue;
 						}
-						const Mesh& mesh = meshRegistry.Get(meshComp.meshId);
 
-						// (c) Model matrix from transform (or identity)
-						Mat4 modelMatrix = Mat4(1.0f);
+						const virasa::Mesh& mesh =
+							meshRegistry.Get(meshComponent.meshId);
+						virasa::math::Mat4 modelMatrix(1.0f);
 						if (world.HasTransformComponent(entity))
 						{
-							const Transform& xform =
-								world.GetTransformComponent(entity);
-							modelMatrix = xform.ToMatrix();
+							modelMatrix =
+								world.GetTransformComponent(entity).ToMatrix();
 						}
 
-						// (d) Material id
-						uint32_t matId = world.GetVisualComponent(entity).materialId;
+						uint32_t materialId =
+							world.GetVisualComponent(entity).materialId;
+						PushConstants pushConstants{};
+						pushConstants.mvp = projectionMatrix * viewMatrix * modelMatrix;
+						pushConstants.model = modelMatrix;
+						pushConstants.vertexBufferAddress =
+							mesh.GetVertexBufferAddress(device);
+						pushConstants.indexBufferAddress =
+							mesh.GetIndexBufferAddress(device);
+						pushConstants.materialBufferAddress =
+							materialTable.GetBufferAddress();
+						pushConstants.lightBufferAddress =
+							lightTable.GetBufferAddress();
+						pushConstants.materialId = materialId;
+						pushConstants.lightCount = lightTable.GetLightCount();
 
-						// (e) Compose MVP and push constants
-						Mat4 mvp = capturedProj * capturedView * modelMatrix;
-
-						VkDeviceAddress vertAddr =
-							mesh.GetVertexBufferAddress(capturedDevice);
-						VkDeviceAddress idxAddr =
-							mesh.GetIndexBufferAddress(capturedDevice);
-
-						// Build 168-byte push constant payload
-						struct PushConstants
-						{
-							Mat4 mvp;				  // offset 0,   64 bytes
-							Mat4 model;				  // offset 64,  64 bytes
-							uint64_t vertexBufferAddress;	  // offset 128, 8 bytes
-							uint64_t indexBufferAddress;	  // offset 136, 8 bytes
-							uint64_t materialBufferAddress; // offset 144, 8 bytes
-							uint64_t lightBufferAddress;	  // offset 152, 8 bytes
-							uint32_t materialId;		  // offset 160, 4 bytes
-							uint32_t lightCount;		  // offset 164, 4 bytes
-						};
-						static_assert(sizeof(PushConstants) == 168,
-							"PushConstants must be 168 bytes");
-
-						PushConstants pc{};
-						pc.mvp = mvp;
-						pc.model = modelMatrix;
-						pc.vertexBufferAddress = static_cast<uint64_t>(vertAddr);
-						pc.indexBufferAddress = static_cast<uint64_t>(idxAddr);
-						pc.materialBufferAddress = static_cast<uint64_t>(matBufAddr);
-						pc.lightBufferAddress = static_cast<uint64_t>(lightBufAddr);
-						pc.materialId = matId;
-						pc.lightCount = lightCount;
-
-						vkCmdPushConstants(cmd,
+						vkCmdPushConstants(commandBuffer,
 							cubePipeline.GetLayout(),
 							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 							0,
-							168,
-							&pc);
+							sizeof(PushConstants),
+							&pushConstants);
 
-						// (f) Draw
-						vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+						vkCmdDraw(commandBuffer, mesh.GetIndexCount(), 1, 0, 0);
 					}
 				});
 
-		// ---- Step 5: Compile and Execute ----
+		virasa::RenderError compileError = graph.Compile();
+		if (compileError != virasa::RenderError::None)
 		{
-			auto err = graph.Compile();
-			if (err != RenderError::None)
-			{
-				LOG_ERROR(logger, "Graph::Compile failed.");
-				return -1;
-			}
+			LOG_ERROR(logger, "Graph::Compile failed: {}", static_cast<int>(compileError));
+			return -1;
 		}
 
+		virasa::RenderError executeError = graph.Execute(context.GetCurrentCommandBuffer());
+		if (executeError != virasa::RenderError::None)
 		{
-			auto err = graph.Execute(context.GetCurrentCommandBuffer());
-			if (err != RenderError::None)
-			{
-				LOG_ERROR(logger, "Graph::Execute failed.");
-				return -1;
-			}
+			LOG_ERROR(logger, "Graph::Execute failed: {}", static_cast<int>(executeError));
+			return -1;
 		}
 
-		// ---- Step 6: End graph ----
 		graph.End();
 
-		// End frame
-		SwapchainStatus endStatus = context.EndFrame();
-		(void)endStatus; // Recreated is not an error
-		if (endStatus == SwapchainStatus::Error)
+		virasa::SwapchainStatus endStatus = context.EndFrame();
+		if (endStatus == virasa::SwapchainStatus::Error)
 		{
 			LOG_ERROR(logger, "Context::EndFrame returned Error.");
 			return -1;
 		}
 	}
-
-	return 0;
 }

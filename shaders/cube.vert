@@ -27,11 +27,13 @@ layout(buffer_reference, scalar) readonly buffer IndexBuffer {
 //   uint32_t _pad                   @ 92  (4 bytes)
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
+    mat4 model;
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
     uint64_t materialBufferAddress;
+    uint64_t lightBufferAddress;
     uint materialId;
-    uint _pad;
+    uint lightCount;
 } pc;
 
 layout(location = 0) out vec2 fragUV;

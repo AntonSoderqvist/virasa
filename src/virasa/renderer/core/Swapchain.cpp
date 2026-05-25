@@ -474,14 +474,6 @@ SwapchainStatus Swapchain::AcquireNextImage(
 		VK_NULL_HANDLE,
 		out_image_index);
 
-	{
-		auto* logger = virasa::Logger::GetLogger("renderer");
-		LOG_INFO(logger,
-			"vkAcquireNextImageKHR -> VkResult={}, image_index={}",
-			static_cast<int>(result),
-			*out_image_index);
-	}
-
 	if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
 	{
 		return SwapchainStatus::Success;
@@ -514,14 +506,6 @@ SwapchainStatus Swapchain::Present(
 	presentInfo.pResults = nullptr;
 
 	VkResult result = vkQueuePresentKHR(present_queue, &presentInfo);
-
-	{
-		auto* logger = virasa::Logger::GetLogger("renderer");
-		LOG_INFO(logger,
-			"vkQueuePresentKHR(image_index={}) -> VkResult={}",
-			image_index,
-			static_cast<int>(result));
-	}
 
 	if (result == VK_SUCCESS)
 	{
