@@ -10,3 +10,9 @@
 	path = vendor/googletest
 	url = https://github.com/google/googletest.git
 	ignore = dirty
+[submodule "vendor/freetype"]
+	path = vendor/freetype
+	url = https://gitlab.freedesktop.org/freetype/freetype.git
+[submodule "vendor/JetBrainsMono"]
+	path = vendor/JetBrainsMono
+	url = https://github.com/JetBrains/JetBrainsMono.git
