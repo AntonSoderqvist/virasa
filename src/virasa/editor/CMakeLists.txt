@@ -5,6 +5,7 @@ add_library(virasa_editor_lib STATIC
     EditorView.cpp
     HierarchyView.cpp
     ViewManager.cpp
+    EditorApp.cpp
 )
 
 target_include_directories(virasa_editor_lib
@@ -14,7 +15,10 @@ target_include_directories(virasa_editor_lib
 
 target_link_libraries(virasa_editor_lib
     PUBLIC
+        virasa_core_lib
         virasa_window_lib
         virasa_ui_lib
         virasa_ecs_lib
+        virasa_renderer_lib
+        virasa_renderer_scene_lib
 )
