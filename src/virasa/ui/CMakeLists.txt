@@ -3,6 +3,7 @@ add_library(virasa_ui_lib STATIC
     CommandBar.cpp
     TextPanel.cpp
     HierarchyPanel.cpp
+    EntityEditorPanel.cpp
 )
 
 target_include_directories(virasa_ui_lib

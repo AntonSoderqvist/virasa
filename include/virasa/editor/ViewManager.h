@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "virasa/editor/CommandBarView.h"
 #include "virasa/editor/EditorView.h"
+#include "virasa/editor/EntityEditorView.h"
 #include "virasa/editor/HierarchyView.h"
 #include "virasa/ui/Types.h"
 #include "virasa/ui/FontAtlas.h"
@@ -54,6 +55,13 @@ enum class EventResult : uint8_t
 class ViewManager final
 {
 public:
+	ViewManager() = default;
+	ViewManager(const ViewManager&) = delete;
+	ViewManager& operator=(const ViewManager&) = delete;
+	ViewManager(ViewManager&&) noexcept = default;
+	ViewManager& operator=(ViewManager&&) noexcept = default;
+	~ViewManager() = default;
+
 	/**
 	 * @brief Returns the current input focus.
 	 * @return The Focus enum value naming the currently focused view.
@@ -103,6 +111,18 @@ public:
 	[[nodiscard]] const virasa::editor::HierarchyView& GetHierarchyView() const noexcept;
 
 	/**
+	 * @brief Returns a mutable reference to the owned EntityEditorView.
+	 * @return Mutable reference to _entityEditorView.
+	 */
+	[[nodiscard]] virasa::editor::EntityEditorView& GetEntityEditorView() noexcept;
+
+	/**
+	 * @brief Returns a const reference to the owned EntityEditorView.
+	 * @return Const reference to _entityEditorView.
+	 */
+	[[nodiscard]] const virasa::editor::EntityEditorView& GetEntityEditorView() const noexcept;
+
+	/**
 	 * @brief Dispatches an input event to the focused view and processes the result.
 	 * @param event The input event to handle.
 	 * @param world The current ECS world (passed through to views that need it).
@@ -132,6 +152,7 @@ private:
 	virasa::editor::CommandBarView _commandBarView = {};
 	virasa::editor::EditorView _editorView = {};
 	virasa::editor::HierarchyView _hierarchyView = {};
+	virasa::editor::EntityEditorView _entityEditorView = {};
 	Focus _focus = Focus::CommandBar;
 	RightPanelMode _rightPanelMode = RightPanelMode::Closed;
 };

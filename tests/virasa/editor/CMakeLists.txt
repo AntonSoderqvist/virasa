@@ -4,6 +4,7 @@ add_executable(virasa_editor_tests
     test_CommandBarView.cpp
     test_EditorView.cpp
     test_HierarchyView.cpp
+    test_EntityEditorView.cpp
     test_ViewManager.cpp
     test_EditorApp.cpp
 )

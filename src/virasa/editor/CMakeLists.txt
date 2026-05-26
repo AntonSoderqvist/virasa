@@ -4,6 +4,7 @@ add_library(virasa_editor_lib STATIC
     CommandBarView.cpp
     EditorView.cpp
     HierarchyView.cpp
+    EntityEditorView.cpp
     ViewManager.cpp
     EditorApp.cpp
 )

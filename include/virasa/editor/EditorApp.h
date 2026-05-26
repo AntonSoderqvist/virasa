@@ -2,6 +2,7 @@
 #define VIRASA_EDITOR_EDITORAPP_H
 
 #include "virasa/math/Types.h"
+#include <cstdint>
 
 namespace virasa::editor
 {

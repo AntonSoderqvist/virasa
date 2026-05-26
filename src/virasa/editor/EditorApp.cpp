@@ -164,6 +164,9 @@ int EditorApp::Run(int argc, char** argv)
 	}
 	viewManager.GetEditorView().GetBuffer().SetText("// scratch\nhello editor\n");
 
+	// Seed the EditorView buffer text per the contract
+	// (already done above; the contract specifies "// scratch\nhello editor\n")
+
 	// -------------------------------------------------------------------------
 	// Stage 8: Input state
 	// -------------------------------------------------------------------------

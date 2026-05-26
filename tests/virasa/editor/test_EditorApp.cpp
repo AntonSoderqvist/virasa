@@ -49,9 +49,12 @@ TEST(EditorApp, test_run_is_program_lifecycle)
 	EditorApp app;
 	char* argv[] = {nullptr};
 
-	const int result = app.Run(0, argv);
+	const int resultWithNullArgvElement = app.Run(0, argv);
+	EXPECT_TRUE(resultWithNullArgvElement == 0 || resultWithNullArgvElement == -1);
 
-	EXPECT_TRUE(result == 0 || result == -1);
+	EditorApp secondApp;
+	const int resultWithNonZeroArgc = secondApp.Run(3, argv);
+	EXPECT_TRUE(resultWithNonZeroArgc == 0 || resultWithNonZeroArgc == -1);
 }
 
 TEST(EditorApp, test_run_loop_drives_one_frame_at_a_time)
@@ -59,9 +62,10 @@ TEST(EditorApp, test_run_loop_drives_one_frame_at_a_time)
 	using virasa::editor::EditorApp;
 
 	EditorApp app;
-	char* argv[] = {nullptr};
+	char programName[] = "editor";
+	char* argv[] = {programName, nullptr};
 
-	const int result = app.Run(0, argv);
+	const int result = app.Run(1, argv);
 
 	EXPECT_TRUE(result == 0 || result == -1);
 }

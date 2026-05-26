@@ -1,5 +1,7 @@
 #include "virasa/editor/ViewManager.h"
 
+#include <cmath>
+
 #include "virasa/editor/Motions.h"
 
 namespace virasa::editor
@@ -43,6 +45,16 @@ virasa::editor::HierarchyView& ViewManager::GetHierarchyView() noexcept
 const virasa::editor::HierarchyView& ViewManager::GetHierarchyView() const noexcept
 {
 	return _hierarchyView;
+}
+
+virasa::editor::EntityEditorView& ViewManager::GetEntityEditorView() noexcept
+{
+	return _entityEditorView;
+}
+
+const virasa::editor::EntityEditorView& ViewManager::GetEntityEditorView() const noexcept
+{
+	return _entityEditorView;
 }
 
 EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::ecs::World& world)
@@ -213,6 +225,10 @@ void ViewManager::Render(
 		}
 		else if (_rightPanelMode == RightPanelMode::Hierarchy)
 		{
+			const float hierarchyHeight = std::floor(panelHeight * 0.5f);
+			const float editorY = panelY + hierarchyHeight;
+			const float editorHeight = panelHeight - hierarchyHeight;
+
 			_hierarchyView.Render(
 				out,
 				world,
@@ -220,7 +236,18 @@ void ViewManager::Render(
 				static_cast<float>(panelX),
 				panelY,
 				static_cast<float>(panelWidth),
-				panelHeight
+				hierarchyHeight
+			);
+
+			_entityEditorView.Render(
+				out,
+				world,
+				_hierarchyView.GetCursorEntity(world),
+				atlas,
+				static_cast<float>(panelX),
+				editorY,
+				static_cast<float>(panelWidth),
+				editorHeight
 			);
 		}
 	}
