@@ -27,7 +27,8 @@ namespace virasa::editor
 enum class HierarchyViewKeyResult : uint8_t
 {
 	Consumed,
-	RequestCommandBar
+	RequestCommandBar,
+	RequestEntityEditor
 };
 
 /**

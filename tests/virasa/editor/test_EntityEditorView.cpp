@@ -8,8 +8,10 @@
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Transform.h"
 #include "virasa/renderer/Types.h"
+#include "virasa/window/Events.h"
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -27,6 +29,7 @@ using virasa::ecs::PointLightComponent;
 using virasa::ecs::SpotLightComponent;
 using virasa::ecs::VisualComponent;
 using virasa::ecs::World;
+using virasa::editor::EntityEditorViewKeyResult;
 using virasa::math::Transform;
 using virasa::CameraDomain;
 using virasa::ui::DrawList;
@@ -34,6 +37,7 @@ using virasa::ui::EntityEditorPanel;
 using virasa::ui::EntityEditorPanelConfig;
 using virasa::ui::FontAtlas;
 using virasa::ui::TextCommand;
+using virasa::KeyCode;
 
 constexpr float kX = 10.0f;
 constexpr float kY = 20.0f;
@@ -48,7 +52,7 @@ std::string_view ExtractText(const DrawList& out, const TextCommand& command)
 
 } // namespace
 
-TEST(EntityEditorView, test_entity_editor_view_owns_panel)
+TEST(EntityEditorView, test_entity_editor_view_owns_panel_cursor_collapsed_and_edit_state)
 {
     static_assert(std::is_default_constructible_v<EntityEditorView>);
     static_assert(std::is_copy_constructible_v<EntityEditorView>);
@@ -65,19 +69,51 @@ TEST(EntityEditorView, test_entity_editor_view_owns_panel)
     EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().background.g, defaultConfig.background.g);
     EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().background.b, defaultConfig.background.b);
     EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().background.a, defaultConfig.background.a);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+    EXPECT_FALSE(view.IsEditing());
 
     EntityEditorPanelConfig updatedConfig = view.GetPanel().GetConfig();
     updatedConfig.paddingX = 17.0f;
-    updatedConfig.captionColumnWidth = 222.0f;
+    updatedConfig.paddingY = 9.0f;
     view.GetPanel().SetConfig(updatedConfig);
+
+    World world;
+    const Entity entity = world.CreateEntity("OwnedState");
+    world.AddTransformComponent(entity, Transform{});
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
 
     EntityEditorView copied = view;
     EXPECT_FLOAT_EQ(copied.GetPanel().GetConfig().paddingX, 17.0f);
-    EXPECT_FLOAT_EQ(copied.GetPanel().GetConfig().captionColumnWidth, 222.0f);
+    EXPECT_FLOAT_EQ(copied.GetPanel().GetConfig().paddingY, 9.0f);
+    EXPECT_EQ(copied.GetCursorRow(), 2u);
+    EXPECT_EQ(copied.GetCursorCell(), 2u);
+    EXPECT_TRUE(copied.IsEditing());
 
     EntityEditorView moved = std::move(view);
     EXPECT_FLOAT_EQ(moved.GetPanel().GetConfig().paddingX, 17.0f);
-    EXPECT_FLOAT_EQ(moved.GetPanel().GetConfig().captionColumnWidth, 222.0f);
+    EXPECT_FLOAT_EQ(moved.GetPanel().GetConfig().paddingY, 9.0f);
+    EXPECT_EQ(moved.GetCursorRow(), 2u);
+    EXPECT_EQ(moved.GetCursorCell(), 2u);
+    EXPECT_TRUE(moved.IsEditing());
+}
+
+TEST(EntityEditorView, test_entity_editor_view_key_result_enum_values_in_declared_order)
+{
+    static_assert(std::is_same_v<std::underlying_type_t<EntityEditorViewKeyResult>, uint8_t>);
+
+    EXPECT_EQ(static_cast<uint8_t>(EntityEditorViewKeyResult::Consumed), 0u);
+    EXPECT_EQ(static_cast<uint8_t>(EntityEditorViewKeyResult::RequestHierarchy), 1u);
+    EXPECT_EQ(static_cast<uint8_t>(EntityEditorViewKeyResult::RequestCommandBar), 2u);
 }
 
 TEST(EntityEditorView, test_get_panel_returns_owned_entity_editor_panel)
@@ -119,15 +155,146 @@ TEST(EntityEditorView, test_component_section_order_is_fixed)
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 51u);
+    ASSERT_EQ(texts.size(), 88u);
 
     EXPECT_EQ(ExtractText(out, texts[2]), "Transform");
-    EXPECT_EQ(ExtractText(out, texts[9]), "Mesh");
-    EXPECT_EQ(ExtractText(out, texts[12]), "Visual");
-    EXPECT_EQ(ExtractText(out, texts[15]), "DirectionalLight");
-    EXPECT_EQ(ExtractText(out, texts[22]), "PointLight");
-    EXPECT_EQ(ExtractText(out, texts[29]), "SpotLight");
-    EXPECT_EQ(ExtractText(out, texts[40]), "Camera");
+    EXPECT_EQ(ExtractText(out, texts[26]), "Mesh");
+    EXPECT_EQ(ExtractText(out, texts[29]), "Visual");
+    EXPECT_EQ(ExtractText(out, texts[32]), "DirectionalLight");
+    EXPECT_EQ(ExtractText(out, texts[49]), "PointLight");
+    EXPECT_EQ(ExtractText(out, texts[61]), "SpotLight");
+    EXPECT_EQ(ExtractText(out, texts[77]), "Camera");
+}
+
+TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
+{
+    EntityEditorView view;
+    DrawList out;
+    World world;
+    FontAtlas atlas;
+
+    const Entity entity = world.CreateEntity("LayoutEntity");
+
+    Transform transform{};
+    transform.translation = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
+    transform.rotation = virasa::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+    transform.scale = virasa::math::Vec3(4.0f, 5.0f, 6.0f);
+    world.AddTransformComponent(entity, transform);
+    world.AddMeshComponent(entity, MeshComponent{42u});
+    world.AddVisualComponent(entity, VisualComponent{99u});
+
+    DirectionalLightComponent directional{};
+    directional.direction = virasa::math::Vec3(7.0f, 8.0f, 9.0f);
+    directional.color = virasa::math::Vec3(0.1f, 0.2f, 0.3f);
+    directional.intensity = 1.5f;
+    world.AddDirectionalLightComponent(entity, directional);
+
+    PointLightComponent point{};
+    point.color = virasa::math::Vec3(0.4f, 0.5f, 0.6f);
+    point.intensity = 2.5f;
+    point.range = 12.0f;
+    world.AddPointLightComponent(entity, point);
+
+    SpotLightComponent spot{};
+    spot.color = virasa::math::Vec3(0.7f, 0.8f, 0.9f);
+    spot.intensity = 3.5f;
+    spot.range = 13.0f;
+    spot.innerConeCos = 0.95f;
+    spot.outerConeCos = 0.85f;
+    world.AddSpotLightComponent(entity, spot);
+
+    CameraComponent camera{};
+    camera.domain = CameraDomain::Editor;
+    camera.fovY = 0.5f;
+    camera.aspect = 1.25f;
+    camera.nearPlane = 0.2f;
+    camera.farPlane = 500.0f;
+    world.AddCameraComponent(entity, camera);
+
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+
+    const auto texts = out.GetTexts();
+    ASSERT_EQ(texts.size(), 88u);
+
+    EXPECT_EQ(ExtractText(out, texts[0]), "Name");
+    EXPECT_EQ(ExtractText(out, texts[1]), "LayoutEntity");
+
+    EXPECT_EQ(ExtractText(out, texts[3]), "Translation");
+    EXPECT_EQ(ExtractText(out, texts[4]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[5]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[6]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[7]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[8]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[9]), "3.000");
+
+    EXPECT_EQ(ExtractText(out, texts[10]), "Rotation");
+    EXPECT_EQ(ExtractText(out, texts[11]), "W:");
+    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[13]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[15]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[16]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[17]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[18]), "0.000");
+
+    EXPECT_EQ(ExtractText(out, texts[19]), "Scale");
+    EXPECT_EQ(ExtractText(out, texts[20]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[21]), "4.000");
+    EXPECT_EQ(ExtractText(out, texts[22]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[23]), "5.000");
+    EXPECT_EQ(ExtractText(out, texts[24]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[25]), "6.000");
+
+    EXPECT_EQ(ExtractText(out, texts[27]), "Mesh Id");
+    EXPECT_EQ(ExtractText(out, texts[28]), "42");
+    EXPECT_EQ(ExtractText(out, texts[30]), "Material Id");
+    EXPECT_EQ(ExtractText(out, texts[31]), "99");
+
+    EXPECT_EQ(ExtractText(out, texts[33]), "Direction");
+    EXPECT_EQ(ExtractText(out, texts[34]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[35]), "7.000");
+    EXPECT_EQ(ExtractText(out, texts[36]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[37]), "8.000");
+    EXPECT_EQ(ExtractText(out, texts[38]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[39]), "9.000");
+
+    EXPECT_EQ(ExtractText(out, texts[40]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[41]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[42]), "0.100");
+    EXPECT_EQ(ExtractText(out, texts[43]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[44]), "0.200");
+    EXPECT_EQ(ExtractText(out, texts[45]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[46]), "0.300");
+    EXPECT_EQ(ExtractText(out, texts[47]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[48]), "1.500");
+
+    EXPECT_EQ(ExtractText(out, texts[50]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[57]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[58]), "2.500");
+    EXPECT_EQ(ExtractText(out, texts[59]), "Range");
+    EXPECT_EQ(ExtractText(out, texts[60]), "12.000");
+
+    EXPECT_EQ(ExtractText(out, texts[61]), "SpotLight");
+    EXPECT_EQ(ExtractText(out, texts[62]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[69]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[70]), "3.500");
+    EXPECT_EQ(ExtractText(out, texts[71]), "Range");
+    EXPECT_EQ(ExtractText(out, texts[72]), "13.000");
+    EXPECT_EQ(ExtractText(out, texts[73]), "Inner Cone Cos");
+    EXPECT_EQ(ExtractText(out, texts[74]), "0.950");
+    EXPECT_EQ(ExtractText(out, texts[75]), "Outer Cone Cos");
+    EXPECT_EQ(ExtractText(out, texts[76]), "0.850");
+
+    EXPECT_EQ(ExtractText(out, texts[78]), "Domain");
+    EXPECT_EQ(ExtractText(out, texts[79]), "Editor");
+    EXPECT_EQ(ExtractText(out, texts[80]), "Fov Y");
+    EXPECT_EQ(ExtractText(out, texts[81]), "0.500");
+    EXPECT_EQ(ExtractText(out, texts[82]), "Aspect");
+    EXPECT_EQ(ExtractText(out, texts[83]), "1.250");
+    EXPECT_EQ(ExtractText(out, texts[84]), "Near Plane");
+    EXPECT_EQ(ExtractText(out, texts[85]), "0.200");
+    EXPECT_EQ(ExtractText(out, texts[86]), "Far Plane");
+    EXPECT_EQ(ExtractText(out, texts[87]), "500.000");
 }
 
 TEST(EntityEditorView, test_field_value_formatting_rules)
@@ -179,29 +346,44 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 51u);
+    ASSERT_EQ(texts.size(), 88u);
 
-    EXPECT_EQ(ExtractText(out, texts[4]), "(0.000, 1.500, -0.100)");
-    EXPECT_EQ(ExtractText(out, texts[6]), "(1.000, 0.000, 0.250, -0.500)");
-    EXPECT_EQ(ExtractText(out, texts[8]), "(2.000, 0.000, 3.125)");
-    EXPECT_EQ(ExtractText(out, texts[11]), "7");
-    EXPECT_EQ(ExtractText(out, texts[14]), "<none>");
-    EXPECT_EQ(ExtractText(out, texts[17]), "(0.000, 2.000, -3.250)");
-    EXPECT_EQ(ExtractText(out, texts[19]), "(4.000, 0.000, 5.500)");
-    EXPECT_EQ(ExtractText(out, texts[21]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[24]), "(0.000, -1.250, 2.500)");
-    EXPECT_EQ(ExtractText(out, texts[26]), "6.000");
-    EXPECT_EQ(ExtractText(out, texts[28]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[31]), "(0.000, 0.000, 9.000)");
-    EXPECT_EQ(ExtractText(out, texts[33]), "1.235");
-    EXPECT_EQ(ExtractText(out, texts[35]), "10.000");
-    EXPECT_EQ(ExtractText(out, texts[37]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[39]), "0.875");
-    EXPECT_EQ(ExtractText(out, texts[42]), "CameraDomain(7)");
+    EXPECT_EQ(ExtractText(out, texts[5]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[7]), "1.500");
+    EXPECT_EQ(ExtractText(out, texts[9]), "-0.100");
+    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[16]), "0.250");
+    EXPECT_EQ(ExtractText(out, texts[18]), "-0.500");
+    EXPECT_EQ(ExtractText(out, texts[21]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[23]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[25]), "3.125");
+    EXPECT_EQ(ExtractText(out, texts[28]), "7");
+    EXPECT_EQ(ExtractText(out, texts[31]), "<none>");
+    EXPECT_EQ(ExtractText(out, texts[35]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[37]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[39]), "-3.250");
+    EXPECT_EQ(ExtractText(out, texts[42]), "4.000");
     EXPECT_EQ(ExtractText(out, texts[44]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[46]), "1.778");
-    EXPECT_EQ(ExtractText(out, texts[48]), "0.100");
-    EXPECT_EQ(ExtractText(out, texts[50]), "4294967296.000");
+    EXPECT_EQ(ExtractText(out, texts[46]), "5.500");
+    EXPECT_EQ(ExtractText(out, texts[48]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[52]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[54]), "-1.250");
+    EXPECT_EQ(ExtractText(out, texts[56]), "2.500");
+    EXPECT_EQ(ExtractText(out, texts[58]), "6.000");
+    EXPECT_EQ(ExtractText(out, texts[60]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[64]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[66]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[68]), "9.000");
+    EXPECT_EQ(ExtractText(out, texts[70]), "1.235");
+    EXPECT_EQ(ExtractText(out, texts[72]), "10.000");
+    EXPECT_EQ(ExtractText(out, texts[74]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[76]), "0.875");
+    EXPECT_EQ(ExtractText(out, texts[79]), "CameraDomain(7)");
+    EXPECT_EQ(ExtractText(out, texts[81]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[83]), "1.778");
+    EXPECT_EQ(ExtractText(out, texts[85]), "0.100");
+    EXPECT_EQ(ExtractText(out, texts[87]), "4294967296.000");
 }
 
 TEST(EntityEditorView, test_render_with_invalid_entity_draws_background_only)
@@ -264,38 +446,497 @@ TEST(EntityEditorView, test_render_emits_name_row_then_sections_per_present_comp
 
     ASSERT_EQ(out.GetQuads().size(), 1u);
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 26u);
+    ASSERT_EQ(texts.size(), 43u);
 
     EXPECT_EQ(ExtractText(out, texts[0]), "Name");
     EXPECT_EQ(ExtractText(out, texts[1]), "InspectorTarget");
 
     EXPECT_EQ(ExtractText(out, texts[2]), "Transform");
     EXPECT_EQ(ExtractText(out, texts[3]), "Translation");
-    EXPECT_EQ(ExtractText(out, texts[4]), "(1.000, 2.000, 3.000)");
-    EXPECT_EQ(ExtractText(out, texts[5]), "Rotation");
-    EXPECT_EQ(ExtractText(out, texts[6]), "(1.000, 0.000, 0.000, 0.000)");
-    EXPECT_EQ(ExtractText(out, texts[7]), "Scale");
-    EXPECT_EQ(ExtractText(out, texts[8]), "(4.000, 5.000, 6.000)");
+    EXPECT_EQ(ExtractText(out, texts[5]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[7]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[9]), "3.000");
+    EXPECT_EQ(ExtractText(out, texts[10]), "Rotation");
+    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[16]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[18]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[19]), "Scale");
+    EXPECT_EQ(ExtractText(out, texts[21]), "4.000");
+    EXPECT_EQ(ExtractText(out, texts[23]), "5.000");
+    EXPECT_EQ(ExtractText(out, texts[25]), "6.000");
 
-    EXPECT_EQ(ExtractText(out, texts[9]), "Mesh");
-    EXPECT_EQ(ExtractText(out, texts[10]), "Mesh Id");
-    EXPECT_EQ(ExtractText(out, texts[11]), "42");
+    EXPECT_EQ(ExtractText(out, texts[26]), "Mesh");
+    EXPECT_EQ(ExtractText(out, texts[27]), "Mesh Id");
+    EXPECT_EQ(ExtractText(out, texts[28]), "42");
 
-    EXPECT_EQ(ExtractText(out, texts[12]), "Visual");
-    EXPECT_EQ(ExtractText(out, texts[13]), "Material Id");
-    EXPECT_EQ(ExtractText(out, texts[14]), "99");
+    EXPECT_EQ(ExtractText(out, texts[29]), "Visual");
+    EXPECT_EQ(ExtractText(out, texts[30]), "Material Id");
+    EXPECT_EQ(ExtractText(out, texts[31]), "99");
 
-    EXPECT_EQ(ExtractText(out, texts[15]), "Camera");
-    EXPECT_EQ(ExtractText(out, texts[16]), "Domain");
-    EXPECT_EQ(ExtractText(out, texts[17]), "Editor");
-    EXPECT_EQ(ExtractText(out, texts[18]), "Fov Y");
-    EXPECT_EQ(ExtractText(out, texts[19]), "0.500");
-    EXPECT_EQ(ExtractText(out, texts[20]), "Aspect");
-    EXPECT_EQ(ExtractText(out, texts[21]), "1.250");
-    EXPECT_EQ(ExtractText(out, texts[22]), "Near Plane");
-    EXPECT_EQ(ExtractText(out, texts[23]), "0.200");
-    EXPECT_EQ(ExtractText(out, texts[24]), "Far Plane");
-    EXPECT_EQ(ExtractText(out, texts[25]), "500.000");
+    EXPECT_EQ(ExtractText(out, texts[32]), "Camera");
+    EXPECT_EQ(ExtractText(out, texts[33]), "Domain");
+    EXPECT_EQ(ExtractText(out, texts[34]), "Editor");
+    EXPECT_EQ(ExtractText(out, texts[35]), "Fov Y");
+    EXPECT_EQ(ExtractText(out, texts[36]), "0.500");
+    EXPECT_EQ(ExtractText(out, texts[37]), "Aspect");
+    EXPECT_EQ(ExtractText(out, texts[38]), "1.250");
+    EXPECT_EQ(ExtractText(out, texts[39]), "Near Plane");
+}
+
+TEST(EntityEditorView, test_render_passes_cursor_coordinate_to_panel)
+{
+    EntityEditorView view;
+    DrawList out;
+    World world;
+    FontAtlas atlas;
+
+    const Entity entity = world.CreateEntity("ClampEntity");
+    world.AddMeshComponent(entity, MeshComponent{42u});
+
+    EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+    ASSERT_EQ(out.GetQuads().size(), 2u);
+
+    DrawList invalidOut;
+    view.Render(invalidOut, world, Entity::Invalid(), atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+}
+
+TEST(EntityEditorView, test_visible_rows_dfs_traversal_excludes_collapsed_field_rows)
+{
+    EntityEditorView view;
+    DrawList out;
+    World world;
+    FontAtlas atlas;
+
+    const Entity entity = world.CreateEntity("CollapsedEntity");
+    world.AddTransformComponent(entity, Transform{});
+    world.AddMeshComponent(entity, MeshComponent{7u});
+
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    ASSERT_EQ(out.GetTexts().size(), 29u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.HandleTextInput("h", world, entity), EntityEditorViewKeyResult::Consumed);
+
+    DrawList collapsedOut;
+    view.Render(collapsedOut, world, entity, atlas, kX, kY, kWidth, kHeight);
+    ASSERT_EQ(collapsedOut.GetTexts().size(), 6u);
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[0]), "Name");
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[1]), "CollapsedEntity");
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[2]), "Transform");
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[3]), "Mesh");
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[4]), "Mesh Id");
+    EXPECT_EQ(ExtractText(collapsedOut, collapsedOut.GetTexts()[5]), "7");
+}
+
+TEST(EntityEditorView, test_handle_key_handles_enter_escape_and_edit_keys)
+{
+    World world;
+    const Entity entity = world.CreateEntity("KeyEntity");
+    world.AddMeshComponent(entity, MeshComponent{7u});
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity),
+              EntityEditorViewKeyResult::RequestHierarchy);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+    EXPECT_FALSE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("12", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleKey(KeyCode::Backspace, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+    EXPECT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+    EXPECT_EQ(view.HandleTextInput("2.5", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Unknown, world, entity), EntityEditorViewKeyResult::Consumed);
+}
+
+TEST(EntityEditorView, test_handle_text_input_dispatches_by_codepoint)
+{
+    World world;
+    const Entity entity = world.CreateEntity("DispatchEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleTextInput("gX", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+
+    EXPECT_EQ(view.HandleTextInput(":tail", world, entity),
+              EntityEditorViewKeyResult::RequestCommandBar);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("hj:kG", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    DrawList out;
+    FontAtlas atlas;
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    const auto texts = out.GetTexts();
+    ASSERT_GE(texts.size(), 10u);
+    EXPECT_EQ(ExtractText(out, texts[5]), "0.000hj:kG");
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_h_collapses_or_walks_left)
+{
+    World world;
+    const Entity entity = world.CreateEntity("HBinding");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("h", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    DrawList out;
+    FontAtlas atlas;
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(out.GetTexts().size(), 3u);
+
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 4u);
+    EXPECT_EQ(view.HandleTextInput("h", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_l_expands_or_walks_right)
+{
+    World world;
+    const Entity entity = world.CreateEntity("LBinding");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("h", world, entity), EntityEditorViewKeyResult::Consumed);
+
+    DrawList collapsedOut;
+    FontAtlas atlas;
+    view.Render(collapsedOut, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(collapsedOut.GetTexts().size(), 3u);
+
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    DrawList expandedOut;
+    view.Render(expandedOut, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_GT(expandedOut.GetTexts().size(), collapsedOut.GetTexts().size());
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorCell(), 4u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_j_moves_cursor_down_to_next_row)
+{
+    World world;
+    const Entity entity = world.CreateEntity("JBinding");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 3u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_k_moves_cursor_up_to_previous_row)
+{
+    World world;
+    const Entity entity = world.CreateEntity("KBinding");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+
+    EXPECT_EQ(view.HandleTextInput("k", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 3u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("k", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    EXPECT_EQ(view.HandleTextInput("k", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 1u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("k", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+
+    EXPECT_EQ(view.HandleTextInput("k", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_gg_moves_cursor_to_first_row)
+{
+    World world;
+    const Entity entity = world.CreateEntity("GGEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+
+    EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+
+    EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_capital_G_moves_cursor_to_last_row)
+{
+    World world;
+    const Entity entity = world.CreateEntity("GEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 4u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    World emptyWorld;
+    const Entity emptyEntity = emptyWorld.CreateEntity("OnlyName");
+    EntityEditorView emptyView;
+    EXPECT_EQ(emptyView.HandleTextInput("G", emptyWorld, emptyEntity),
+              EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(emptyView.GetCursorRow(), 0u);
+    EXPECT_EQ(emptyView.GetCursorCell(), 1u);
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_i_enters_edit_mode_on_value_cell)
+{
+    World world;
+    const Entity entity = world.CreateEntity("IEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+}
+
+TEST(EntityEditorView, test_entity_editor_text_input_colon_requests_command_bar)
+{
+    World world;
+    const Entity entity = world.CreateEntity("ColonEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
+
+    EXPECT_EQ(view.HandleTextInput(":ignored", world, entity),
+              EntityEditorViewKeyResult::RequestCommandBar);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 0u);
+
+    EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 0u);
+    EXPECT_EQ(view.GetCursorCell(), 1u);
+}
+
+TEST(EntityEditorView, test_edit_mode_enter_seeds_buffer_from_value_cell)
+{
+    World world;
+    const Entity entity = world.CreateEntity("SeedName");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    DrawList out;
+    FontAtlas atlas;
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    ASSERT_GE(out.GetTexts().size(), 2u);
+    EXPECT_EQ(ExtractText(out, out.GetTexts()[1]), "SeedName");
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    DrawList transformOut;
+    view.Render(transformOut, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(ExtractText(transformOut, transformOut.GetTexts()[5]), "0.000");
+}
+
+TEST(EntityEditorView, test_edit_mode_buffers_keystrokes_until_commit_or_cancel)
+{
+    World world;
+    const Entity entity = world.CreateEntity("BufferEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleTextInput("hjg:G", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
+
+    DrawList out;
+    FontAtlas atlas;
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(ExtractText(out, out.GetTexts()[5]), "0.000hjg:G");
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Backspace, world, entity), EntityEditorViewKeyResult::Consumed);
+    DrawList afterBackspace;
+    view.Render(afterBackspace, world, entity, atlas, kX, kY, kWidth, kHeight);
+    EXPECT_EQ(ExtractText(afterBackspace, afterBackspace.GetTexts()[5]), "0.000hjg:");
+}
+
+TEST(EntityEditorView, test_render_overlays_edit_buffer_on_focused_value_cell)
+{
+    World world;
+    const Entity entity = world.CreateEntity("OverlayEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("abc", world, entity), EntityEditorViewKeyResult::Consumed);
+
+    DrawList out;
+    FontAtlas atlas;
+    view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
+    const auto texts = out.GetTexts();
+    ASSERT_GE(texts.size(), 10u);
+    EXPECT_EQ(ExtractText(out, texts[5]), "0.000abc");
+    EXPECT_EQ(ExtractText(out, texts[7]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[9]), "0.000");
+}
+
+TEST(EntityEditorView, test_edit_mode_commit_writes_buffer_to_component)
+{
+    World world;
+    const Entity entity = world.CreateEntity("CommitEntity");
+    world.AddTransformComponent(entity, Transform{});
+    world.AddMeshComponent(entity, MeshComponent{7u});
+
+    EntityEditorView view;
+
+    EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("Renamed", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(world.GetNameComponent(entity).name, "CommitEntityRenamed");
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput(" 2.5 ", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("123", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(world.GetMeshComponent(entity).meshId, 7u);
+}
+
+TEST(EntityEditorView, test_edit_mode_cancel_discards_buffer)
+{
+    World world;
+    const Entity entity = world.CreateEntity("CancelEntity");
+    world.AddTransformComponent(entity, Transform{});
+
+    EntityEditorView view;
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_EQ(view.HandleTextInput("9.5", world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_TRUE(view.IsEditing());
+
+    EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity), EntityEditorViewKeyResult::Consumed);
+    EXPECT_FALSE(view.IsEditing());
+    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+    EXPECT_EQ(view.GetCursorRow(), 2u);
+    EXPECT_EQ(view.GetCursorCell(), 2u);
 }
 
 TEST(EntityEditorView, test_render_consumes_references_for_duration_of_call)

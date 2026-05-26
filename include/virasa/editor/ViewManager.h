@@ -21,7 +21,8 @@ enum class Focus : uint8_t
 {
 	CommandBar,
 	Editor,
-	Hierarchy
+	Hierarchy,
+	EntityEditor
 };
 
 /**

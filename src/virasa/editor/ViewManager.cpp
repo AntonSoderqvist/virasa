@@ -93,6 +93,25 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 					_commandBarView.SetText(":");
 					_focus = Focus::CommandBar;
 				}
+				else if (result == HierarchyViewKeyResult::RequestEntityEditor)
+				{
+					_focus = Focus::EntityEditor;
+				}
+				return EventResult::Consumed;
+			}
+			case Focus::EntityEditor:
+			{
+				virasa::ecs::Entity cursorEntity = _hierarchyView.GetCursorEntity(world);
+				EntityEditorViewKeyResult result = _entityEditorView.HandleKey(key, const_cast<virasa::ecs::World&>(world), cursorEntity);
+				if (result == EntityEditorViewKeyResult::RequestCommandBar)
+				{
+					_commandBarView.SetText(":");
+					_focus = Focus::CommandBar;
+				}
+				else if (result == EntityEditorViewKeyResult::RequestHierarchy)
+				{
+					_focus = Focus::Hierarchy;
+				}
 				return EventResult::Consumed;
 			}
 		}
@@ -130,6 +149,25 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 				{
 					_commandBarView.SetText(":");
 					_focus = Focus::CommandBar;
+				}
+				else if (result == HierarchyViewKeyResult::RequestEntityEditor)
+				{
+					_focus = Focus::EntityEditor;
+				}
+				return EventResult::Consumed;
+			}
+			case Focus::EntityEditor:
+			{
+				virasa::ecs::Entity cursorEntity = _hierarchyView.GetCursorEntity(world);
+				EntityEditorViewKeyResult result = _entityEditorView.HandleTextInput(utf8, const_cast<virasa::ecs::World&>(world), cursorEntity);
+				if (result == EntityEditorViewKeyResult::RequestCommandBar)
+				{
+					_commandBarView.SetText(":");
+					_focus = Focus::CommandBar;
+				}
+				else if (result == EntityEditorViewKeyResult::RequestHierarchy)
+				{
+					_focus = Focus::Hierarchy;
 				}
 				return EventResult::Consumed;
 			}

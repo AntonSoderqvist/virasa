@@ -102,6 +102,7 @@ TEST(HierarchyView, test_hierarchy_view_key_result_enum_values_in_declared_order
 
 	EXPECT_EQ(static_cast<uint8_t>(editor::HierarchyViewKeyResult::Consumed), 0u);
 	EXPECT_EQ(static_cast<uint8_t>(editor::HierarchyViewKeyResult::RequestCommandBar), 1u);
+	EXPECT_EQ(static_cast<uint8_t>(editor::HierarchyViewKeyResult::RequestEntityEditor), 2u);
 }
 
 TEST(HierarchyView, test_get_panel_returns_owned_hierarchy_panel)
@@ -239,6 +240,19 @@ TEST(HierarchyView, test_handle_key_consumes_without_modification)
 	EXPECT_EQ(view.HandleKey(KeyCode::Down, world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.HandleTextInput("g", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorRow(), 1u);
+
+	EXPECT_EQ(view.HandleKey(KeyCode::Escape, world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.HandleTextInput("g", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.HandleKey(KeyCode::Enter, world), editor::HierarchyViewKeyResult::RequestEntityEditor);
+	EXPECT_EQ(view.GetCursorRow(), 1u);
+	EXPECT_EQ(view.GetCursorEntity(world), child);
+
+	editor::HierarchyView emptyView;
+	ecs::World emptyWorld;
+	EXPECT_EQ(emptyView.HandleTextInput("g", emptyWorld), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(emptyView.HandleKey(KeyCode::Enter, emptyWorld), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(emptyView.GetCursorRow(), 0u);
+	EXPECT_EQ(emptyView.GetCursorEntity(emptyWorld), ecs::Entity::Invalid());
 }
 
 TEST(HierarchyView, test_handle_text_input_dispatches_by_codepoint)
@@ -264,6 +278,15 @@ TEST(HierarchyView, test_handle_text_input_dispatches_by_codepoint)
 	EXPECT_EQ(view.HandleTextInput("gx", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 	EXPECT_EQ(view.HandleTextInput("g:", world), editor::HierarchyViewKeyResult::RequestCommandBar);
+	EXPECT_EQ(view.GetCursorEntity(world), root);
+
+	EXPECT_EQ(view.HandleTextInput("l", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.GetCursorRow(), 1u);
+	world.DestroyEntity(child);
+	EXPECT_EQ(view.GetCursorRow(), 1u);
+	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.GetCursorRow(), 0u);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 }
 

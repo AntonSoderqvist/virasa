@@ -154,9 +154,22 @@ virasa::ecs::Entity HierarchyView::GetCursorEntity(const virasa::ecs::World& wor
 }
 
 HierarchyViewKeyResult HierarchyView::HandleKey(
-	virasa::KeyCode /*key*/,
-	const virasa::ecs::World& /*world*/)
+	virasa::KeyCode key,
+	const virasa::ecs::World& world)
 {
+	if (key == virasa::KeyCode::Enter)
+	{
+		// Look up the cursor entity.
+		auto rows = ComputeVisibleRows(world, _expanded);
+		if (rows.empty() || _cursorRow >= rows.size())
+		{
+			_pendingG = false;
+			return HierarchyViewKeyResult::Consumed;
+		}
+		_pendingG = false;
+		return HierarchyViewKeyResult::RequestEntityEditor;
+	}
+
 	_pendingG = false;
 	return HierarchyViewKeyResult::Consumed;
 }
