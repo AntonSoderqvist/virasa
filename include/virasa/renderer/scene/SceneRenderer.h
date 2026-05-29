@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "virasa/ecs/Types.h"
 #include "virasa/ecs/World.h"
@@ -84,6 +86,33 @@ class SceneRenderer final
 	[[nodiscard]] uint32_t CreateDefaultMaterial();
 
 	/**
+	 * @brief Registers one mesh in the owned mesh registry.
+	 * @param mesh_data CPU-side mesh geometry to upload.
+	 * @param out_mesh_id Receives the allocated mesh id on success.
+	 * @return RegisterError::None on success, or a specific registration failure.
+	 */
+	[[nodiscard]] virasa::RegisterError RegisterMesh(
+		const virasa::MeshData& mesh_data, uint32_t& out_mesh_id);
+
+	/**
+	 * @brief Registers one visual material in the owned material table.
+	 * @param material Material data to allocate.
+	 * @param out_material_id Receives the allocated material id on success.
+	 * @return RegisterError::None on success, or a specific registration failure.
+	 */
+	[[nodiscard]] virasa::RegisterError RegisterMaterial(
+		const virasa::VisualMaterial& material, uint32_t& out_material_id);
+
+	/**
+	 * @brief Uploads one texture and registers it in the bindless texture array.
+	 * @param upload Texture upload description.
+	 * @param out_slot Receives the allocated bindless slot on success.
+	 * @return RegisterError::None on success, or a specific registration failure.
+	 */
+	[[nodiscard]] virasa::RegisterError RegisterTexture(
+		const virasa::TextureUpload& upload, uint32_t& out_slot);
+
+	/**
 	 * @brief Begins a new frame, acquiring a swapchain image and starting the render graph.
 	 * @param sceneWidth Width of the scene render target in pixels.
 	 * @param sceneHeight Height of the scene render target in pixels.
@@ -146,6 +175,8 @@ class SceneRenderer final
 	uint32_t _frameSceneSlot = 0xFFFFFFFFu;
 
 	std::unordered_map<VkImageView, uint32_t> _sceneSlotCache = {};
+	std::vector<std::pair<virasa::SamplerConfig, virasa::Sampler>> _samplerCache = {};
+	std::vector<virasa::Image> _textureImages = {};
 
 	bool _initialized = false;
 };

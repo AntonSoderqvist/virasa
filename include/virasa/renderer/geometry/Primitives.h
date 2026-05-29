@@ -27,14 +27,16 @@ namespace virasa
 						const glm::vec3& v1,
 						const glm::vec3& v2,
 						const glm::vec3& v3,
-						const glm::vec3& normal)
+						const glm::vec3& normal,
+						const glm::vec3& tangentXYZ)
 	{
 		const uint32_t baseIndex = static_cast<uint32_t>(meshData.vertices.size());
+		const glm::vec4 tangent(tangentXYZ, 1.0f);
 
-		meshData.vertices.push_back(Vertex{v0, normal, glm::vec2(0.0f, 0.0f)});
-		meshData.vertices.push_back(Vertex{v1, normal, glm::vec2(1.0f, 0.0f)});
-		meshData.vertices.push_back(Vertex{v2, normal, glm::vec2(1.0f, 1.0f)});
-		meshData.vertices.push_back(Vertex{v3, normal, glm::vec2(0.0f, 1.0f)});
+		meshData.vertices.push_back(Vertex{v0, normal, tangent, glm::vec2(0.0f, 0.0f)});
+		meshData.vertices.push_back(Vertex{v1, normal, tangent, glm::vec2(1.0f, 0.0f)});
+		meshData.vertices.push_back(Vertex{v2, normal, tangent, glm::vec2(1.0f, 1.0f)});
+		meshData.vertices.push_back(Vertex{v3, normal, tangent, glm::vec2(0.0f, 1.0f)});
 
 		meshData.indices.push_back(baseIndex + 0);
 		meshData.indices.push_back(baseIndex + 1);
@@ -48,37 +50,43 @@ namespace virasa
 		glm::vec3(h, -h, -h),
 		glm::vec3(h, h, -h),
 		glm::vec3(h, h, h),
-		glm::vec3(1.0f, 0.0f, 0.0f));
+		glm::vec3(1.0f, 0.0f, 0.0f),
+		glm::vec3(0.0f, 1.0f, 0.0f));
 
 	appendFace(glm::vec3(-h, -h, -h),
 		glm::vec3(-h, -h, h),
 		glm::vec3(-h, h, h),
 		glm::vec3(-h, h, -h),
-		glm::vec3(-1.0f, 0.0f, 0.0f));
+		glm::vec3(-1.0f, 0.0f, 0.0f),
+		glm::vec3(0.0f, -1.0f, 0.0f));
 
 	appendFace(glm::vec3(-h, h, h),
 		glm::vec3(h, h, h),
 		glm::vec3(h, h, -h),
 		glm::vec3(-h, h, -h),
-		glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec3(0.0f, 1.0f, 0.0f),
+		glm::vec3(-1.0f, 0.0f, 0.0f));
 
 	appendFace(glm::vec3(-h, -h, -h),
 		glm::vec3(h, -h, -h),
 		glm::vec3(h, -h, h),
 		glm::vec3(-h, -h, h),
-		glm::vec3(0.0f, -1.0f, 0.0f));
+		glm::vec3(0.0f, -1.0f, 0.0f),
+		glm::vec3(1.0f, 0.0f, 0.0f));
 
 	appendFace(glm::vec3(-h, -h, h),
 		glm::vec3(h, -h, h),
 		glm::vec3(h, h, h),
 		glm::vec3(-h, h, h),
-		glm::vec3(0.0f, 0.0f, 1.0f));
+		glm::vec3(0.0f, 0.0f, 1.0f),
+		glm::vec3(1.0f, 0.0f, 0.0f));
 
 	appendFace(glm::vec3(h, -h, -h),
 		glm::vec3(-h, -h, -h),
 		glm::vec3(-h, h, -h),
 		glm::vec3(h, h, -h),
-		glm::vec3(0.0f, 0.0f, -1.0f));
+		glm::vec3(0.0f, 0.0f, -1.0f),
+		glm::vec3(-1.0f, 0.0f, 0.0f));
 
 	return meshData;
 }
@@ -116,9 +124,10 @@ namespace virasa
 
 			const glm::vec3 normal(sinPhi * cosTheta, cosPhi, sinPhi * sinTheta);
 			const glm::vec3 position = normal * radius;
+			const glm::vec4 tangent(-sinTheta, 0.0f, cosTheta, 1.0f);
 
 			meshData.vertices.push_back(
-				Vertex{position, glm::normalize(normal), glm::vec2(u, v)});
+				Vertex{position, glm::normalize(normal), tangent, glm::vec2(u, v)});
 		}
 	}
 

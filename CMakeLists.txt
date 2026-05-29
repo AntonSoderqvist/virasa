@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(viras
     VERSION 0.1.0
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
@@ -14,6 +14,8 @@ option(VIRASA_BUILD_TESTS "Build tests" ON)
 
 # --- CMake modules ---
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+include(VendorLibs)
 
 # Quill
 set(QUILL_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)

@@ -6,8 +6,8 @@
 #include "glm/geometric.hpp"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
+#include "glm/vec4.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -36,77 +36,102 @@ bool NearlyEqualVec3(const glm::vec3& a, const glm::vec3& b, float epsilon = kEp
 		NearlyEqual(a.z, b.z, epsilon);
 }
 
-void ExpectVertexMatches(
-	const virasa::Vertex& vertex,
-	const glm::vec3& expectedPosition,
-	const glm::vec3& expectedNormal,
-	const glm::vec2& expectedUv)
+bool NearlyEqualVec4(const glm::vec4& a, const glm::vec4& b, float epsilon = kEpsilon)
 {
-	EXPECT_TRUE(NearlyEqualVec3(vertex.position, expectedPosition));
-	EXPECT_TRUE(NearlyEqualVec3(vertex.normal, expectedNormal));
-	EXPECT_TRUE(NearlyEqualVec2(vertex.uv, expectedUv));
+	return NearlyEqual(a.x, b.x, epsilon) && NearlyEqual(a.y, b.y, epsilon) &&
+		NearlyEqual(a.z, b.z, epsilon) && NearlyEqual(a.w, b.w, epsilon);
 }
 
 } // namespace
 
 TEST(Primitives, test_primitives_are_pure_cpu_geometry_generators)
 {
-	const virasa::MeshData cube = virasa::CreateCube();
-	const virasa::MeshData sphere = virasa::CreateSphere();
+	const virasa::MeshData cubeA = virasa::CreateCube();
+	const virasa::MeshData cubeB = virasa::CreateCube();
+	const virasa::MeshData sphereA = virasa::CreateSphere();
+	const virasa::MeshData sphereB = virasa::CreateSphere();
 
-	EXPECT_FALSE(cube.vertices.empty());
-	EXPECT_FALSE(cube.indices.empty());
-	EXPECT_FALSE(sphere.vertices.empty());
-	EXPECT_FALSE(sphere.indices.empty());
+	EXPECT_FALSE(cubeA.vertices.empty());
+	EXPECT_FALSE(cubeA.indices.empty());
+	EXPECT_FALSE(sphereA.vertices.empty());
+	EXPECT_FALSE(sphereA.indices.empty());
 
-	for (const virasa::Vertex& vertex : cube.vertices)
+	ASSERT_EQ(cubeA.vertices.size(), cubeB.vertices.size());
+	ASSERT_EQ(cubeA.indices.size(), cubeB.indices.size());
+	for (std::size_t i = 0; i < cubeA.vertices.size(); ++i)
+	{
+		EXPECT_TRUE(NearlyEqualVec3(cubeA.vertices[i].position, cubeB.vertices[i].position));
+		EXPECT_TRUE(NearlyEqualVec3(cubeA.vertices[i].normal, cubeB.vertices[i].normal));
+		EXPECT_TRUE(NearlyEqualVec4(cubeA.vertices[i].tangent, cubeB.vertices[i].tangent));
+		EXPECT_TRUE(NearlyEqualVec2(cubeA.vertices[i].uv, cubeB.vertices[i].uv));
+	}
+	EXPECT_EQ(cubeA.indices, cubeB.indices);
+
+	ASSERT_EQ(sphereA.vertices.size(), sphereB.vertices.size());
+	ASSERT_EQ(sphereA.indices.size(), sphereB.indices.size());
+	for (std::size_t i = 0; i < sphereA.vertices.size(); ++i)
+	{
+		EXPECT_TRUE(NearlyEqualVec3(sphereA.vertices[i].position, sphereB.vertices[i].position));
+		EXPECT_TRUE(NearlyEqualVec3(sphereA.vertices[i].normal, sphereB.vertices[i].normal));
+		EXPECT_TRUE(NearlyEqualVec4(sphereA.vertices[i].tangent, sphereB.vertices[i].tangent));
+		EXPECT_TRUE(NearlyEqualVec2(sphereA.vertices[i].uv, sphereB.vertices[i].uv));
+	}
+	EXPECT_EQ(sphereA.indices, sphereB.indices);
+
+	for (const virasa::Vertex& vertex : cubeA.vertices)
 	{
 		EXPECT_NEAR(glm::length(vertex.normal), 1.0f, kEpsilon);
+		EXPECT_NEAR(glm::length(glm::vec3(vertex.tangent)), 1.0f, kEpsilon);
+		EXPECT_NEAR(glm::dot(vertex.normal, glm::vec3(vertex.tangent)), 0.0f, kEpsilon);
+		EXPECT_FLOAT_EQ(vertex.tangent.w, 1.0f);
 		EXPECT_GE(vertex.uv.x, 0.0f);
 		EXPECT_LE(vertex.uv.x, 1.0f);
 		EXPECT_GE(vertex.uv.y, 0.0f);
 		EXPECT_LE(vertex.uv.y, 1.0f);
 	}
 
-	for (std::size_t i = 0; i < cube.indices.size(); i += 3)
+	for (std::size_t i = 0; i < cubeA.indices.size(); i += 3)
 	{
-		ASSERT_LT(cube.indices[i], cube.vertices.size());
-		ASSERT_LT(cube.indices[i + 1], cube.vertices.size());
-		ASSERT_LT(cube.indices[i + 2], cube.vertices.size());
+		ASSERT_LT(cubeA.indices[i], cubeA.vertices.size());
+		ASSERT_LT(cubeA.indices[i + 1], cubeA.vertices.size());
+		ASSERT_LT(cubeA.indices[i + 2], cubeA.vertices.size());
 
-		const virasa::Vertex& a = cube.vertices[cube.indices[i]];
-		const virasa::Vertex& b = cube.vertices[cube.indices[i + 1]];
-		const virasa::Vertex& c = cube.vertices[cube.indices[i + 2]];
+		const virasa::Vertex& a = cubeA.vertices[cubeA.indices[i]];
+		const virasa::Vertex& b = cubeA.vertices[cubeA.indices[i + 1]];
+		const virasa::Vertex& c = cubeA.vertices[cubeA.indices[i + 2]];
 		const glm::vec3 faceCross = glm::cross(b.position - a.position, c.position - a.position);
 		const glm::vec3 faceNormal = glm::normalize(faceCross);
 		const glm::vec3 averageNormal = glm::normalize(a.normal + b.normal + c.normal);
 		EXPECT_GT(glm::dot(faceNormal, averageNormal), 0.99f);
 	}
 
-	for (const virasa::Vertex& vertex : sphere.vertices)
+	for (const virasa::Vertex& vertex : sphereA.vertices)
 	{
 		EXPECT_NEAR(glm::length(vertex.normal), 1.0f, kEpsilon);
 		EXPECT_NEAR(glm::length(vertex.position), 0.5f, 1e-4f);
 		EXPECT_TRUE(NearlyEqualVec3(vertex.normal, glm::normalize(vertex.position), 1e-4f));
+		EXPECT_NEAR(glm::length(glm::vec3(vertex.tangent)), 1.0f, kEpsilon);
+		EXPECT_NEAR(glm::dot(vertex.normal, glm::vec3(vertex.tangent)), 0.0f, 1e-4f);
+		EXPECT_FLOAT_EQ(vertex.tangent.w, 1.0f);
 		EXPECT_GE(vertex.uv.x, 0.0f);
 		EXPECT_LE(vertex.uv.x, 1.0f);
 		EXPECT_GE(vertex.uv.y, 0.0f);
 		EXPECT_LE(vertex.uv.y, 1.0f);
 	}
 
-	for (std::size_t i = 0; i < sphere.indices.size(); i += 3)
+	for (std::size_t i = 0; i < sphereA.indices.size(); i += 3)
 	{
-		ASSERT_LT(sphere.indices[i], sphere.vertices.size());
-		ASSERT_LT(sphere.indices[i + 1], sphere.vertices.size());
-		ASSERT_LT(sphere.indices[i + 2], sphere.vertices.size());
+		ASSERT_LT(sphereA.indices[i], sphereA.vertices.size());
+		ASSERT_LT(sphereA.indices[i + 1], sphereA.vertices.size());
+		ASSERT_LT(sphereA.indices[i + 2], sphereA.vertices.size());
 
-		const virasa::Vertex& a = sphere.vertices[sphere.indices[i]];
-		const virasa::Vertex& b = sphere.vertices[sphere.indices[i + 1]];
-		const virasa::Vertex& c = sphere.vertices[sphere.indices[i + 2]];
+		const virasa::Vertex& a = sphereA.vertices[sphereA.indices[i]];
+		const virasa::Vertex& b = sphereA.vertices[sphereA.indices[i + 1]];
+		const virasa::Vertex& c = sphereA.vertices[sphereA.indices[i + 2]];
 		const glm::vec3 faceCross = glm::cross(b.position - a.position, c.position - a.position);
 		if (glm::length(faceCross) < 1e-6f)
 		{
-			continue; // degenerate pole triangle — skip winding check
+			continue;
 		}
 		const glm::vec3 triangleCenter = (a.position + b.position + c.position) / 3.0f;
 		EXPECT_GT(glm::dot(faceCross, triangleCenter), 0.0f);
@@ -124,23 +149,12 @@ TEST(Primitives, test_create_cube_generates_box_geometry)
 	const std::array<uint32_t, 6> expectedFaceIndices = {
 		0u, 1u, 2u, 0u, 2u, 3u
 	};
-
-	for (std::size_t face = 0; face < 6; ++face)
-	{
-		for (std::size_t i = 0; i < expectedFaceIndices.size(); ++i)
-		{
-			EXPECT_EQ(cube.indices[face * expectedFaceIndices.size() + i],
-				cube.indices[face * expectedFaceIndices.size()] + expectedFaceIndices[i]);
-		}
-	}
-
 	const std::array<glm::vec2, 4> expectedUvs = {
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(1.0f, 0.0f),
 		glm::vec2(1.0f, 1.0f),
 		glm::vec2(0.0f, 1.0f)
 	};
-
 	const std::array<glm::vec3, 6> expectedNormals = {
 		glm::vec3(1.0f, 0.0f, 0.0f),
 		glm::vec3(-1.0f, 0.0f, 0.0f),
@@ -149,44 +163,45 @@ TEST(Primitives, test_create_cube_generates_box_geometry)
 		glm::vec3(0.0f, 0.0f, 1.0f),
 		glm::vec3(0.0f, 0.0f, -1.0f)
 	};
-
+	const std::array<glm::vec4, 6> expectedTangents = {
+		glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),
+		glm::vec4(0.0f, -1.0f, 0.0f, 1.0f),
+		glm::vec4(-1.0f, 0.0f, 0.0f, 1.0f),
+		glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+		glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+		glm::vec4(-1.0f, 0.0f, 0.0f, 1.0f)
+	};
 	const std::array<std::array<glm::vec3, 4>, 6> expectedPositions = {{
-		// +X face
 		{
 			glm::vec3(kHalfExtent, -kHalfExtent, kHalfExtent),
 			glm::vec3(kHalfExtent, -kHalfExtent, -kHalfExtent),
 			glm::vec3(kHalfExtent, kHalfExtent, -kHalfExtent),
 			glm::vec3(kHalfExtent, kHalfExtent, kHalfExtent)
 		},
-		// -X face
 		{
 			glm::vec3(-kHalfExtent, -kHalfExtent, -kHalfExtent),
 			glm::vec3(-kHalfExtent, -kHalfExtent, kHalfExtent),
 			glm::vec3(-kHalfExtent, kHalfExtent, kHalfExtent),
 			glm::vec3(-kHalfExtent, kHalfExtent, -kHalfExtent)
 		},
-		// +Y face
 		{
 			glm::vec3(-kHalfExtent, kHalfExtent, kHalfExtent),
 			glm::vec3(kHalfExtent, kHalfExtent, kHalfExtent),
 			glm::vec3(kHalfExtent, kHalfExtent, -kHalfExtent),
 			glm::vec3(-kHalfExtent, kHalfExtent, -kHalfExtent)
 		},
-		// -Y face
 		{
 			glm::vec3(-kHalfExtent, -kHalfExtent, -kHalfExtent),
 			glm::vec3(kHalfExtent, -kHalfExtent, -kHalfExtent),
 			glm::vec3(kHalfExtent, -kHalfExtent, kHalfExtent),
 			glm::vec3(-kHalfExtent, -kHalfExtent, kHalfExtent)
 		},
-		// +Z face
 		{
 			glm::vec3(-kHalfExtent, -kHalfExtent, kHalfExtent),
 			glm::vec3(kHalfExtent, -kHalfExtent, kHalfExtent),
 			glm::vec3(kHalfExtent, kHalfExtent, kHalfExtent),
 			glm::vec3(-kHalfExtent, kHalfExtent, kHalfExtent)
 		},
-		// -Z face
 		{
 			glm::vec3(kHalfExtent, -kHalfExtent, -kHalfExtent),
 			glm::vec3(-kHalfExtent, -kHalfExtent, -kHalfExtent),
@@ -201,37 +216,32 @@ TEST(Primitives, test_create_cube_generates_box_geometry)
 
 	for (std::size_t face = 0; face < 6; ++face)
 	{
+		for (std::size_t i = 0; i < expectedFaceIndices.size(); ++i)
+		{
+			EXPECT_EQ(cube.indices[face * expectedFaceIndices.size() + i],
+				static_cast<uint32_t>(face * 4) + expectedFaceIndices[i]);
+		}
+
 		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
 		{
 			const virasa::Vertex& vertex = cube.vertices[face * 4 + vertexIndex];
-
-			// Check normal and UV exactly; positions are checked loosely below
+			EXPECT_TRUE(NearlyEqualVec3(vertex.position, expectedPositions[face][vertexIndex]));
 			EXPECT_TRUE(NearlyEqualVec3(vertex.normal, expectedNormals[face]));
+			EXPECT_TRUE(NearlyEqualVec4(vertex.tangent, expectedTangents[face]));
 			EXPECT_TRUE(NearlyEqualVec2(vertex.uv, expectedUvs[vertexIndex]));
+			EXPECT_NEAR(glm::length(vertex.normal), 1.0f, kEpsilon);
+			EXPECT_NEAR(glm::length(glm::vec3(vertex.tangent)), 1.0f, kEpsilon);
+			EXPECT_NEAR(glm::dot(vertex.normal, glm::vec3(vertex.tangent)), 0.0f, kEpsilon);
+
+			const glm::vec3 bitangent =
+				glm::cross(vertex.normal, glm::vec3(vertex.tangent)) * vertex.tangent.w;
+			EXPECT_NEAR(glm::length(bitangent), 1.0f, kEpsilon);
+			EXPECT_NEAR(glm::dot(bitangent, vertex.normal), 0.0f, kEpsilon);
+			EXPECT_NEAR(glm::dot(bitangent, glm::vec3(vertex.tangent)), 0.0f, kEpsilon);
 
 			xValues.insert(vertex.position.x);
 			yValues.insert(vertex.position.y);
 			zValues.insert(vertex.position.z);
-		}
-
-		// Verify the four face positions match the expected set (order-independent)
-		std::array<glm::vec3, 4> actualPositions;
-		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
-		{
-			actualPositions[vertexIndex] = cube.vertices[face * 4 + vertexIndex].position;
-		}
-		for (std::size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
-		{
-			bool found = false;
-			for (std::size_t j = 0; j < 4; ++j)
-			{
-				if (NearlyEqualVec3(actualPositions[j], expectedPositions[face][vertexIndex]))
-				{
-					found = true;
-					break;
-				}
-			}
-			EXPECT_TRUE(found) << "Face " << face << " vertex " << vertexIndex << " position not found";
 		}
 	}
 
@@ -273,12 +283,20 @@ TEST(Primitives, test_create_sphere_generates_uv_sphere_geometry)
 			const glm::vec2 expectedUv(
 				static_cast<float>(slice) / static_cast<float>(kSlices),
 				static_cast<float>(stack) / static_cast<float>(kStacks));
+			const glm::vec4 expectedTangent(
+				-std::sin(theta),
+				0.0f,
+				std::cos(theta),
+				1.0f);
 
 			EXPECT_TRUE(NearlyEqualVec3(vertex.position, expectedPosition, 1e-4f));
 			EXPECT_TRUE(NearlyEqualVec3(vertex.normal, expectedNormal, 1e-4f));
 			EXPECT_TRUE(NearlyEqualVec2(vertex.uv, expectedUv, 1e-5f));
+			EXPECT_TRUE(NearlyEqualVec4(vertex.tangent, expectedTangent, 1e-5f));
 			EXPECT_NEAR(glm::length(vertex.position), kRadius, 1e-4f);
 			EXPECT_NEAR(glm::length(vertex.normal), 1.0f, 1e-4f);
+			EXPECT_NEAR(glm::length(glm::vec3(vertex.tangent)), 1.0f, 1e-5f);
+			EXPECT_NEAR(glm::dot(vertex.normal, glm::vec3(vertex.tangent)), 0.0f, 1e-4f);
 		}
 	}
 
@@ -309,7 +327,7 @@ TEST(Primitives, test_create_sphere_generates_uv_sphere_geometry)
 		const glm::vec3 faceCross = glm::cross(b.position - a.position, c.position - a.position);
 		if (glm::length(faceCross) < 1e-6f)
 		{
-			continue; // degenerate pole triangle — skip winding check
+			continue;
 		}
 		const glm::vec3 center = (a.position + b.position + c.position) / 3.0f;
 		EXPECT_GT(glm::dot(faceCross, center), 0.0f);

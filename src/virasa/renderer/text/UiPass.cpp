@@ -131,19 +131,14 @@ UiPass::~UiPass()
 }
 
 UiPass::UiPass(UiPass&& other) noexcept
-	: _atlasImage(std::move(other._atlasImage))
-	, _linearSampler(std::move(other._linearSampler))
-	, _quadPipeline(std::move(other._quadPipeline))
-	, _textPipeline(std::move(other._textPipeline))
-	, _imageQuadPipeline(std::move(other._imageQuadPipeline))
-	, _geometryBuffer(std::move(other._geometryBuffer))
-	, _perFrameSliceSize(other._perFrameSliceSize)
-	, _framesInFlight(other._framesInFlight)
-	, _device(other._device)
-	, _textSetLayout(other._textSetLayout)
-	, _textDescriptorPool(other._textDescriptorPool)
-	, _textDescriptorSet(other._textDescriptorSet)
-	, _initialized(other._initialized)
+    : _atlasImage(std::move(other._atlasImage)), _linearSampler(std::move(other._linearSampler)),
+	_quadPipeline(std::move(other._quadPipeline)), _textPipeline(std::move(other._textPipeline)),
+	_imageQuadPipeline(std::move(other._imageQuadPipeline)),
+	_geometryBuffer(std::move(other._geometryBuffer)),
+	_perFrameSliceSize(other._perFrameSliceSize), _framesInFlight(other._framesInFlight),
+	_device(other._device), _textSetLayout(other._textSetLayout),
+	_textDescriptorPool(other._textDescriptorPool), _textDescriptorSet(other._textDescriptorSet),
+	_initialized(other._initialized)
 {
 	other._perFrameSliceSize = 0;
 	other._framesInFlight = 0;
@@ -464,7 +459,7 @@ RenderError UiPass::Initialize(const Device& device, const Context& context,
 
 	fresh._device = device.GetHandle();
 	if (vkCreateDescriptorSetLayout(
-			device.GetHandle(), &layoutInfo, nullptr, &fresh._textSetLayout) != VK_SUCCESS)
+		    device.GetHandle(), &layoutInfo, nullptr, &fresh._textSetLayout) != VK_SUCCESS)
 	{
 		return RenderError::DescriptorPoolCreateFailed;
 	}
@@ -530,7 +525,7 @@ RenderError UiPass::Initialize(const Device& device, const Context& context,
 	poolInfo.pPoolSizes = &poolSize;
 
 	if (vkCreateDescriptorPool(
-			device.GetHandle(), &poolInfo, nullptr, &fresh._textDescriptorPool) != VK_SUCCESS)
+		    device.GetHandle(), &poolInfo, nullptr, &fresh._textDescriptorPool) != VK_SUCCESS)
 	{
 		return RenderError::DescriptorPoolCreateFailed;
 	}
@@ -541,8 +536,8 @@ RenderError UiPass::Initialize(const Device& device, const Context& context,
 	setAllocInfo.descriptorSetCount = 1;
 	setAllocInfo.pSetLayouts = &fresh._textSetLayout;
 
-	if (vkAllocateDescriptorSets(
-			device.GetHandle(), &setAllocInfo, &fresh._textDescriptorSet) != VK_SUCCESS)
+	if (vkAllocateDescriptorSets(device.GetHandle(), &setAllocInfo, &fresh._textDescriptorSet) !=
+		VK_SUCCESS)
 	{
 		return RenderError::DescriptorPoolCreateFailed;
 	}
@@ -590,13 +585,11 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	virasa::renderer::graph::ImageHandle swapchainTarget, const virasa::ui::DrawList& list,
 	const virasa::ui::FontAtlas& atlas,
 	std::span<const virasa::renderer::graph::ImageHandle> sampledImages,
-	VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight,
-	uint32_t frameIndex)
+	VkDescriptorSet bindlessSet, uint32_t windowWidth, uint32_t windowHeight, uint32_t frameIndex)
 {
 	assert(_initialized);
 	assert(frameIndex < _framesInFlight);
-	const VkDeviceSize frameBase =
-		static_cast<VkDeviceSize>(frameIndex) * _perFrameSliceSize;
+	const VkDeviceSize frameBase = static_cast<VkDeviceSize>(frameIndex) * _perFrameSliceSize;
 
 	std::vector<QuadVertex> quadVertices;
 	std::vector<uint16_t> quadIndices;

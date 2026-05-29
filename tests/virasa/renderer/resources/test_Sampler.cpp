@@ -61,43 +61,6 @@ TEST(Sampler, test_sampler_default_constructed_state)
 }
 
 // ---------------------------------------------------------------------------
-// TEST: sampler_config_describes_sampler_creation_parameters
-// ---------------------------------------------------------------------------
-TEST(Sampler, test_sampler_config_describes_sampler_creation_parameters)
-{
-	// Default-constructible
-	SamplerConfig cfg;
-
-	// Verify all twelve default values.
-	EXPECT_EQ(cfg.magFilter, VK_FILTER_LINEAR);
-	EXPECT_EQ(cfg.minFilter, VK_FILTER_LINEAR);
-	EXPECT_EQ(cfg.mipmapMode, VK_SAMPLER_MIPMAP_MODE_LINEAR);
-	EXPECT_EQ(cfg.addressModeU, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-	EXPECT_EQ(cfg.addressModeV, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-	EXPECT_EQ(cfg.addressModeW, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-	EXPECT_FALSE(cfg.anisotropyEnable);
-	EXPECT_FLOAT_EQ(cfg.maxAnisotropy, 1.0f);
-	EXPECT_FLOAT_EQ(cfg.minLod, 0.0f);
-	EXPECT_FLOAT_EQ(cfg.maxLod, VK_LOD_CLAMP_NONE);
-	EXPECT_FLOAT_EQ(cfg.mipLodBias, 0.0f);
-	EXPECT_EQ(cfg.borderColor, VK_BORDER_COLOR_INT_OPAQUE_BLACK);
-
-	// Copyable
-	SamplerConfig copy = cfg;
-	EXPECT_EQ(copy.magFilter, cfg.magFilter);
-
-	// Movable
-	SamplerConfig moved = std::move(copy);
-	EXPECT_EQ(moved.magFilter, VK_FILTER_LINEAR);
-
-	// Owns no resources — trivially verified by the fact that it is
-	// default-constructible and copyable without any Vulkan calls.
-	EXPECT_TRUE((std::is_copy_constructible_v<SamplerConfig>));
-	EXPECT_TRUE((std::is_move_constructible_v<SamplerConfig>));
-	EXPECT_TRUE((std::is_default_constructible_v<SamplerConfig>));
-}
-
-// ---------------------------------------------------------------------------
 // TEST: sampler_is_raii_movable_non_copyable
 // ---------------------------------------------------------------------------
 TEST(Sampler, test_sampler_is_raii_movable_non_copyable)

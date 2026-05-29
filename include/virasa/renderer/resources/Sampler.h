@@ -9,52 +9,6 @@ namespace virasa
 {
 
 /**
- * @brief Configuration parameters for creating a VkSampler.
- *
- * All fields have sensible defaults and are passed verbatim into
- * VkSamplerCreateInfo during Sampler::Initialize.
- */
-struct SamplerConfig
-{
-	public:
-	/// Magnification filter. Default: VK_FILTER_LINEAR.
-	VkFilter magFilter = VK_FILTER_LINEAR;
-
-	/// Minification filter. Default: VK_FILTER_LINEAR.
-	VkFilter minFilter = VK_FILTER_LINEAR;
-
-	/// Mipmap filter mode. Default: VK_SAMPLER_MIPMAP_MODE_LINEAR.
-	VkSamplerMipmapMode mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-
-	/// Address mode for U axis. Default: VK_SAMPLER_ADDRESS_MODE_REPEAT.
-	VkSamplerAddressMode addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-
-	/// Address mode for V axis. Default: VK_SAMPLER_ADDRESS_MODE_REPEAT.
-	VkSamplerAddressMode addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-
-	/// Address mode for W axis. Default: VK_SAMPLER_ADDRESS_MODE_REPEAT.
-	VkSamplerAddressMode addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-
-	/// Enable anisotropic filtering. Default: false.
-	bool anisotropyEnable = false;
-
-	/// Maximum anisotropy level (used when anisotropyEnable is true). Default: 1.0f.
-	float maxAnisotropy = 1.0f;
-
-	/// Minimum LOD clamp. Default: 0.0f.
-	float minLod = 0.0f;
-
-	/// Maximum LOD clamp. Default: VK_LOD_CLAMP_NONE.
-	float maxLod = VK_LOD_CLAMP_NONE;
-
-	/// LOD bias. Default: 0.0f.
-	float mipLodBias = 0.0f;
-
-	/// Border color for CLAMP_TO_BORDER address modes. Default: VK_BORDER_COLOR_INT_OPAQUE_BLACK.
-	VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-};
-
-/**
  * @brief Owns and manages the lifetime of a single VkSampler handle.
  *
  * Sampler is a RAII wrapper around VkSampler. It is default-constructible

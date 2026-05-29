@@ -18,6 +18,7 @@ add_library(virasa_renderer_lib STATIC
     graph/Pass.cpp
     graph/ImageRegistry.cpp
     graph/BufferRegistry.cpp
+    geometry/Tangents.cpp
 )
 
 target_include_directories(virasa_renderer_lib
@@ -33,4 +34,5 @@ target_link_libraries(virasa_renderer_lib
     PRIVATE
         virasa_core_lib
         virasa_window_lib
+        virasa_vendor_mikktspace
 )

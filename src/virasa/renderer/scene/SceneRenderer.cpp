@@ -1,42 +1,223 @@
 #include "virasa/renderer/scene/SceneRenderer.h"
 
+#include <array>
 #include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <vector>
 
-#include "virasa/renderer/geometry/Primitives.h"
-#include "virasa/ecs/Components.h"
-#include "virasa/math/Transform.h"
-#include "virasa/math/Projection.h"
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/Components.h"
+#include "virasa/math/Projection.h"
+#include "virasa/math/Transform.h"
+#include "virasa/renderer/geometry/Primitives.h"
+#include "virasa/renderer/resources/Buffer.h"
 
 namespace virasa::renderer::scene
 {
+
+namespace
+{
+constexpr uint32_t kInvalidSlot = 0xFFFFFFFFu;
+
+size_t GetTexelSize(VkFormat format) noexcept
+{
+	switch (format)
+	{
+		case VK_FORMAT_R8_UNORM:
+			return 1;
+		case VK_FORMAT_R8G8_UNORM:
+			return 2;
+		case VK_FORMAT_R8G8B8A8_UNORM:
+		case VK_FORMAT_R8G8B8A8_SRGB:
+		case VK_FORMAT_B8G8R8A8_UNORM:
+		case VK_FORMAT_B8G8R8A8_SRGB:
+			return 4;
+		default:
+			return 0;
+	}
+}
+
+RenderError UploadImageWithStaging(const Device& device, const Context& context, Image& image,
+	const void* data, size_t size_bytes)
+{
+	Buffer stagingBuffer;
+	BufferConfig stagingConfig{};
+	stagingConfig.size = static_cast<VkDeviceSize>(size_bytes);
+	stagingConfig.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	stagingConfig.memoryProperties =
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+	RenderError error = stagingBuffer.Initialize(device, stagingConfig);
+	if (error != RenderError::None)
+	{
+		return error;
+	}
+
+	error = stagingBuffer.Upload(data, size_bytes);
+	if (error != RenderError::None)
+	{
+		return error;
+	}
+
+	VkCommandBufferAllocateInfo allocateInfo{};
+	allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocateInfo.commandPool = context.GetGraphicsCommandPool();
+	allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocateInfo.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+	VkResult result = vkAllocateCommandBuffers(device.GetHandle(), &allocateInfo, &commandBuffer);
+	if (result != VK_SUCCESS)
+	{
+		return RenderError::CommandPoolCreateFailed;
+	}
+
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+	if (result != VK_SUCCESS)
+	{
+		vkFreeCommandBuffers(
+			device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
+		return RenderError::CommandPoolCreateFailed;
+	}
+
+	VkImageMemoryBarrier toTransfer{};
+	toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	toTransfer.image = image.GetHandle();
+	toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	toTransfer.subresourceRange.baseMipLevel = 0;
+	toTransfer.subresourceRange.levelCount = 1;
+	toTransfer.subresourceRange.baseArrayLayer = 0;
+	toTransfer.subresourceRange.layerCount = 1;
+	toTransfer.srcAccessMask = 0;
+	toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+	vkCmdPipelineBarrier(commandBuffer,
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0,
+		0,
+		nullptr,
+		0,
+		nullptr,
+		1,
+		&toTransfer);
+
+	VkBufferImageCopy region{};
+	region.bufferOffset = 0;
+	region.bufferRowLength = 0;
+	region.bufferImageHeight = 0;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+	region.imageOffset = {0, 0, 0};
+	region.imageExtent = {image.GetWidth(), image.GetHeight(), 1};
+
+	vkCmdCopyBufferToImage(commandBuffer,
+		stagingBuffer.GetHandle(),
+		image.GetHandle(),
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&region);
+
+	VkImageMemoryBarrier toSampled{};
+	toSampled.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	toSampled.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	toSampled.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	toSampled.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	toSampled.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	toSampled.image = image.GetHandle();
+	toSampled.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	toSampled.subresourceRange.baseMipLevel = 0;
+	toSampled.subresourceRange.levelCount = 1;
+	toSampled.subresourceRange.baseArrayLayer = 0;
+	toSampled.subresourceRange.layerCount = 1;
+	toSampled.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	toSampled.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+	vkCmdPipelineBarrier(commandBuffer,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		0,
+		0,
+		nullptr,
+		0,
+		nullptr,
+		1,
+		&toSampled);
+
+	result = vkEndCommandBuffer(commandBuffer);
+	if (result != VK_SUCCESS)
+	{
+		vkFreeCommandBuffers(
+			device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
+		return RenderError::CommandPoolCreateFailed;
+	}
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+
+	result = vkQueueSubmit(device.GetGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+	if (result != VK_SUCCESS)
+	{
+		vkFreeCommandBuffers(
+			device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
+		return RenderError::CommandPoolCreateFailed;
+	}
+
+	result = vkQueueWaitIdle(device.GetGraphicsQueue());
+	vkFreeCommandBuffers(device.GetHandle(), context.GetGraphicsCommandPool(), 1, &commandBuffer);
+	if (result != VK_SUCCESS)
+	{
+		return RenderError::CommandPoolCreateFailed;
+	}
+
+	return RenderError::None;
+}
+
+void LogRendererError(const char* message)
+{
+	(void)message;
+	auto* logger = virasa::Logger::GetLogger("renderer");
+	(void)logger;
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Internal push-constant layout (168 bytes)
 // ---------------------------------------------------------------------------
 struct PushConstants
 {
-	virasa::math::Mat4 mvp;                  // 64
-	virasa::math::Mat4 model;                // 64
-	uint64_t vertexBufferAddress;            //  8
-	uint64_t indexBufferAddress;             //  8
-	uint64_t materialBufferAddress;          //  8
-	uint64_t lightBufferAddress;             //  8
-	uint32_t materialId;                     //  4
-	uint32_t lightCount;                     //  4
+	virasa::math::Mat4 mvp;		  // 64
+	virasa::math::Mat4 model;	  // 64
+	uint64_t vertexBufferAddress;	  //  8
+	uint64_t indexBufferAddress;	  //  8
+	uint64_t materialBufferAddress; //  8
+	uint64_t lightBufferAddress;	  //  8
+	uint32_t materialId;		  //  4
+	uint32_t lightCount;		  //  4
 };
 static_assert(sizeof(PushConstants) == 168, "PushConstants must be exactly 168 bytes");
 
 // ---------------------------------------------------------------------------
 // Initialize
 // ---------------------------------------------------------------------------
-virasa::RenderError SceneRenderer::Initialize(
-	const virasa::Device& device,
-	const virasa::Context& context,
-	const virasa::ui::FontAtlas& atlas)
+virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
+	const virasa::Context& context, const virasa::ui::FontAtlas& atlas)
 {
 	// Step 1: store borrowed pointers
 	_device = &device;
@@ -103,103 +284,14 @@ virasa::RenderError SceneRenderer::Initialize(
 			return err;
 		}
 
-		// Upload 0xFFFFFFFF pixel via staging
 		const uint32_t whitePixel = 0xFFFFFFFFu;
-
-		// Create staging buffer
-		virasa::Buffer stagingBuffer;
-		virasa::BufferConfig stagingCfg{};
-		stagingCfg.size = sizeof(uint32_t);
-		stagingCfg.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		stagingCfg.memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-		err = stagingBuffer.Initialize(device, stagingCfg);
+		err = UploadImageWithStaging(
+			device, context, _whiteImage, &whitePixel, sizeof(whitePixel));
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
 			return err;
 		}
-
-		err = stagingBuffer.Upload(&whitePixel, sizeof(uint32_t));
-		if (err != virasa::RenderError::None)
-		{
-			_initialized = false;
-			return err;
-		}
-
-		// One-shot command buffer
-		VkCommandBufferAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		allocInfo.commandPool = context.GetGraphicsCommandPool();
-		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
-
-		VkCommandBuffer cmd = VK_NULL_HANDLE;
-		vkAllocateCommandBuffers(device.GetHandle(), &allocInfo, &cmd);
-
-		VkCommandBufferBeginInfo beginInfo{};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(cmd, &beginInfo);
-
-		// Transition image: UNDEFINED -> TRANSFER_DST_OPTIMAL
-		VkImageMemoryBarrier barrier{};
-		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = _whiteImage.GetHandle();
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.baseMipLevel = 0;
-		barrier.subresourceRange.levelCount = 1;
-		barrier.subresourceRange.baseArrayLayer = 0;
-		barrier.subresourceRange.layerCount = 1;
-		barrier.srcAccessMask = 0;
-		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-		// Copy buffer to image
-		VkBufferImageCopy region{};
-		region.bufferOffset = 0;
-		region.bufferRowLength = 0;
-		region.bufferImageHeight = 0;
-		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		region.imageSubresource.mipLevel = 0;
-		region.imageSubresource.baseArrayLayer = 0;
-		region.imageSubresource.layerCount = 1;
-		region.imageOffset = {0, 0, 0};
-		region.imageExtent = {1, 1, 1};
-
-		vkCmdCopyBufferToImage(cmd, stagingBuffer.GetHandle(), _whiteImage.GetHandle(),
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-		// Transition image: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-		barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-		barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-		vkEndCommandBuffer(cmd);
-
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &cmd;
-
-		vkQueueSubmit(device.GetGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(device.GetGraphicsQueue());
-
-		vkFreeCommandBuffers(device.GetHandle(), context.GetGraphicsCommandPool(), 1, &cmd);
 	}
 
 	// Step 6: initialize default sampler
@@ -222,7 +314,8 @@ virasa::RenderError SceneRenderer::Initialize(
 
 	// Step 7: register white image into bindless at slot 0
 	{
-		uint32_t slot = _bindlessTextures.RegisterTexture(_whiteImage.GetView(), _defaultSampler.GetHandle());
+		uint32_t slot = _bindlessTextures.RegisterTexture(
+			_whiteImage.GetView(), _defaultSampler.GetHandle());
 		if (slot == 0xFFFFFFFFu || slot != 0u)
 		{
 			_initialized = false;
@@ -264,8 +357,7 @@ virasa::RenderError SceneRenderer::Initialize(
 	// Step 10: build forward pipeline
 	{
 		virasa::PipelineBuilder builder;
-		builder
-			.SetVertexShader(_forwardVertexShader)
+		builder.SetVertexShader(_forwardVertexShader)
 			.SetFragmentShader(_forwardFragmentShader)
 			.SetColorFormat(context.GetSwapchainFormat())
 			.SetDepthFormat(context.GetDepthFormat())
@@ -275,9 +367,7 @@ virasa::RenderError SceneRenderer::Initialize(
 			.SetDepthWrite(true)
 			.SetDepthCompareOp(VK_COMPARE_OP_LESS)
 			.AddPushConstantRange(
-				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-				0,
-				168)
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168)
 			.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
 
 		auto err = builder.Build(device, _forwardPipeline);
@@ -356,6 +446,143 @@ uint32_t SceneRenderer::CreateDefaultMaterial()
 }
 
 // ---------------------------------------------------------------------------
+// RegisterMesh
+// ---------------------------------------------------------------------------
+virasa::RegisterError SceneRenderer::RegisterMesh(
+	const virasa::MeshData& mesh_data, uint32_t& out_mesh_id)
+{
+	if (mesh_data.vertices.empty() || mesh_data.indices.empty() ||
+		(mesh_data.indices.size() % 3u) != 0u)
+	{
+		LogRendererError("RegisterMesh invalid input");
+		return virasa::RegisterError::InvalidInput;
+	}
+
+	virasa::Mesh mesh;
+	const virasa::RenderError error = mesh.Initialize(*_device, *_context, mesh_data);
+	if (error != virasa::RenderError::None)
+	{
+		LogRendererError("RegisterMesh upload failed");
+		return virasa::RegisterError::UploadFailed;
+	}
+
+	const uint32_t id = _meshRegistry.Allocate(std::move(mesh));
+	if (id == kInvalidSlot)
+	{
+		LogRendererError("RegisterMesh out of slots");
+		return virasa::RegisterError::OutOfSlots;
+	}
+
+	out_mesh_id = id;
+	return virasa::RegisterError::None;
+}
+
+// ---------------------------------------------------------------------------
+// RegisterMaterial
+// ---------------------------------------------------------------------------
+virasa::RegisterError SceneRenderer::RegisterMaterial(
+	const virasa::VisualMaterial& material, uint32_t& out_material_id)
+{
+	const uint32_t id = _materialTable.Allocate(material);
+	if (id == kInvalidSlot)
+	{
+		LogRendererError("RegisterMaterial out of slots");
+		return virasa::RegisterError::OutOfSlots;
+	}
+
+	out_material_id = id;
+	return virasa::RegisterError::None;
+}
+
+// ---------------------------------------------------------------------------
+// RegisterTexture
+// ---------------------------------------------------------------------------
+virasa::RegisterError SceneRenderer::RegisterTexture(
+	const virasa::TextureUpload& upload, uint32_t& out_slot)
+{
+	const size_t texelSize = GetTexelSize(upload.format);
+	const size_t expectedSize =
+		static_cast<size_t>(upload.width) * static_cast<size_t>(upload.height) * texelSize;
+	if (upload.width == 0u || upload.height == 0u || upload.pixels.data() == nullptr ||
+		texelSize == 0u || upload.pixels.size() != expectedSize)
+	{
+		LogRendererError("RegisterTexture invalid input");
+		return virasa::RegisterError::InvalidInput;
+	}
+
+	virasa::Image image;
+	virasa::ImageConfig imageConfig{};
+	imageConfig.width = upload.width;
+	imageConfig.height = upload.height;
+	imageConfig.format = upload.format;
+	imageConfig.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	imageConfig.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	imageConfig.memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+	virasa::RenderError renderError = image.Initialize(*_device, imageConfig);
+	if (renderError != virasa::RenderError::None)
+	{
+		LogRendererError("RegisterTexture image create failed");
+		return virasa::RegisterError::UploadFailed;
+	}
+
+	renderError = UploadImageWithStaging(
+		*_device, *_context, image, upload.pixels.data(), upload.pixels.size());
+	if (renderError != virasa::RenderError::None)
+	{
+		LogRendererError("RegisterTexture upload failed");
+		return virasa::RegisterError::UploadFailed;
+	}
+
+	VkSampler samplerHandle = VK_NULL_HANDLE;
+	for (auto& entry : _samplerCache)
+	{
+		if (entry.first == upload.sampler)
+		{
+			samplerHandle = entry.second.GetHandle();
+			break;
+		}
+	}
+
+	if (samplerHandle == VK_NULL_HANDLE)
+	{
+		virasa::Sampler sampler;
+		virasa::SamplerConfig samplerConfig{};
+		samplerConfig.magFilter = upload.sampler.magFilter;
+		samplerConfig.minFilter = upload.sampler.minFilter;
+		samplerConfig.mipmapMode = upload.sampler.mipmapMode;
+		samplerConfig.addressModeU = upload.sampler.addressModeU;
+		samplerConfig.addressModeV = upload.sampler.addressModeV;
+		samplerConfig.addressModeW = upload.sampler.addressModeW;
+		samplerConfig.anisotropyEnable = upload.sampler.anisotropyEnable;
+		samplerConfig.maxAnisotropy = upload.sampler.maxAnisotropy;
+
+		renderError = sampler.Initialize(*_device, samplerConfig);
+		if (renderError != virasa::RenderError::None)
+		{
+			LogRendererError("RegisterTexture sampler create failed");
+			return virasa::RegisterError::SamplerCreateFailed;
+		}
+
+		samplerHandle = sampler.GetHandle();
+		_samplerCache.emplace_back(upload.sampler, std::move(sampler));
+	}
+
+	_textureImages.push_back(std::move(image));
+	const virasa::Image& storedImage = _textureImages.back();
+	const uint32_t slot = _bindlessTextures.RegisterTexture(storedImage.GetView(), samplerHandle);
+	if (slot == kInvalidSlot)
+	{
+		_textureImages.pop_back();
+		LogRendererError("RegisterTexture out of slots");
+		return virasa::RegisterError::OutOfSlots;
+	}
+
+	out_slot = slot;
+	return virasa::RegisterError::None;
+}
+
+// ---------------------------------------------------------------------------
 // BeginFrame
 // ---------------------------------------------------------------------------
 virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t sceneHeight)
@@ -373,8 +600,7 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 	_graph.Begin();
 
 	// Import swapchain image
-	_frameSwapchainHandle = _graph.ImportImage(
-		_context->GetCurrentImage(),
+	_frameSwapchainHandle = _graph.ImportImage(_context->GetCurrentImage(),
 		_context->GetCurrentImageView(),
 		_context->GetSwapchainFormat(),
 		_context->GetSwapchainExtent(),
@@ -408,7 +634,8 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 // ---------------------------------------------------------------------------
 // RenderWorld
 // ---------------------------------------------------------------------------
-uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs::Entity cameraEntity)
+uint32_t SceneRenderer::RenderWorld(
+	const virasa::ecs::World& world, virasa::ecs::Entity cameraEntity)
 {
 	// --- Derive camera matrices ---
 	virasa::math::Mat4 viewMatrix(1.0f);
@@ -423,11 +650,12 @@ uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs
 		virasa::math::Vec3 target = transform.translation + transform.Forward();
 		viewMatrix = virasa::math::LookAtRH_ZUp(eye, target);
 
-		float aspect = (cam.aspect > 0.0f)
-			? cam.aspect
-			: static_cast<float>(_frameSceneWidth) / static_cast<float>(_frameSceneHeight);
+		float aspect = (cam.aspect > 0.0f) ? cam.aspect
+							     : static_cast<float>(_frameSceneWidth) /
+									 static_cast<float>(_frameSceneHeight);
 
-		projMatrix = virasa::math::PerspectiveRH_ZO(cam.fovY, aspect, cam.nearPlane, cam.farPlane);
+		projMatrix =
+			virasa::math::PerspectiveRH_ZO(cam.fovY, aspect, cam.nearPlane, cam.farPlane);
 	}
 
 	// --- Gather lights ---
@@ -469,7 +697,8 @@ uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Spot);
 		light.position = tr.translation;
-		virasa::math::Vec3 dir = glm::normalize(tr.rotation * virasa::math::Vec3(0.0f, 1.0f, 0.0f));
+		virasa::math::Vec3 dir =
+			glm::normalize(tr.rotation * virasa::math::Vec3(0.0f, 1.0f, 0.0f));
 		light.direction = dir;
 		light.range = sl.range;
 		light.color = sl.color * sl.intensity;
@@ -496,82 +725,94 @@ uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs
 
 	// --- Add forward pass ---
 	_graph.AddPass("forward")
-		.ColorAttachment(
-			_frameSceneColorHandle,
+		.ColorAttachment(_frameSceneColorHandle,
 			virasa::renderer::graph::LoadOp::Clear,
 			virasa::renderer::graph::ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
-		.DepthAttachment(
-			_frameSceneDepthHandle,
-			virasa::renderer::graph::LoadOp::Clear,
-			1.0f)
-		.Record([pipeline, bindless, meshReg, matTable, lightTable, dev,
-				capturedView, capturedProj, &world](const virasa::renderer::graph::GraphContext& gc)
-		{
-			VkCommandBuffer cmd = gc.GetCommandBuffer();
-			VkExtent2D extent = gc.GetRenderExtent();
-
-			// Viewport and scissor
-			VkViewport viewport{};
-			viewport.x = 0.0f;
-			viewport.y = 0.0f;
-			viewport.width = static_cast<float>(extent.width);
-			viewport.height = static_cast<float>(extent.height);
-			viewport.minDepth = 0.0f;
-			viewport.maxDepth = 1.0f;
-			vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-			VkRect2D scissor{};
-			scissor.offset = {0, 0};
-			scissor.extent = extent;
-			vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-			// Bind pipeline
-			pipeline->Bind(cmd);
-
-			// Bind bindless descriptor set
-			VkDescriptorSet descSet = bindless->GetDescriptorSet();
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				pipeline->GetLayout(), 0, 1, &descSet, 0, nullptr);
-
-			// Draw each entity with a visual component
-			for (auto entity : world.GetVisualComponentEntities())
+		.DepthAttachment(_frameSceneDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
+		.Record(
+			[pipeline,
+				bindless,
+				meshReg,
+				matTable,
+				lightTable,
+				dev,
+				capturedView,
+				capturedProj,
+				&world](const virasa::renderer::graph::GraphContext& gc)
 			{
-				if (!world.HasMeshComponent(entity))
-					continue;
+				VkCommandBuffer cmd = gc.GetCommandBuffer();
+				VkExtent2D extent = gc.GetRenderExtent();
 
-				const auto& meshComp = world.GetMeshComponent(entity);
-				if (!meshReg->IsAllocated(meshComp.meshId))
-					continue;
+				VkViewport viewport{};
+				viewport.x = 0.0f;
+				viewport.y = 0.0f;
+				viewport.width = static_cast<float>(extent.width);
+				viewport.height = static_cast<float>(extent.height);
+				viewport.minDepth = 0.0f;
+				viewport.maxDepth = 1.0f;
+				vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-				const auto& mesh = meshReg->Get(meshComp.meshId);
-				const auto& visualComp = world.GetVisualComponent(entity);
+				VkRect2D scissor{};
+				scissor.offset = {0, 0};
+				scissor.extent = extent;
+				vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-				// Model matrix
-				virasa::math::Mat4 model(1.0f);
-				if (world.HasTransformComponent(entity))
+				pipeline->Bind(cmd);
+
+				VkDescriptorSet descSet = bindless->GetDescriptorSet();
+				vkCmdBindDescriptorSets(cmd,
+					VK_PIPELINE_BIND_POINT_GRAPHICS,
+					pipeline->GetLayout(),
+					0,
+					1,
+					&descSet,
+					0,
+					nullptr);
+
+				for (auto entity : world.GetVisualComponentEntities())
 				{
-					model = world.GetTransformComponent(entity).ToMatrix();
+					if (!world.HasMeshComponent(entity))
+					{
+						continue;
+					}
+
+					const auto& meshComp = world.GetMeshComponent(entity);
+					if (!meshReg->IsAllocated(meshComp.meshId))
+					{
+						continue;
+					}
+
+					const auto& mesh = meshReg->Get(meshComp.meshId);
+					const auto& visualComp = world.GetVisualComponent(entity);
+
+					virasa::math::Mat4 model(1.0f);
+					if (world.HasTransformComponent(entity))
+					{
+						model = world.GetTransformComponent(entity).ToMatrix();
+					}
+
+					const virasa::math::Mat4 mvp = capturedProj * capturedView * model;
+
+					PushConstants pc{};
+					pc.mvp = mvp;
+					pc.model = model;
+					pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
+					pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
+					pc.materialBufferAddress = matTable->GetBufferAddress();
+					pc.lightBufferAddress = lightTable->GetBufferAddress();
+					pc.materialId = visualComp.materialId;
+					pc.lightCount = lightTable->GetLightCount();
+
+					vkCmdPushConstants(cmd,
+						pipeline->GetLayout(),
+						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+						0,
+						sizeof(PushConstants),
+						&pc);
+
+					vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
 				}
-
-				virasa::math::Mat4 mvp = capturedProj * capturedView * model;
-
-				PushConstants pc{};
-				pc.mvp = mvp;
-				pc.model = model;
-				pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
-				pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
-				pc.materialBufferAddress = matTable->GetBufferAddress();
-				pc.lightBufferAddress = lightTable->GetBufferAddress();
-				pc.materialId = visualComp.materialId;
-				pc.lightCount = lightTable->GetLightCount();
-
-				vkCmdPushConstants(cmd, pipeline->GetLayout(),
-					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-					0, sizeof(PushConstants), &pc);
-
-				vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
-			}
-		});
+			});
 
 	// --- Register scene color in bindless (with caching) ---
 	VkImageView sceneView = _imageRegistry.Get(_frameSceneColorHandle).GetView();
@@ -583,7 +824,8 @@ uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs
 	}
 	else
 	{
-		uint32_t slot = _bindlessTextures.RegisterTexture(sceneView, _defaultSampler.GetHandle());
+		uint32_t slot =
+			_bindlessTextures.RegisterTexture(sceneView, _defaultSampler.GetHandle());
 		if (slot == 0xFFFFFFFFu)
 		{
 			return 0xFFFFFFFFu;
@@ -598,16 +840,12 @@ uint32_t SceneRenderer::RenderWorld(const virasa::ecs::World& world, virasa::ecs
 // ---------------------------------------------------------------------------
 // SubmitFrame
 // ---------------------------------------------------------------------------
-virasa::SwapchainStatus SceneRenderer::SubmitFrame(
-	const virasa::ui::DrawList& drawList,
-	const virasa::ui::FontAtlas& atlas,
-	uint32_t windowWidth,
-	uint32_t windowHeight)
+virasa::SwapchainStatus SceneRenderer::SubmitFrame(const virasa::ui::DrawList& drawList,
+	const virasa::ui::FontAtlas& atlas, uint32_t windowWidth, uint32_t windowHeight)
 {
 	// Step 1: submit UI pass
 	std::array<virasa::renderer::graph::ImageHandle, 1> sampledImages = {_frameSceneColorHandle};
-	_uiPass.Submit(
-		_graph,
+	_uiPass.Submit(_graph,
 		_frameSwapchainHandle,
 		drawList,
 		atlas,

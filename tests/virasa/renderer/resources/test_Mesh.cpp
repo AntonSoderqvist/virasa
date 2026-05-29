@@ -19,9 +19,9 @@ MeshData MakeTestMeshData()
 	MeshData meshData;
 
 	meshData.vertices = {
-		{glm::vec3{0.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec2{0.0F, 0.0F}},
-		{glm::vec3{1.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec2{1.0F, 0.0F}},
-		{glm::vec3{0.0F, 1.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec2{0.0F, 1.0F}}};
+		{glm::vec3{0.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec4{1.0F, 0.0F, 0.0F, 1.0F}, glm::vec2{0.0F, 0.0F}},
+		{glm::vec3{1.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec4{1.0F, 0.0F, 0.0F, 1.0F}, glm::vec2{1.0F, 0.0F}},
+		{glm::vec3{0.0F, 1.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F}, glm::vec4{1.0F, 0.0F, 0.0F, 1.0F}, glm::vec2{0.0F, 1.0F}}};
 	meshData.indices = {0U, 1U, 2U};
 
 	return meshData;
@@ -123,13 +123,19 @@ TEST_F(MeshIntegrationTest, test_mesh_initialize_uploads_geometry)
 		MeshData data;
 		data.vertices = {{glm::vec3{-1.0F, -1.0F, 0.0F},
 					     glm::vec3{0.0F, 1.0F, 0.0F},
+					     glm::vec4{1.0F, 0.0F, 0.0F, 1.0F},
 					     glm::vec2{0.0F, 0.0F}},
 			{glm::vec3{1.0F, -1.0F, 0.0F},
 				glm::vec3{0.0F, 1.0F, 0.0F},
+				glm::vec4{1.0F, 0.0F, 0.0F, 1.0F},
 				glm::vec2{1.0F, 0.0F}},
-			{glm::vec3{1.0F, 1.0F, 0.0F}, glm::vec3{0.0F, 1.0F, 0.0F}, glm::vec2{1.0F, 1.0F}},
+			{glm::vec3{1.0F, 1.0F, 0.0F},
+				glm::vec3{0.0F, 1.0F, 0.0F},
+				glm::vec4{1.0F, 0.0F, 0.0F, 1.0F},
+				glm::vec2{1.0F, 1.0F}},
 			{glm::vec3{-1.0F, 1.0F, 0.0F},
 				glm::vec3{0.0F, 1.0F, 0.0F},
+				glm::vec4{1.0F, 0.0F, 0.0F, 1.0F},
 				glm::vec2{0.0F, 1.0F}}};
 		data.indices = {0U, 1U, 2U, 2U, 3U, 0U};
 		return data;

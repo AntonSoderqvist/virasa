@@ -8,6 +8,7 @@
 #include <ostream>
 #include <span>
 #include <vector>
+#include <type_traits>
 
 #include "virasa/math/Types.h"
 
@@ -93,6 +94,21 @@ enum class CameraDomain : uint8_t
 {
 	Main = 0,
 	Editor
+};
+
+/**
+ * @brief Error codes for renderer resource registration operations.
+ *
+ * RegisterError values represent coarse-grained failure modes reported by
+ * authoring-facing registration APIs. None is the only success value.
+ */
+enum class RegisterError : uint8_t
+{
+	None = 0,
+	OutOfSlots,
+	InvalidInput,
+	UploadFailed,
+	SamplerCreateFailed
 };
 
 /**
@@ -209,10 +225,10 @@ struct VertexLayout
 };
 
 /**
- * @brief A single vertex with position, normal, and texture coordinates.
+ * @brief A single vertex in the renderer's fixed geometry format.
  *
  * The memory layout is tightly packed: 3 floats for position, 3 for normal,
- * 2 for UV, total 32 bytes with no padding.
+ * 4 for tangent, and 2 for UV, total 48 bytes with no padding.
  */
 struct Vertex
 {
@@ -222,11 +238,19 @@ struct Vertex
 	/** @brief Vertex normal. */
 	virasa::math::Vec3 normal;
 
+	/** @brief Vertex tangent and handedness sign. */
+	virasa::math::Vec4 tangent;
+
 	/** @brief Vertex texture coordinates. */
 	virasa::math::Vec2 uv;
 };
 
-static_assert(sizeof(Vertex) == 32, "Vertex must remain tightly packed at 32 bytes.");
+static_assert(offsetof(Vertex, position) == 0, "Vertex::position must be at offset 0.");
+static_assert(offsetof(Vertex, normal) == 12, "Vertex::normal must be at offset 12.");
+static_assert(offsetof(Vertex, tangent) == 24, "Vertex::tangent must be at offset 24.");
+static_assert(offsetof(Vertex, uv) == 40, "Vertex::uv must be at offset 40.");
+static_assert(sizeof(Vertex) == 48, "Vertex must remain tightly packed at 48 bytes.");
+static_assert(std::is_standard_layout_v<Vertex>, "Vertex must be standard layout.");
 
 /**
  * @brief CPU-side geometry data with vertices and indices.
@@ -240,6 +264,81 @@ struct MeshData
 
 	/** @brief Index array. */
 	std::vector<uint32_t> indices;
+};
+
+/**
+ * @brief Describes Vulkan sampler parameters used by renderer texture registration.
+ *
+ * SamplerConfig is a plain data key type used for sampler caching.
+ */
+struct SamplerConfig
+{
+	/** @brief Magnification filter. */
+	VkFilter magFilter = VK_FILTER_LINEAR;
+
+	/** @brief Minification filter. */
+	VkFilter minFilter = VK_FILTER_LINEAR;
+
+	/** @brief Mipmap sampling mode. */
+	VkSamplerMipmapMode mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+	/** @brief Address mode for the U axis. */
+	VkSamplerAddressMode addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	/** @brief Address mode for the V axis. */
+	VkSamplerAddressMode addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	/** @brief Address mode for the W axis. */
+	VkSamplerAddressMode addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	/** @brief Whether anisotropic filtering is enabled. */
+	bool anisotropyEnable = false;
+
+	/** @brief Maximum anisotropy value. */
+	float maxAnisotropy = 1.0f;
+
+	/** @brief Minimum LOD clamp. */
+	float minLod = 0.0f;
+
+	/** @brief Maximum LOD clamp. */
+	float maxLod = VK_LOD_CLAMP_NONE;
+
+	/** @brief LOD bias. */
+	float mipLodBias = 0.0f;
+
+	/** @brief Border color for CLAMP_TO_BORDER address modes. */
+	VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+
+	/**
+	 * @brief Compares two sampler configurations for equality.
+	 * @param other The other sampler configuration.
+	 * @return True if all members compare equal; otherwise false.
+	 */
+	[[nodiscard]] bool operator==(const SamplerConfig& other) const noexcept = default;
+};
+
+/**
+ * @brief Describes one sampled texture upload and registration request.
+ *
+ * TextureUpload is a non-owning view of source pixel bytes and associated
+ * metadata needed to create a sampled 2D texture.
+ */
+struct TextureUpload
+{
+	/** @brief Tightly packed source pixel bytes in scanline order. */
+	std::span<const std::byte> pixels;
+
+	/** @brief Texture width in texels. */
+	uint32_t width = 0u;
+
+	/** @brief Texture height in texels. */
+	uint32_t height = 0u;
+
+	/** @brief Vulkan format of the source texels and destination image. */
+	VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+
+	/** @brief Sampler configuration for the registered texture. */
+	SamplerConfig sampler;
 };
 
 /**

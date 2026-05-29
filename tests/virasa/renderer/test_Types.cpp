@@ -5,9 +5,12 @@
 #include "vulkan/vulkan.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
+#include "glm/vec4.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -510,16 +513,20 @@ TEST(Types, test_vertex_struct_layout)
 		"Vertex::position must be virasa::math::Vec3");
 	static_assert(std::is_same_v<decltype(Vertex::normal), Vec3>,
 		"Vertex::normal must be virasa::math::Vec3");
+	static_assert(std::is_same_v<decltype(Vertex::tangent), Vec4>,
+		"Vertex::tangent must be virasa::math::Vec4");
 	static_assert(std::is_same_v<decltype(Vertex::uv), Vec2>,
 		"Vertex::uv must be virasa::math::Vec2");
 	static_assert(offsetof(Vertex, position) == 0,
-		"Vertex::position must be the first field");
-	static_assert(offsetof(Vertex, normal) == sizeof(glm::vec3),
-		"Vertex::normal must immediately follow position");
-	static_assert(offsetof(Vertex, uv) == sizeof(glm::vec3) * 2,
-		"Vertex::uv must immediately follow normal");
-	static_assert(sizeof(Vertex) == 32,
-		"Vertex must be tightly packed to 32 bytes");
+		"Vertex::position must be at byte offset 0");
+	static_assert(offsetof(Vertex, normal) == 12,
+		"Vertex::normal must be at byte offset 12");
+	static_assert(offsetof(Vertex, tangent) == 24,
+		"Vertex::tangent must be at byte offset 24");
+	static_assert(offsetof(Vertex, uv) == 40,
+		"Vertex::uv must be at byte offset 40");
+	static_assert(sizeof(Vertex) == 48,
+		"Vertex must be tightly packed to 48 bytes");
 
 	Vertex vertex{};
 	EXPECT_FLOAT_EQ(vertex.position.x, 0.0f);
@@ -528,11 +535,16 @@ TEST(Types, test_vertex_struct_layout)
 	EXPECT_FLOAT_EQ(vertex.normal.x, 0.0f);
 	EXPECT_FLOAT_EQ(vertex.normal.y, 0.0f);
 	EXPECT_FLOAT_EQ(vertex.normal.z, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.x, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.y, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.z, 0.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.w, 0.0f);
 	EXPECT_FLOAT_EQ(vertex.uv.x, 0.0f);
 	EXPECT_FLOAT_EQ(vertex.uv.y, 0.0f);
 
 	vertex.position = Vec3{1.0f, 2.0f, 3.0f};
 	vertex.normal = Vec3{4.0f, 5.0f, 6.0f};
+	vertex.tangent = Vec4{7.0f, 8.0f, 9.0f, -1.0f};
 	vertex.uv = Vec2{0.25f, 0.75f};
 
 	EXPECT_FLOAT_EQ(vertex.position.x, 1.0f);
@@ -541,6 +553,10 @@ TEST(Types, test_vertex_struct_layout)
 	EXPECT_FLOAT_EQ(vertex.normal.x, 4.0f);
 	EXPECT_FLOAT_EQ(vertex.normal.y, 5.0f);
 	EXPECT_FLOAT_EQ(vertex.normal.z, 6.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.x, 7.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.y, 8.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.z, 9.0f);
+	EXPECT_FLOAT_EQ(vertex.tangent.w, -1.0f);
 	EXPECT_FLOAT_EQ(vertex.uv.x, 0.25f);
 	EXPECT_FLOAT_EQ(vertex.uv.y, 0.75f);
 }
@@ -563,11 +579,13 @@ TEST(Types, test_mesh_data_holds_cpu_geometry)
 	Vertex v0{};
 	v0.position = glm::vec3{1.0f, 0.0f, 0.0f};
 	v0.normal = glm::vec3{0.0f, 1.0f, 0.0f};
+	v0.tangent = glm::vec4{1.0f, 0.0f, 0.0f, 1.0f};
 	v0.uv = glm::vec2{0.0f, 0.0f};
 
 	Vertex v1{};
 	v1.position = glm::vec3{0.0f, 1.0f, 0.0f};
 	v1.normal = glm::vec3{0.0f, 1.0f, 0.0f};
+	v1.tangent = glm::vec4{0.0f, 1.0f, 0.0f, -1.0f};
 	v1.uv = glm::vec2{1.0f, 0.0f};
 
 	mesh.vertices.push_back(v0);
@@ -580,6 +598,8 @@ TEST(Types, test_mesh_data_holds_cpu_geometry)
 	EXPECT_EQ(mesh.indices.size(), std::size_t{3});
 	EXPECT_FLOAT_EQ(mesh.vertices[0].position.x, 1.0f);
 	EXPECT_FLOAT_EQ(mesh.vertices[1].position.y, 1.0f);
+	EXPECT_FLOAT_EQ(mesh.vertices[0].tangent.w, 1.0f);
+	EXPECT_FLOAT_EQ(mesh.vertices[1].tangent.w, -1.0f);
 	EXPECT_EQ(mesh.indices[0], uint32_t{0});
 	EXPECT_EQ(mesh.indices[1], uint32_t{1});
 	EXPECT_EQ(mesh.indices[2], uint32_t{0});
@@ -591,6 +611,7 @@ TEST(Types, test_mesh_data_holds_cpu_geometry)
 	EXPECT_NE(copy.indices.data(), mesh.indices.data());
 	EXPECT_FLOAT_EQ(copy.vertices[0].position.x, mesh.vertices[0].position.x);
 	EXPECT_FLOAT_EQ(copy.vertices[1].uv.x, mesh.vertices[1].uv.x);
+	EXPECT_FLOAT_EQ(copy.vertices[0].tangent.w, mesh.vertices[0].tangent.w);
 	EXPECT_EQ(copy.indices[0], mesh.indices[0]);
 	EXPECT_EQ(copy.indices[1], mesh.indices[1]);
 	EXPECT_EQ(copy.indices[2], mesh.indices[2]);
@@ -600,7 +621,206 @@ TEST(Types, test_mesh_data_holds_cpu_geometry)
 	EXPECT_EQ(moved.indices.size(), std::size_t{3});
 	EXPECT_FLOAT_EQ(moved.vertices[0].normal.y, 1.0f);
 	EXPECT_FLOAT_EQ(moved.vertices[1].uv.x, 1.0f);
+	EXPECT_FLOAT_EQ(moved.vertices[1].tangent.y, 1.0f);
 	EXPECT_EQ(moved.indices[0], uint32_t{0});
 	EXPECT_EQ(moved.indices[1], uint32_t{1});
 	EXPECT_EQ(moved.indices[2], uint32_t{0});
+}
+
+TEST(Types, test_register_error_enum_values_in_declared_order)
+{
+	static_assert(std::is_same_v<std::underlying_type_t<RegisterError>, uint8_t>,
+		"RegisterError underlying type must be uint8_t");
+
+	constexpr uint8_t values[] = {
+		static_cast<uint8_t>(RegisterError::None),
+		static_cast<uint8_t>(RegisterError::OutOfSlots),
+		static_cast<uint8_t>(RegisterError::InvalidInput),
+		static_cast<uint8_t>(RegisterError::UploadFailed),
+		static_cast<uint8_t>(RegisterError::SamplerCreateFailed),
+	};
+
+	EXPECT_EQ(values[0], uint8_t{0});
+	for (std::size_t i = 1; i < std::size(values); ++i)
+	{
+		EXPECT_EQ(values[i], static_cast<uint8_t>(i));
+		EXPECT_GT(values[i], values[i - 1]);
+	}
+
+	for (std::size_t i = 0; i < std::size(values); ++i)
+	{
+		for (std::size_t j = i + 1; j < std::size(values); ++j)
+		{
+			EXPECT_NE(values[i], values[j]);
+		}
+	}
+}
+
+TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
+{
+	static_assert(std::is_default_constructible_v<SamplerConfig>,
+		"SamplerConfig must be default-constructible");
+	static_assert(std::is_copy_constructible_v<SamplerConfig>,
+		"SamplerConfig must be copy-constructible");
+	static_assert(std::is_move_constructible_v<SamplerConfig>,
+		"SamplerConfig must be move-constructible");
+	static_assert(std::is_trivially_destructible_v<SamplerConfig>,
+		"SamplerConfig must be trivially destructible");
+	static_assert(std::is_same_v<decltype(SamplerConfig::magFilter), VkFilter>,
+		"magFilter must be VkFilter");
+	static_assert(std::is_same_v<decltype(SamplerConfig::minFilter), VkFilter>,
+		"minFilter must be VkFilter");
+	static_assert(std::is_same_v<decltype(SamplerConfig::mipmapMode), VkSamplerMipmapMode>,
+		"mipmapMode must be VkSamplerMipmapMode");
+	static_assert(std::is_same_v<decltype(SamplerConfig::addressModeU), VkSamplerAddressMode>,
+		"addressModeU must be VkSamplerAddressMode");
+	static_assert(std::is_same_v<decltype(SamplerConfig::addressModeV), VkSamplerAddressMode>,
+		"addressModeV must be VkSamplerAddressMode");
+	static_assert(std::is_same_v<decltype(SamplerConfig::addressModeW), VkSamplerAddressMode>,
+		"addressModeW must be VkSamplerAddressMode");
+	static_assert(std::is_same_v<decltype(SamplerConfig::anisotropyEnable), bool>,
+		"anisotropyEnable must be bool");
+	static_assert(std::is_same_v<decltype(SamplerConfig::maxAnisotropy), float>,
+		"maxAnisotropy must be float");
+
+	SamplerConfig config;
+	EXPECT_EQ(config.magFilter, VK_FILTER_LINEAR);
+	EXPECT_EQ(config.minFilter, VK_FILTER_LINEAR);
+	EXPECT_EQ(config.mipmapMode, VK_SAMPLER_MIPMAP_MODE_LINEAR);
+	EXPECT_EQ(config.addressModeU, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+	EXPECT_EQ(config.addressModeV, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+	EXPECT_EQ(config.addressModeW, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+	EXPECT_FALSE(config.anisotropyEnable);
+	EXPECT_FLOAT_EQ(config.maxAnisotropy, 1.0f);
+
+	SamplerConfig sameDefaults;
+	EXPECT_TRUE(config == sameDefaults);
+
+	SamplerConfig different = config;
+	different.magFilter = VK_FILTER_NEAREST;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.minFilter = VK_FILTER_NEAREST;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.anisotropyEnable = true;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.maxAnisotropy = 16.0f;
+	EXPECT_FALSE(config == different);
+
+	SamplerConfig anisotropyDisabledA{};
+	SamplerConfig anisotropyDisabledB{};
+	anisotropyDisabledA.anisotropyEnable = false;
+	anisotropyDisabledB.anisotropyEnable = false;
+	anisotropyDisabledA.maxAnisotropy = 1.0f;
+	anisotropyDisabledB.maxAnisotropy = 8.0f;
+	EXPECT_FALSE(anisotropyDisabledA == anisotropyDisabledB);
+
+	SamplerConfig customized{};
+	customized.magFilter = VK_FILTER_NEAREST;
+	customized.minFilter = VK_FILTER_NEAREST;
+	customized.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	customized.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	customized.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+	customized.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	customized.anisotropyEnable = true;
+	customized.maxAnisotropy = 4.0f;
+
+	SamplerConfig copy = customized;
+	EXPECT_TRUE(copy == customized);
+
+	SamplerConfig moved = std::move(copy);
+	EXPECT_TRUE(moved == customized);
+}
+
+TEST(Types, test_texture_upload_describes_one_sampled_texture_registration)
+{
+	static_assert(std::is_default_constructible_v<TextureUpload>,
+		"TextureUpload must be default-constructible");
+	static_assert(std::is_copy_constructible_v<TextureUpload>,
+		"TextureUpload must be copy-constructible");
+	static_assert(std::is_move_constructible_v<TextureUpload>,
+		"TextureUpload must be move-constructible");
+	static_assert(std::is_trivially_destructible_v<TextureUpload>,
+		"TextureUpload must be trivially destructible");
+	static_assert(std::is_same_v<decltype(TextureUpload::pixels), std::span<const std::byte>>,
+		"pixels must be std::span<const std::byte>");
+	static_assert(std::is_same_v<decltype(TextureUpload::width), uint32_t>,
+		"width must be uint32_t");
+	static_assert(std::is_same_v<decltype(TextureUpload::height), uint32_t>,
+		"height must be uint32_t");
+	static_assert(std::is_same_v<decltype(TextureUpload::format), VkFormat>,
+		"format must be VkFormat");
+	static_assert(std::is_same_v<decltype(TextureUpload::sampler), SamplerConfig>,
+		"sampler must be SamplerConfig");
+	static_assert(offsetof(TextureUpload, pixels) == 0,
+		"pixels must be the first member");
+	static_assert(offsetof(TextureUpload, width) > offsetof(TextureUpload, pixels),
+		"width must follow pixels");
+	static_assert(offsetof(TextureUpload, height) > offsetof(TextureUpload, width),
+		"height must follow width");
+	static_assert(offsetof(TextureUpload, format) > offsetof(TextureUpload, height),
+		"format must follow height");
+	static_assert(offsetof(TextureUpload, sampler) > offsetof(TextureUpload, format),
+		"sampler must follow format");
+
+	TextureUpload upload;
+	EXPECT_TRUE(upload.pixels.empty());
+	EXPECT_EQ(upload.width, 0u);
+	EXPECT_EQ(upload.height, 0u);
+	EXPECT_EQ(upload.format, VK_FORMAT_R8G8B8A8_UNORM);
+	EXPECT_TRUE(upload.sampler == SamplerConfig{});
+
+	const std::array<std::byte, 16> pixels = {
+		std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
+		std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
+		std::byte{0x09}, std::byte{0x0A}, std::byte{0x0B}, std::byte{0x0C},
+		std::byte{0x0D}, std::byte{0x0E}, std::byte{0x0F}, std::byte{0x10},
+	};
+	SamplerConfig sampler{};
+	sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler.anisotropyEnable = true;
+	sampler.maxAnisotropy = 8.0f;
+
+	upload.pixels = std::span<const std::byte>{pixels};
+	upload.width = 2u;
+	upload.height = 2u;
+	upload.format = VK_FORMAT_R8G8B8A8_SRGB;
+	upload.sampler = sampler;
+
+	EXPECT_EQ(upload.pixels.data(), pixels.data());
+	EXPECT_EQ(upload.pixels.size(), pixels.size());
+	EXPECT_EQ(upload.width, 2u);
+	EXPECT_EQ(upload.height, 2u);
+	EXPECT_EQ(upload.format, VK_FORMAT_R8G8B8A8_SRGB);
+	EXPECT_TRUE(upload.sampler == sampler);
+
+	TextureUpload copy = upload;
+	EXPECT_EQ(copy.pixels.data(), upload.pixels.data());
+	EXPECT_EQ(copy.pixels.size(), upload.pixels.size());
+	EXPECT_EQ(copy.width, upload.width);
+	EXPECT_EQ(copy.height, upload.height);
+	EXPECT_EQ(copy.format, upload.format);
+	EXPECT_TRUE(copy.sampler == upload.sampler);
+
+	TextureUpload moved = std::move(copy);
+	EXPECT_EQ(moved.pixels.data(), pixels.data());
+	EXPECT_EQ(moved.pixels.size(), pixels.size());
+	EXPECT_EQ(moved.width, 2u);
+	EXPECT_EQ(moved.height, 2u);
+	EXPECT_EQ(moved.format, VK_FORMAT_R8G8B8A8_SRGB);
+	EXPECT_TRUE(moved.sampler == sampler);
 }
