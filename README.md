@@ -4,7 +4,7 @@ virasa is (soon) a vi-like 3d editor built with [calchestra](https://github.com/
 
 ## Status
 
-Early days on this project, as of May 19 2026, virasa can render a triangle (nice).
+Early days on this project, as of May 19 2026, virasa can load gltf files and accepts a limited amount of commands to modify the scene.
 
 ## Goals
 
@@ -18,7 +18,7 @@ The aspirations are strong, but the flesh is weak. Very happy to entertain sugge
 
 ## Roadmap
 
-Will be setting up the window creation, initial rendering, and some command parsing in the coming days.
+Will be dialing in the ECS, improving draw efficiency, adding shadow mapping, improving asset loading, hot reloading shaders/assets, and improving/expanding the UI capabilities.
 
 ## License
 
