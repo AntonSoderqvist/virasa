@@ -17,6 +17,10 @@
 #include <type_traits>
 #include <utility>
 
+#include <glm/gtc/quaternion.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/vec3.hpp>
+
 namespace
 {
 
@@ -155,15 +159,15 @@ TEST(EntityEditorView, test_component_section_order_is_fixed)
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 88u);
+    ASSERT_EQ(texts.size(), 86u);
 
     EXPECT_EQ(ExtractText(out, texts[2]), "Transform");
-    EXPECT_EQ(ExtractText(out, texts[26]), "Mesh");
-    EXPECT_EQ(ExtractText(out, texts[29]), "Visual");
-    EXPECT_EQ(ExtractText(out, texts[32]), "DirectionalLight");
-    EXPECT_EQ(ExtractText(out, texts[49]), "PointLight");
-    EXPECT_EQ(ExtractText(out, texts[61]), "SpotLight");
-    EXPECT_EQ(ExtractText(out, texts[77]), "Camera");
+    EXPECT_EQ(ExtractText(out, texts[24]), "Mesh");
+    EXPECT_EQ(ExtractText(out, texts[27]), "Visual");
+    EXPECT_EQ(ExtractText(out, texts[30]), "DirectionalLight");
+    EXPECT_EQ(ExtractText(out, texts[47]), "PointLight");
+    EXPECT_EQ(ExtractText(out, texts[59]), "SpotLight");
+    EXPECT_EQ(ExtractText(out, texts[75]), "Camera");
 }
 
 TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
@@ -214,7 +218,7 @@ TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 88u);
+    ASSERT_EQ(texts.size(), 86u);
 
     EXPECT_EQ(ExtractText(out, texts[0]), "Name");
     EXPECT_EQ(ExtractText(out, texts[1]), "LayoutEntity");
@@ -228,73 +232,71 @@ TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
     EXPECT_EQ(ExtractText(out, texts[9]), "3.000");
 
     EXPECT_EQ(ExtractText(out, texts[10]), "Rotation");
-    EXPECT_EQ(ExtractText(out, texts[11]), "W:");
-    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
-    EXPECT_EQ(ExtractText(out, texts[13]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[11]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[12]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[13]), "Y:");
     EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[15]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[15]), "Z:");
     EXPECT_EQ(ExtractText(out, texts[16]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[17]), "Z:");
-    EXPECT_EQ(ExtractText(out, texts[18]), "0.000");
 
-    EXPECT_EQ(ExtractText(out, texts[19]), "Scale");
-    EXPECT_EQ(ExtractText(out, texts[20]), "X:");
-    EXPECT_EQ(ExtractText(out, texts[21]), "4.000");
-    EXPECT_EQ(ExtractText(out, texts[22]), "Y:");
-    EXPECT_EQ(ExtractText(out, texts[23]), "5.000");
-    EXPECT_EQ(ExtractText(out, texts[24]), "Z:");
-    EXPECT_EQ(ExtractText(out, texts[25]), "6.000");
+    EXPECT_EQ(ExtractText(out, texts[17]), "Scale");
+    EXPECT_EQ(ExtractText(out, texts[18]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[19]), "4.000");
+    EXPECT_EQ(ExtractText(out, texts[20]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[21]), "5.000");
+    EXPECT_EQ(ExtractText(out, texts[22]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[23]), "6.000");
 
-    EXPECT_EQ(ExtractText(out, texts[27]), "Mesh Id");
-    EXPECT_EQ(ExtractText(out, texts[28]), "42");
-    EXPECT_EQ(ExtractText(out, texts[30]), "Material Id");
-    EXPECT_EQ(ExtractText(out, texts[31]), "99");
+    EXPECT_EQ(ExtractText(out, texts[25]), "Mesh Id");
+    EXPECT_EQ(ExtractText(out, texts[26]), "42");
+    EXPECT_EQ(ExtractText(out, texts[28]), "Material Id");
+    EXPECT_EQ(ExtractText(out, texts[29]), "99");
 
-    EXPECT_EQ(ExtractText(out, texts[33]), "Direction");
-    EXPECT_EQ(ExtractText(out, texts[34]), "X:");
-    EXPECT_EQ(ExtractText(out, texts[35]), "7.000");
-    EXPECT_EQ(ExtractText(out, texts[36]), "Y:");
-    EXPECT_EQ(ExtractText(out, texts[37]), "8.000");
-    EXPECT_EQ(ExtractText(out, texts[38]), "Z:");
-    EXPECT_EQ(ExtractText(out, texts[39]), "9.000");
+    EXPECT_EQ(ExtractText(out, texts[31]), "Direction");
+    EXPECT_EQ(ExtractText(out, texts[32]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[33]), "7.000");
+    EXPECT_EQ(ExtractText(out, texts[34]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[35]), "8.000");
+    EXPECT_EQ(ExtractText(out, texts[36]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[37]), "9.000");
 
-    EXPECT_EQ(ExtractText(out, texts[40]), "Color");
-    EXPECT_EQ(ExtractText(out, texts[41]), "X:");
-    EXPECT_EQ(ExtractText(out, texts[42]), "0.100");
-    EXPECT_EQ(ExtractText(out, texts[43]), "Y:");
-    EXPECT_EQ(ExtractText(out, texts[44]), "0.200");
-    EXPECT_EQ(ExtractText(out, texts[45]), "Z:");
-    EXPECT_EQ(ExtractText(out, texts[46]), "0.300");
-    EXPECT_EQ(ExtractText(out, texts[47]), "Intensity");
-    EXPECT_EQ(ExtractText(out, texts[48]), "1.500");
+    EXPECT_EQ(ExtractText(out, texts[38]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[39]), "X:");
+    EXPECT_EQ(ExtractText(out, texts[40]), "0.100");
+    EXPECT_EQ(ExtractText(out, texts[41]), "Y:");
+    EXPECT_EQ(ExtractText(out, texts[42]), "0.200");
+    EXPECT_EQ(ExtractText(out, texts[43]), "Z:");
+    EXPECT_EQ(ExtractText(out, texts[44]), "0.300");
+    EXPECT_EQ(ExtractText(out, texts[45]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[46]), "1.500");
 
-    EXPECT_EQ(ExtractText(out, texts[50]), "Color");
-    EXPECT_EQ(ExtractText(out, texts[57]), "Intensity");
-    EXPECT_EQ(ExtractText(out, texts[58]), "2.500");
-    EXPECT_EQ(ExtractText(out, texts[59]), "Range");
-    EXPECT_EQ(ExtractText(out, texts[60]), "12.000");
+    EXPECT_EQ(ExtractText(out, texts[48]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[55]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[56]), "2.500");
+    EXPECT_EQ(ExtractText(out, texts[57]), "Range");
+    EXPECT_EQ(ExtractText(out, texts[58]), "12.000");
 
-    EXPECT_EQ(ExtractText(out, texts[61]), "SpotLight");
-    EXPECT_EQ(ExtractText(out, texts[62]), "Color");
-    EXPECT_EQ(ExtractText(out, texts[69]), "Intensity");
-    EXPECT_EQ(ExtractText(out, texts[70]), "3.500");
-    EXPECT_EQ(ExtractText(out, texts[71]), "Range");
-    EXPECT_EQ(ExtractText(out, texts[72]), "13.000");
-    EXPECT_EQ(ExtractText(out, texts[73]), "Inner Cone Cos");
-    EXPECT_EQ(ExtractText(out, texts[74]), "0.950");
-    EXPECT_EQ(ExtractText(out, texts[75]), "Outer Cone Cos");
-    EXPECT_EQ(ExtractText(out, texts[76]), "0.850");
+    EXPECT_EQ(ExtractText(out, texts[59]), "SpotLight");
+    EXPECT_EQ(ExtractText(out, texts[60]), "Color");
+    EXPECT_EQ(ExtractText(out, texts[67]), "Intensity");
+    EXPECT_EQ(ExtractText(out, texts[68]), "3.500");
+    EXPECT_EQ(ExtractText(out, texts[69]), "Range");
+    EXPECT_EQ(ExtractText(out, texts[70]), "13.000");
+    EXPECT_EQ(ExtractText(out, texts[71]), "Inner Cone Cos");
+    EXPECT_EQ(ExtractText(out, texts[72]), "0.950");
+    EXPECT_EQ(ExtractText(out, texts[73]), "Outer Cone Cos");
+    EXPECT_EQ(ExtractText(out, texts[74]), "0.850");
 
-    EXPECT_EQ(ExtractText(out, texts[78]), "Domain");
-    EXPECT_EQ(ExtractText(out, texts[79]), "Editor");
-    EXPECT_EQ(ExtractText(out, texts[80]), "Fov Y");
-    EXPECT_EQ(ExtractText(out, texts[81]), "0.500");
-    EXPECT_EQ(ExtractText(out, texts[82]), "Aspect");
-    EXPECT_EQ(ExtractText(out, texts[83]), "1.250");
-    EXPECT_EQ(ExtractText(out, texts[84]), "Near Plane");
-    EXPECT_EQ(ExtractText(out, texts[85]), "0.200");
-    EXPECT_EQ(ExtractText(out, texts[86]), "Far Plane");
-    EXPECT_EQ(ExtractText(out, texts[87]), "500.000");
+    EXPECT_EQ(ExtractText(out, texts[76]), "Domain");
+    EXPECT_EQ(ExtractText(out, texts[77]), "Editor");
+    EXPECT_EQ(ExtractText(out, texts[78]), "Fov Y");
+    EXPECT_EQ(ExtractText(out, texts[79]), "0.500");
+    EXPECT_EQ(ExtractText(out, texts[80]), "Aspect");
+    EXPECT_EQ(ExtractText(out, texts[81]), "1.250");
+    EXPECT_EQ(ExtractText(out, texts[82]), "Near Plane");
+    EXPECT_EQ(ExtractText(out, texts[83]), "0.200");
+    EXPECT_EQ(ExtractText(out, texts[84]), "Far Plane");
+    EXPECT_EQ(ExtractText(out, texts[85]), "500.000");
 }
 
 TEST(EntityEditorView, test_field_value_formatting_rules)
@@ -308,7 +310,8 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
 
     Transform transform{};
     transform.translation = virasa::math::Vec3(-0.0f, 1.5f, -0.1f);
-    transform.rotation = virasa::math::Quat(1.0f, -0.0f, 0.25f, -0.5f);
+    transform.rotation = virasa::math::Quat(glm::vec3(
+        glm::radians(0.0f), glm::radians(1.5f), glm::radians(-0.1f)));
     transform.scale = virasa::math::Vec3(2.0f, -0.0f, 3.125f);
     world.AddTransformComponent(entity, transform);
 
@@ -346,44 +349,43 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 88u);
+    ASSERT_EQ(texts.size(), 86u);
 
     EXPECT_EQ(ExtractText(out, texts[5]), "0.000");
     EXPECT_EQ(ExtractText(out, texts[7]), "1.500");
     EXPECT_EQ(ExtractText(out, texts[9]), "-0.100");
-    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
-    EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[16]), "0.250");
-    EXPECT_EQ(ExtractText(out, texts[18]), "-0.500");
-    EXPECT_EQ(ExtractText(out, texts[21]), "2.000");
-    EXPECT_EQ(ExtractText(out, texts[23]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[25]), "3.125");
-    EXPECT_EQ(ExtractText(out, texts[28]), "7");
-    EXPECT_EQ(ExtractText(out, texts[31]), "<none>");
-    EXPECT_EQ(ExtractText(out, texts[35]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[37]), "2.000");
-    EXPECT_EQ(ExtractText(out, texts[39]), "-3.250");
-    EXPECT_EQ(ExtractText(out, texts[42]), "4.000");
-    EXPECT_EQ(ExtractText(out, texts[44]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[46]), "5.500");
-    EXPECT_EQ(ExtractText(out, texts[48]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[52]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[54]), "-1.250");
-    EXPECT_EQ(ExtractText(out, texts[56]), "2.500");
-    EXPECT_EQ(ExtractText(out, texts[58]), "6.000");
-    EXPECT_EQ(ExtractText(out, texts[60]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[12]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[14]), "1.500");
+    EXPECT_EQ(ExtractText(out, texts[16]), "-0.100");
+    EXPECT_EQ(ExtractText(out, texts[19]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[21]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[23]), "3.125");
+    EXPECT_EQ(ExtractText(out, texts[26]), "7");
+    EXPECT_EQ(ExtractText(out, texts[29]), "<none>");
+    EXPECT_EQ(ExtractText(out, texts[33]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[35]), "2.000");
+    EXPECT_EQ(ExtractText(out, texts[37]), "-3.250");
+    EXPECT_EQ(ExtractText(out, texts[40]), "4.000");
+    EXPECT_EQ(ExtractText(out, texts[42]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[44]), "5.500");
+    EXPECT_EQ(ExtractText(out, texts[46]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[50]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[52]), "-1.250");
+    EXPECT_EQ(ExtractText(out, texts[54]), "2.500");
+    EXPECT_EQ(ExtractText(out, texts[56]), "6.000");
+    EXPECT_EQ(ExtractText(out, texts[58]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[62]), "0.000");
     EXPECT_EQ(ExtractText(out, texts[64]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[66]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[68]), "9.000");
-    EXPECT_EQ(ExtractText(out, texts[70]), "1.235");
-    EXPECT_EQ(ExtractText(out, texts[72]), "10.000");
-    EXPECT_EQ(ExtractText(out, texts[74]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[76]), "0.875");
-    EXPECT_EQ(ExtractText(out, texts[79]), "CameraDomain(7)");
-    EXPECT_EQ(ExtractText(out, texts[81]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[83]), "1.778");
-    EXPECT_EQ(ExtractText(out, texts[85]), "0.100");
-    EXPECT_EQ(ExtractText(out, texts[87]), "4294967296.000");
+    EXPECT_EQ(ExtractText(out, texts[66]), "9.000");
+    EXPECT_EQ(ExtractText(out, texts[68]), "1.235");
+    EXPECT_EQ(ExtractText(out, texts[70]), "10.000");
+    EXPECT_EQ(ExtractText(out, texts[72]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[74]), "0.875");
+    EXPECT_EQ(ExtractText(out, texts[77]), "CameraDomain(7)");
+    EXPECT_EQ(ExtractText(out, texts[79]), "0.000");
+    EXPECT_EQ(ExtractText(out, texts[81]), "1.778");
+    EXPECT_EQ(ExtractText(out, texts[83]), "0.100");
+    EXPECT_EQ(ExtractText(out, texts[85]), "4294967296.000");
 }
 
 TEST(EntityEditorView, test_render_with_invalid_entity_draws_background_only)
@@ -446,7 +448,7 @@ TEST(EntityEditorView, test_render_emits_name_row_then_sections_per_present_comp
 
     ASSERT_EQ(out.GetQuads().size(), 1u);
     const auto texts = out.GetTexts();
-    ASSERT_EQ(texts.size(), 43u);
+    ASSERT_EQ(texts.size(), 41u);
 
     EXPECT_EQ(ExtractText(out, texts[0]), "Name");
     EXPECT_EQ(ExtractText(out, texts[1]), "InspectorTarget");
@@ -457,31 +459,30 @@ TEST(EntityEditorView, test_render_emits_name_row_then_sections_per_present_comp
     EXPECT_EQ(ExtractText(out, texts[7]), "2.000");
     EXPECT_EQ(ExtractText(out, texts[9]), "3.000");
     EXPECT_EQ(ExtractText(out, texts[10]), "Rotation");
-    EXPECT_EQ(ExtractText(out, texts[12]), "1.000");
+    EXPECT_EQ(ExtractText(out, texts[12]), "0.000");
     EXPECT_EQ(ExtractText(out, texts[14]), "0.000");
     EXPECT_EQ(ExtractText(out, texts[16]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[18]), "0.000");
-    EXPECT_EQ(ExtractText(out, texts[19]), "Scale");
-    EXPECT_EQ(ExtractText(out, texts[21]), "4.000");
-    EXPECT_EQ(ExtractText(out, texts[23]), "5.000");
-    EXPECT_EQ(ExtractText(out, texts[25]), "6.000");
+    EXPECT_EQ(ExtractText(out, texts[17]), "Scale");
+    EXPECT_EQ(ExtractText(out, texts[19]), "4.000");
+    EXPECT_EQ(ExtractText(out, texts[21]), "5.000");
+    EXPECT_EQ(ExtractText(out, texts[23]), "6.000");
 
-    EXPECT_EQ(ExtractText(out, texts[26]), "Mesh");
-    EXPECT_EQ(ExtractText(out, texts[27]), "Mesh Id");
-    EXPECT_EQ(ExtractText(out, texts[28]), "42");
+    EXPECT_EQ(ExtractText(out, texts[24]), "Mesh");
+    EXPECT_EQ(ExtractText(out, texts[25]), "Mesh Id");
+    EXPECT_EQ(ExtractText(out, texts[26]), "42");
 
-    EXPECT_EQ(ExtractText(out, texts[29]), "Visual");
-    EXPECT_EQ(ExtractText(out, texts[30]), "Material Id");
-    EXPECT_EQ(ExtractText(out, texts[31]), "99");
+    EXPECT_EQ(ExtractText(out, texts[27]), "Visual");
+    EXPECT_EQ(ExtractText(out, texts[28]), "Material Id");
+    EXPECT_EQ(ExtractText(out, texts[29]), "99");
 
-    EXPECT_EQ(ExtractText(out, texts[32]), "Camera");
-    EXPECT_EQ(ExtractText(out, texts[33]), "Domain");
-    EXPECT_EQ(ExtractText(out, texts[34]), "Editor");
-    EXPECT_EQ(ExtractText(out, texts[35]), "Fov Y");
-    EXPECT_EQ(ExtractText(out, texts[36]), "0.500");
-    EXPECT_EQ(ExtractText(out, texts[37]), "Aspect");
-    EXPECT_EQ(ExtractText(out, texts[38]), "1.250");
-    EXPECT_EQ(ExtractText(out, texts[39]), "Near Plane");
+    EXPECT_EQ(ExtractText(out, texts[30]), "Camera");
+    EXPECT_EQ(ExtractText(out, texts[31]), "Domain");
+    EXPECT_EQ(ExtractText(out, texts[32]), "Editor");
+    EXPECT_EQ(ExtractText(out, texts[33]), "Fov Y");
+    EXPECT_EQ(ExtractText(out, texts[34]), "0.500");
+    EXPECT_EQ(ExtractText(out, texts[35]), "Aspect");
+    EXPECT_EQ(ExtractText(out, texts[36]), "1.250");
+    EXPECT_EQ(ExtractText(out, texts[37]), "Near Plane");
 }
 
 TEST(EntityEditorView, test_render_passes_cursor_coordinate_to_panel)
@@ -522,7 +523,7 @@ TEST(EntityEditorView, test_visible_rows_dfs_traversal_excludes_collapsed_field_
     world.AddMeshComponent(entity, MeshComponent{7u});
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
-    ASSERT_EQ(out.GetTexts().size(), 29u);
+    ASSERT_EQ(out.GetTexts().size(), 27u);
 
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.GetCursorRow(), 1u);

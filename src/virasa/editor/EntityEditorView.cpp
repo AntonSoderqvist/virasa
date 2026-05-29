@@ -15,6 +15,12 @@
 #include <string_view>
 #include <vector>
 
+#include <glm/common.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/mat3x3.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/vec3.hpp>
+
 namespace virasa::editor
 {
 
@@ -167,29 +173,20 @@ void AddVec3Row(
 		});
 }
 
-void AddQuatRow(
-	BuiltRows& built,
-		RowDescriptor descriptor,
-		std::string_view caption,
-		std::string_view w,
-		std::string_view x,
-		std::string_view y,
-		std::string_view z)
+glm::vec3 DecomposeQuatToEulerDegreesXYZ(const virasa::math::Quat& q)
 {
-	AddRow(
-		built,
-		descriptor,
-		{
-			EntityEditorPanelCell{EntityEditorCellKind::Label, caption, 0u},
-			EntityEditorPanelCell{EntityEditorCellKind::Label, "W:", 1u},
-			EntityEditorPanelCell{EntityEditorCellKind::Value, w, 2u},
-			EntityEditorPanelCell{EntityEditorCellKind::Label, "X:", 3u},
-			EntityEditorPanelCell{EntityEditorCellKind::Value, x, 4u},
-			EntityEditorPanelCell{EntityEditorCellKind::Label, "Y:", 5u},
-			EntityEditorPanelCell{EntityEditorCellKind::Value, y, 6u},
-			EntityEditorPanelCell{EntityEditorCellKind::Label, "Z:", 7u},
-			EntityEditorPanelCell{EntityEditorCellKind::Value, z, 8u},
-		});
+	const virasa::math::Quat n = glm::normalize(q);
+	const glm::mat3 m = glm::mat3_cast(n);
+	const float x = std::atan2(m[1][2], m[2][2]);
+	const float y = std::asin(std::clamp(-m[0][2], -1.0f, 1.0f));
+	const float z = std::atan2(m[0][1], m[0][0]);
+	return glm::vec3(glm::degrees(x), glm::degrees(y), glm::degrees(z));
+}
+
+virasa::math::Quat ComposeEulerDegreesXYZToQuat(const glm::vec3& degrees)
+{
+	return virasa::math::Quat(glm::vec3(
+		glm::radians(degrees.x), glm::radians(degrees.y), glm::radians(degrees.z)));
 }
 
 void AddSectionRow(BuiltRows& built, uint8_t sectionIndex, std::string_view label)
@@ -366,14 +363,14 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 				AddScratch(built, FormatFloat(transform.translation.x)),
 				AddScratch(built, FormatFloat(transform.translation.y)),
 				AddScratch(built, FormatFloat(transform.translation.z)));
-			AddQuatRow(
+			const glm::vec3 eulerDeg = DecomposeQuatToEulerDegreesXYZ(transform.rotation);
+			AddVec3Row(
 				built,
 				RowDescriptor{RowDescriptor::Kind::TransformRotation, kTransformSection},
 				"Rotation",
-				AddScratch(built, FormatFloat(transform.rotation.w)),
-				AddScratch(built, FormatFloat(transform.rotation.x)),
-				AddScratch(built, FormatFloat(transform.rotation.y)),
-				AddScratch(built, FormatFloat(transform.rotation.z)));
+				AddScratch(built, FormatFloat(eulerDeg.x)),
+				AddScratch(built, FormatFloat(eulerDeg.y)),
+				AddScratch(built, FormatFloat(eulerDeg.z)));
 			AddVec3Row(
 				built,
 				RowDescriptor{RowDescriptor::Kind::TransformScale, kTransformSection},
@@ -624,7 +621,6 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 			case 2u: return 0;
 			case 4u: return 1;
 			case 6u: return 2;
-			case 8u: return 3;
 			default: return -1;
 		}
 	};
@@ -659,14 +655,15 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 				case RowDescriptor::Kind::TransformRotation:
 				{
 					virasa::math::Transform& transform = world.GetTransformComponent(entity);
+					glm::vec3 eulerDeg = DecomposeQuatToEulerDegreesXYZ(transform.rotation);
 					switch (componentIndexFromSlot())
 					{
-						case 0: transform.rotation.w = parsed; break;
-						case 1: transform.rotation.x = parsed; break;
-						case 2: transform.rotation.y = parsed; break;
-						case 3: transform.rotation.z = parsed; break;
+						case 0: eulerDeg.x = parsed; break;
+						case 1: eulerDeg.y = parsed; break;
+						case 2: eulerDeg.z = parsed; break;
 						default: break;
 					}
+					transform.rotation = ComposeEulerDegreesXYZToQuat(eulerDeg);
 					break;
 				}
 				case RowDescriptor::Kind::TransformScale:

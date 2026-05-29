@@ -5,12 +5,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-#include <string>
-#include <string_view>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <string>
+#include <string_view>
 
 #include "virasa/core/Logger.h"
 #include "virasa/ecs/Components.h"
@@ -216,8 +216,7 @@ int EditorApp::Run(int argc, char** argv)
 
 			if (!shouldExit)
 			{
-				virasa::editor::EventResult result =
-					viewManager.HandleEvent(event, world);
+				virasa::editor::EventResult result = viewManager.HandleEvent(event, world);
 				if (result == virasa::editor::EventResult::QuitRequested)
 				{
 					LOG_INFO(logger, "QuitRequested from ViewManager.");
@@ -264,15 +263,22 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		inputState.Update(events);
 
+		float wheelScrollY = 0.0f;
+		for (const auto& event : events)
+		{
+			if (event.type == virasa::EventType::MouseWheel)
+			{
+				wheelScrollY -= event.mouseWheel.scrollY;
+			}
+		}
+
 		// ------------------------------------------------------------------
 		// Step 3: Camera control
 		// ------------------------------------------------------------------
-		if (inputState.IsMouseButtonDown(virasa::MouseButton::Middle))
 		{
-			auto [dx, dy] = inputState.GetMouseDelta();
-
 			const float kRotateSensitivity = 0.005f;
 			const float kPanSensitivity = 0.01f;
+			const float kZoomSensitivity = 0.5f;
 			const float kPitchLimit = glm::radians(89.0f);
 
 			virasa::math::Quat yawQuat =
@@ -281,37 +287,45 @@ int EditorApp::Run(int argc, char** argv)
 				glm::angleAxis(_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
 			virasa::math::Quat orientation = yawQuat * pitchQuat;
 
-			const bool ctrlHeld = inputState.IsKeyDown(virasa::KeyCode::LCtrl) ||
-						    inputState.IsKeyDown(virasa::KeyCode::RCtrl);
-
-			if (ctrlHeld)
+			if (inputState.IsMouseButtonDown(virasa::MouseButton::Middle))
 			{
-				_cameraPosition += (orientation * virasa::math::Vec3(1.0f, 0.0f, 0.0f)) *
-							 (-static_cast<float>(dx) * kPanSensitivity);
-				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, 0.0f, 1.0f)) *
-							 (static_cast<float>(dy) * kPanSensitivity);
-			}
-			else
-			{
-				_cameraYaw -= static_cast<float>(dx) * kRotateSensitivity;
-				_cameraPitch -= static_cast<float>(dy) * kRotateSensitivity;
-				_cameraPitch = std::clamp(_cameraPitch, -kPitchLimit, kPitchLimit);
+				auto [dx, dy] = inputState.GetMouseDelta();
+
+				const bool ctrlHeld = inputState.IsKeyDown(virasa::KeyCode::LCtrl) ||
+							    inputState.IsKeyDown(virasa::KeyCode::RCtrl);
+
+				if (ctrlHeld)
+				{
+					_cameraPosition +=
+						(orientation * virasa::math::Vec3(1.0f, 0.0f, 0.0f)) *
+						(-static_cast<float>(dx) * kPanSensitivity);
+					_cameraPosition +=
+						(orientation * virasa::math::Vec3(0.0f, 0.0f, 1.0f)) *
+						(static_cast<float>(dy) * kPanSensitivity);
+				}
+				else
+				{
+					_cameraYaw -= static_cast<float>(dx) * kRotateSensitivity;
+					_cameraPitch -= static_cast<float>(dy) * kRotateSensitivity;
+					_cameraPitch = std::clamp(_cameraPitch, -kPitchLimit, kPitchLimit);
+
+					yawQuat = glm::angleAxis(
+						_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+					pitchQuat = glm::angleAxis(
+						_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+					orientation = yawQuat * pitchQuat;
+				}
 			}
 
-			// Recompute orientation after potential yaw/pitch change
-			yawQuat = glm::angleAxis(_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
-			pitchQuat = glm::angleAxis(_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
-			orientation = yawQuat * pitchQuat;
+			if (wheelScrollY != 0.0f)
+			{
+				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
+							 (wheelScrollY * kZoomSensitivity);
+			}
 
 			auto& camTransform = world.GetTransformComponent(cameraEntity);
 			camTransform.translation = _cameraPosition;
 			camTransform.rotation = orientation;
-		}
-		else
-		{
-			// Still update translation in case position changed elsewhere
-			auto& camTransform = world.GetTransformComponent(cameraEntity);
-			camTransform.translation = _cameraPosition;
 		}
 
 		// ------------------------------------------------------------------

@@ -786,9 +786,14 @@ uint32_t SceneRenderer::RenderWorld(
 					const auto& visualComp = world.GetVisualComponent(entity);
 
 					virasa::math::Mat4 model(1.0f);
-					if (world.HasTransformComponent(entity))
+					for (virasa::ecs::Entity node = entity;
+						node != virasa::ecs::Entity::Invalid();
+						node = world.GetParent(node))
 					{
-						model = world.GetTransformComponent(entity).ToMatrix();
+						if (world.HasTransformComponent(node))
+						{
+							model = world.GetTransformComponent(node).ToMatrix() * model;
+						}
 					}
 
 					const virasa::math::Mat4 mvp = capturedProj * capturedView * model;
