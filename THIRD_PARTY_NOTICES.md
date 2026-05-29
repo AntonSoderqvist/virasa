@@ -63,6 +63,60 @@ Full license text: see `vendor/freetype/docs/FTL.TXT`.
 
 ---
 
+## stb_image
+
+- Source: https://github.com/nothings/stb
+- License: Public Domain (or MIT, at user's option) — dual-licensed per
+  the notice in `stb_image.h`.
+- Location: `vendor/stb/` (single-header: `stb_image.h`)
+
+License text is reproduced at the bottom of `vendor/stb/stb_image.h`.
+
+---
+
+## tinygltf
+
+- Source: https://github.com/syoyo/tinygltf
+- License: MIT
+- Location: `vendor/tinygltf/` (`tiny_gltf.h`, `tinygltf_impl.cpp`)
+
+The implementation TU is compiled with `TINYGLTF_NO_STB_IMAGE`,
+`TINYGLTF_NO_STB_IMAGE_WRITE`, and `TINYGLTF_NO_EXTERNAL_IMAGE`; image
+decoding is performed by Virasa's `editor.io.ImageLoader` via the
+separately vendored stb_image.
+
+License text is reproduced at the top of `vendor/tinygltf/tiny_gltf.h`.
+
+---
+
+## nlohmann/json
+
+- Source: https://github.com/nlohmann/json
+- License: MIT
+- Location: `vendor/tinygltf/json.hpp` (bundled inside tinygltf as the
+  single-header `json.hpp`; not vendored separately).
+
+License text is reproduced at the top of `vendor/tinygltf/json.hpp`.
+
+---
+
+## MikkTSpace
+
+- Source: http://www.mikktspace.com/
+  (reference implementation by Morten S. Mikkelsen)
+- License: zlib-style permissive license (see header).
+- Location: `vendor/mikktspace/` (`mikktspace.c`, `mikktspace.h`)
+
+Required attribution:
+
+> Copyright (C) 2011 by Morten S. Mikkelsen. Provided 'as-is', without
+> any express or implied warranty.
+
+Full license text: see the header block at the top of
+`vendor/mikktspace/mikktspace.h`.
+
+---
+
 ## JetBrains Mono
 
 - Source: https://github.com/JetBrains/JetBrainsMono
