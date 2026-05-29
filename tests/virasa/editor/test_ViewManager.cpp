@@ -12,6 +12,8 @@
 #include "virasa/window/Events.h"
 
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <type_traits>
 
 using namespace virasa::editor;
@@ -52,6 +54,14 @@ virasa::Event MakeUnknownEvent()
 	virasa::Event ev;
 	ev.type = virasa::EventType::Quit;
 	return ev;
+}
+
+std::string GetTextCommandText(const virasa::ui::DrawList& drawList, std::size_t index)
+{
+	const auto texts = drawList.GetTexts();
+	const auto buffer = drawList.GetTextBuffer();
+	const auto& command = texts[index];
+	return std::string(buffer.substr(command.textOffset, command.textLength));
 }
 
 } // namespace
@@ -129,6 +139,7 @@ TEST(ViewManager, test_event_result_enum_values_in_declared_order)
 
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::Consumed), uint8_t{0});
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::QuitRequested), uint8_t{1});
+	EXPECT_EQ(static_cast<uint8_t>(EventResult::LoadModelRequested), uint8_t{2});
 }
 
 // ===========================================================================
@@ -154,6 +165,38 @@ TEST(ViewManager, test_get_right_panel_mode_returns_current_mode)
 	EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 
 	static_assert(std::is_same_v<decltype(vm.GetRightPanelMode()), RightPanelMode>);
+}
+
+// ===========================================================================
+// get_pending_load_path_returns_last_load_request
+// ===========================================================================
+TEST(ViewManager, test_get_pending_load_path_returns_last_load_request)
+{
+	virasa::ecs::World world;
+	ViewManager vm;
+
+	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+
+	vm.GetCommandBarView().SetText(":load first.glb");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::LoadModelRequested);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "first.glb");
+
+	const std::string_view firstView = vm.GetPendingLoadPath();
+	EXPECT_EQ(vm.HandleEvent(MakeUnknownEvent(), world), EventResult::Consumed);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "first.glb");
+	EXPECT_EQ(firstView, "first.glb");
+
+	virasa::ui::DrawList drawList;
+	virasa::ui::FontAtlas atlas;
+	vm.Render(drawList, world, atlas, 320u, 200u);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "first.glb");
+	EXPECT_EQ(firstView, "first.glb");
+
+	vm.GetCommandBarView().SetText(":load second.glb");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::LoadModelRequested);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "second.glb");
 }
 
 // ===========================================================================
@@ -373,6 +416,7 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 		EXPECT_TRUE(vm.GetCommandBarView().GetText().empty());
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
 	}
 
 	{
@@ -441,6 +485,19 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 
 	{
 		ViewManager vm;
+		vm.GetCommandBarView().SetText(":ide");
+		ASSERT_EQ(vm.HandleEvent(enterEv, world), EventResult::Consumed);
+		ASSERT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
+		ASSERT_EQ(vm.GetFocus(), Focus::Editor);
+		vm.GetCommandBarView().SetText(":load model_a.glb");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadModelRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "model_a.glb");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
 		vm.GetCommandBarView().SetText("seed");
 		EXPECT_EQ(vm.HandleEvent(MakeTextEvent("x"), world), EventResult::Consumed);
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
@@ -464,29 +521,63 @@ TEST(ViewManager, test_render_lays_out_views_and_delegates)
 	const uint32_t kWidth = 800u;
 	const uint32_t kHeight = 600u;
 
+	ViewManager vm;
+	const float barHeight = atlas.GetAscender() - atlas.GetDescender() +
+		2.0f * vm.GetCommandBarView().GetPanel().GetConfig().paddingY;
+	const float expectedPanelHeight = std::max(0.0f, static_cast<float>(kHeight) - barHeight);
+	const float expectedHierarchyHeight = std::floor(expectedPanelHeight * 0.5f);
+	const float expectedEntityEditorY = expectedHierarchyHeight;
+	const float expectedEntityEditorHeight = expectedPanelHeight - expectedHierarchyHeight;
+
+	vm.Render(drawList, world, atlas, kWidth, kHeight);
+	EXPECT_EQ(drawList.GetImageQuads().size(), std::size_t{0});
+	ASSERT_GE(drawList.GetQuads().size(), std::size_t{1});
+	EXPECT_EQ(drawList.GetQuads()[0].x, 0.0f);
+	EXPECT_EQ(drawList.GetQuads()[0].y, static_cast<float>(kHeight) - barHeight);
+	EXPECT_EQ(drawList.GetQuads()[0].width, static_cast<float>(kWidth));
+	EXPECT_EQ(drawList.GetQuads()[0].height, barHeight);
+	const std::size_t closedQuadCount = drawList.GetQuads().size();
+	drawList.Clear();
+
+	vm.GetCommandBarView().SetText(":ide");
+	ASSERT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world), EventResult::Consumed);
+	vm.Render(drawList, world, atlas, kWidth, kHeight);
+	EXPECT_EQ(drawList.GetImageQuads().size(), std::size_t{0});
+	EXPECT_GT(drawList.GetQuads().size(), closedQuadCount);
+	ASSERT_GE(drawList.GetQuads().size(), std::size_t{2});
+	EXPECT_EQ(drawList.GetQuads()[0].x, static_cast<float>(kWidth / 2u));
+	EXPECT_EQ(drawList.GetQuads()[0].y, 0.0f);
+	EXPECT_EQ(drawList.GetQuads()[0].width, static_cast<float>(kWidth - (kWidth / 2u)));
+	EXPECT_EQ(drawList.GetQuads()[0].height, expectedPanelHeight);
+	EXPECT_EQ(drawList.GetQuads().back().x, 0.0f);
+	EXPECT_EQ(drawList.GetQuads().back().y, static_cast<float>(kHeight) - barHeight);
+	drawList.Clear();
+
+	vm.HandleEvent(MakeTextEvent(":"), world);
+	vm.GetCommandBarView().SetText(":tree");
+	ASSERT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world), EventResult::Consumed);
+	vm.Render(drawList, world, atlas, kWidth, kHeight);
+	EXPECT_EQ(drawList.GetImageQuads().size(), std::size_t{0});
+	ASSERT_GE(drawList.GetQuads().size(), std::size_t{3});
+	EXPECT_EQ(drawList.GetQuads()[0].x, static_cast<float>(kWidth / 2u));
+	EXPECT_EQ(drawList.GetQuads()[0].y, 0.0f);
+	EXPECT_EQ(drawList.GetQuads()[0].width, static_cast<float>(kWidth - (kWidth / 2u)));
+	EXPECT_EQ(drawList.GetQuads()[0].height, expectedHierarchyHeight);
+	EXPECT_EQ(drawList.GetQuads()[1].x, static_cast<float>(kWidth / 2u));
+	EXPECT_EQ(drawList.GetQuads()[1].y, expectedEntityEditorY);
+	EXPECT_EQ(drawList.GetQuads()[1].width, static_cast<float>(kWidth - (kWidth / 2u)));
+	EXPECT_EQ(drawList.GetQuads()[1].height, expectedEntityEditorHeight);
+	EXPECT_EQ(drawList.GetQuads().back().x, 0.0f);
+	EXPECT_EQ(drawList.GetQuads().back().y, static_cast<float>(kHeight) - barHeight);
+
+	bool foundEntityName = false;
+	for (std::size_t i = 0; i < drawList.GetTexts().size(); ++i)
 	{
-		ViewManager vm;
-		vm.Render(drawList, world, atlas, kWidth, kHeight);
-		EXPECT_FALSE(drawList.GetQuads().empty());
-		EXPECT_EQ(drawList.GetImageQuads().size(), std::size_t{0});
-		const std::size_t closedQuadCount = drawList.GetQuads().size();
-		const std::size_t closedTextCount = drawList.GetTexts().size();
-		EXPECT_GE(closedQuadCount, std::size_t{1});
-		EXPECT_GE(closedTextCount, std::size_t{0});
-		drawList.Clear();
-
-		vm.GetCommandBarView().SetText(":ide");
-		ASSERT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world), EventResult::Consumed);
-		vm.Render(drawList, world, atlas, kWidth, kHeight);
-		EXPECT_GT(drawList.GetQuads().size(), closedQuadCount);
-		EXPECT_GE(drawList.GetTexts().size(), closedTextCount);
-		drawList.Clear();
-
-		vm.HandleEvent(MakeTextEvent(":"), world);
-		vm.GetCommandBarView().SetText(":tree");
-		ASSERT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world), EventResult::Consumed);
-		vm.Render(drawList, world, atlas, kWidth, kHeight);
-		EXPECT_GE(drawList.GetQuads().size(), std::size_t{3});
-		EXPECT_GE(drawList.GetTexts().size(), std::size_t{1});
+		if (GetTextCommandText(drawList, i) == "RenderEntity")
+		{
+			foundEntityName = true;
+			break;
+		}
 	}
+	EXPECT_TRUE(foundEntityName);
 }

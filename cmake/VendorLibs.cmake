@@ -27,14 +27,20 @@ if(NOT EXISTS "${_TINYGLTF_DIR}/tiny_gltf.h")
         "Place tiny_gltf.h (and its bundled json.hpp) under vendor/tinygltf/ "
         "before configuring.")
 endif()
-add_library(virasa_vendor_tinygltf INTERFACE)
-target_include_directories(virasa_vendor_tinygltf INTERFACE "${_TINYGLTF_DIR}")
+# tinygltf is shipped as a single header; we compile its implementation in a
+# dedicated TU here so consumers only see declarations.
+add_library(virasa_vendor_tinygltf STATIC "${_TINYGLTF_DIR}/tinygltf_impl.cpp")
+target_include_directories(virasa_vendor_tinygltf PUBLIC "${_TINYGLTF_DIR}")
 # tinygltf decodes images via stb_image; disable its own decoder so the
-# editor.io.ImageLoader path is the single decode site.
-target_compile_definitions(virasa_vendor_tinygltf INTERFACE
+# editor.io.ImageLoader path is the single decode site. PUBLIC so the impl TU
+# and downstream consumers agree on the configured surface.
+target_compile_definitions(virasa_vendor_tinygltf PUBLIC
     TINYGLTF_NO_STB_IMAGE
     TINYGLTF_NO_STB_IMAGE_WRITE
     TINYGLTF_NO_EXTERNAL_IMAGE
+)
+set_target_properties(virasa_vendor_tinygltf PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # --- MikkTSpace (C source + header) ---------------------------------------

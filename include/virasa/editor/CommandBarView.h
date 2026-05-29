@@ -30,11 +30,12 @@ enum class CommandBarKeyResult : uint8_t
 /**
  * @brief Result returned by Submit() after parsing the command line.
  *
- * None     - no known command matched; leave state unchanged.
+ * None          - no known command matched; leave state unchanged.
  * OpenEditor    - ":ide" command; open (or toggle) the editor view.
  * OpenHierarchy - ":tree" command; open (or toggle) the hierarchy view.
- * Close    - empty command (":"); close the right panel.
- * Quit     - ":q" command; begin application shutdown.
+ * Close         - empty command ("" or ":"); close the right panel.
+ * Quit          - ":q" command; begin application shutdown.
+ * LoadModel     - ":load <path>" command; load the submitted model path.
  */
 enum class CommandResult : uint8_t
 {
@@ -42,7 +43,8 @@ enum class CommandResult : uint8_t
 	OpenEditor,
 	OpenHierarchy,
 	Close,
-	Quit
+	Quit,
+	LoadModel
 };
 
 /**
@@ -52,6 +54,7 @@ enum class CommandResult : uint8_t
  * CommandBarView is a final class that holds:
  *   - a virasa::ui::CommandBar (_panel) for stateless rendering,
  *   - a std::string (_text) for the UTF-8 bytes being edited,
+ *   - a std::string (_argument) for the most recently submitted argument,
  *   - a std::size_t (_cursorByte) for the byte-offset insertion cursor.
  *
  * It has no Vulkan or ECS dependency and owns no external resources.
@@ -81,7 +84,13 @@ public:
 	[[nodiscard]] std::size_t GetCursorByte() const noexcept;
 
 	/**
-	 * @brief Empties the text buffer and resets the cursor to 0.
+	 * @brief Returns a view over the most recently submitted argument.
+	 * @return std::string_view valid until the next mutating operation.
+	 */
+	[[nodiscard]] std::string_view GetSubmittedArgument() const noexcept;
+
+	/**
+	 * @brief Empties the text buffer, submitted argument, and resets the cursor to 0.
 	 */
 	void Clear() noexcept;
 
@@ -109,10 +118,12 @@ public:
 	/**
 	 * @brief Parses the current text buffer and returns the matching command.
 	 *
-	 * Clears the text buffer and resets the cursor after parsing.
+	 * Clears the text buffer and resets the cursor after parsing. When the
+	 * parsed command is ":load <path>", stores the submitted path in the
+	 * internal argument buffer.
 	 * @return The CommandResult corresponding to the current text.
 	 */
-	CommandResult Submit() noexcept;
+	CommandResult Submit();
 
 	/**
 	 * @brief Delegates rendering to the owned CommandBar.
@@ -142,6 +153,7 @@ public:
 private:
 	virasa::ui::CommandBar _panel = {};
 	std::string _text = {};
+	std::string _argument = {};
 	std::size_t _cursorByte = 0u;
 };
 

@@ -2,6 +2,8 @@
 #define VIRASA_EDITOR_VIEWMANAGER_H
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include "virasa/editor/CommandBarView.h"
 #include "virasa/editor/EditorView.h"
 #include "virasa/editor/EntityEditorView.h"
@@ -41,7 +43,8 @@ enum class RightPanelMode : uint8_t
 enum class EventResult : uint8_t
 {
 	Consumed,
-	QuitRequested
+	QuitRequested,
+	LoadModelRequested
 };
 
 /**
@@ -124,10 +127,16 @@ public:
 	[[nodiscard]] const virasa::editor::EntityEditorView& GetEntityEditorView() const noexcept;
 
 	/**
+	 * @brief Returns a string_view over the path of the most recently requested GLB load.
+	 * @return A string_view over _pendingLoadPath; empty if no load has been requested.
+	 */
+	[[nodiscard]] std::string_view GetPendingLoadPath() const noexcept;
+
+	/**
 	 * @brief Dispatches an input event to the focused view and processes the result.
 	 * @param event The input event to handle.
 	 * @param world The current ECS world (passed through to views that need it).
-	 * @return EventResult::QuitRequested if a ':q' command was submitted, EventResult::Consumed otherwise.
+	 * @return EventResult::QuitRequested if ':q' was submitted, EventResult::LoadModelRequested if ':load <path>' was submitted, EventResult::Consumed otherwise.
 	 */
 	EventResult HandleEvent(const virasa::Event& event, const virasa::ecs::World& world);
 
@@ -148,7 +157,7 @@ public:
 	);
 
 private:
-	[[nodiscard]] EventResult ApplyCommandResult(CommandResult cmd) noexcept;
+	[[nodiscard]] EventResult ApplyCommandResult(CommandResult cmd);
 
 	virasa::editor::CommandBarView _commandBarView = {};
 	virasa::editor::EditorView _editorView = {};
@@ -156,6 +165,7 @@ private:
 	virasa::editor::EntityEditorView _entityEditorView = {};
 	Focus _focus = Focus::CommandBar;
 	RightPanelMode _rightPanelMode = RightPanelMode::Closed;
+	std::string _pendingLoadPath = {};
 };
 
 } // namespace virasa::editor

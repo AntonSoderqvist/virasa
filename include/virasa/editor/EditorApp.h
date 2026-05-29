@@ -1,8 +1,9 @@
 #ifndef VIRASA_EDITOR_EDITORAPP_H
 #define VIRASA_EDITOR_EDITORAPP_H
 
-#include "virasa/math/Types.h"
 #include <cstdint>
+
+#include "virasa/math/Types.h"
 
 namespace virasa::editor
 {

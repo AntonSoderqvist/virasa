@@ -4,19 +4,26 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <string_view>
+#include <glm/common.hpp>
+#include <glm/ext/scalar_constants.hpp>
+#include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/quaternion.hpp>
 
 #include "virasa/core/Logger.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/ecs/Types.h"
 #include "virasa/ecs/World.h"
 #include "virasa/editor/ViewManager.h"
+#include "virasa/editor/io/GltfLoader.h"
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/scene/SceneRenderer.h"
+#include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
 #include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
@@ -209,11 +216,34 @@ int EditorApp::Run(int argc, char** argv)
 
 			if (!shouldExit)
 			{
-				if (viewManager.HandleEvent(event, world) ==
-					virasa::editor::EventResult::QuitRequested)
+				virasa::editor::EventResult result =
+					viewManager.HandleEvent(event, world);
+				if (result == virasa::editor::EventResult::QuitRequested)
 				{
 					LOG_INFO(logger, "QuitRequested from ViewManager.");
 					shouldExit = true;
+				}
+				else if (result == virasa::editor::EventResult::LoadModelRequested)
+				{
+					std::string_view path = viewManager.GetPendingLoadPath();
+					std::string resolved(path);
+					if (!resolved.empty() && resolved.front() == '~' &&
+						(resolved.size() == 1u || resolved[1] == '/'))
+					{
+						if (const char* home = std::getenv("HOME"))
+						{
+							resolved.replace(0u, 1u, home);
+						}
+					}
+					virasa::editor::io::GltfLoadResult loadResult =
+						virasa::editor::io::LoadGlb(resolved, world, sceneRenderer);
+					if (loadResult.error != virasa::editor::io::GltfLoadError::None)
+					{
+						LOG_ERROR(logger,
+							"LoadGlb failed for '{}' with error {}.",
+							resolved,
+							static_cast<uint32_t>(loadResult.error));
+					}
 				}
 			}
 

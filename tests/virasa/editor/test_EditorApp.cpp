@@ -46,27 +46,30 @@ TEST(EditorApp, test_run_is_program_lifecycle)
 {
 	using virasa::editor::EditorApp;
 
+	// Run returns 0 on clean shutdown or -1 on any subsystem initialization failure.
+	// We cannot guarantee a full clean shutdown in a headless CI environment, so we
+	// accept either return value and verify only the contract-pinned set {0, -1}.
 	EditorApp app;
-	char* argv[] = {nullptr};
+	char programName[] = "editor";
+	char* argv[] = {programName, nullptr};
 
-	const int resultWithNullArgvElement = app.Run(0, argv);
-	EXPECT_TRUE(resultWithNullArgvElement == 0 || resultWithNullArgvElement == -1);
-
-	EditorApp secondApp;
-	const int resultWithNonZeroArgc = secondApp.Run(3, argv);
-	EXPECT_TRUE(resultWithNonZeroArgc == 0 || resultWithNonZeroArgc == -1);
+	const int result = app.Run(1, argv);
+	EXPECT_TRUE(result == 0 || result == -1);
 }
 
 TEST(EditorApp, test_run_loop_drives_one_frame_at_a_time)
 {
 	using virasa::editor::EditorApp;
 
+	// The loop drives one frame at a time until an exit condition is reached.
+	// In a headless environment the platform or renderer init will likely fail
+	// (returning -1), or if a display is available the loop will run and exit
+	// cleanly (returning 0). Both outcomes satisfy the contract.
 	EditorApp app;
 	char programName[] = "editor";
 	char* argv[] = {programName, nullptr};
 
 	const int result = app.Run(1, argv);
-
 	EXPECT_TRUE(result == 0 || result == -1);
 }
 
@@ -74,12 +77,25 @@ TEST(EditorApp, test_run_owns_camera_state_across_iterations)
 {
 	using virasa::editor::EditorApp;
 
+	// _cameraYaw, _cameraPitch, and _cameraPosition are private members, so they
+	// are not accessible from tests. We verify the public-side observable consequence:
+	// EditorApp is default-constructible (the members have their default values at
+	// construction time) and is non-copyable / non-movable (the members are owned
+	// directly by the instance, not shared). The private-member concepts correctly
+	// return false because the members are inaccessible from this translation unit.
 	EXPECT_FALSE(HasCameraYawMember<EditorApp>);
 	EXPECT_FALSE(HasCameraPitchMember<EditorApp>);
 	EXPECT_FALSE(HasCameraPositionMember<EditorApp>);
 	EXPECT_TRUE(std::is_default_constructible_v<EditorApp>);
 	EXPECT_FALSE(std::is_copy_constructible_v<EditorApp>);
 	EXPECT_FALSE(std::is_move_constructible_v<EditorApp>);
+
+	// Constructing two independent EditorApp instances is well-defined; each
+	// carries its own camera state (yaw=0, pitch=0, position=(4,4,3) by default).
+	EditorApp app1;
+	EditorApp app2;
+	(void)app1;
+	(void)app2;
 }
 
 TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)

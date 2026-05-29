@@ -27,25 +27,52 @@ TEST(CommandBarView, test_command_bar_view_owns_panel_text_and_cursor)
 
 	CommandBarView view;
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText("abc");
 	EXPECT_EQ(view.GetText(), std::string_view("abc"));
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 3u);
+
+	view.SetText("");
+	EXPECT_EQ(view.GetCursorByte(), 1u);
+	ASSERT_LT(view.GetCursorByte(), view.GetText().size() + 1u);
+	if (view.GetCursorByte() != 0u && view.GetCursorByte() != view.GetText().size())
+	{
+		EXPECT_NE((static_cast<unsigned char>(view.GetText()[view.GetCursorByte()]) & 0xC0u), 0x80u);
+	}
+
+	view.SetText("\x80");
+	EXPECT_EQ(view.GetCursorByte(), 2u);
+
+	view.SetText("\x80\x81");
 	EXPECT_EQ(view.GetCursorByte(), 3u);
 
 	CommandBarView copied = view;
-	EXPECT_EQ(copied.GetText(), std::string_view("abc"));
+	EXPECT_EQ(copied.GetText(), std::string_view("\x80\x81", 3));
+	EXPECT_TRUE(copied.GetSubmittedArgument().empty());
 	EXPECT_EQ(copied.GetCursorByte(), 3u);
+
+	view.SetText(":load model.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("model.glb"));
+
+	copied = view;
+	EXPECT_TRUE(copied.GetText().empty());
+	EXPECT_EQ(copied.GetSubmittedArgument(), std::string_view("model.glb"));
+	EXPECT_EQ(copied.GetCursorByte(), 0u);
 
 	view.Clear();
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
-	EXPECT_EQ(copied.GetText(), std::string_view("abc"));
-	EXPECT_EQ(copied.GetCursorByte(), 3u);
+	EXPECT_EQ(copied.GetSubmittedArgument(), std::string_view("model.glb"));
 
 	CommandBarView moved = std::move(copied);
-	EXPECT_EQ(moved.GetText(), std::string_view("abc"));
-	EXPECT_EQ(moved.GetCursorByte(), 3u);
+	EXPECT_TRUE(moved.GetText().empty());
+	EXPECT_EQ(moved.GetSubmittedArgument(), std::string_view("model.glb"));
+	EXPECT_EQ(moved.GetCursorByte(), 0u);
 }
 
 TEST(CommandBarView, test_command_bar_key_result_enum_values_in_declared_order)
@@ -67,6 +94,7 @@ TEST(CommandBarView, test_command_result_enum_values_in_declared_order)
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::OpenHierarchy), 2u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Close), 3u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Quit), 4u);
+	EXPECT_EQ(static_cast<uint8_t>(CommandResult::LoadModel), 5u);
 }
 
 TEST(CommandBarView, test_get_text_returns_internal_byte_view)
@@ -95,9 +123,33 @@ TEST(CommandBarView, test_get_cursor_byte_returns_current_offset)
 	EXPECT_LE(view.GetCursorByte(), view.GetText().size());
 }
 
+TEST(CommandBarView, test_get_submitted_argument_returns_last_argument)
+{
+	virasa::editor::CommandBarView view;
+
+	const std::string_view initial = view.GetSubmittedArgument();
+	EXPECT_TRUE(initial.empty());
+	EXPECT_EQ(initial.data(), view.GetSubmittedArgument().data());
+	EXPECT_NO_THROW(static_cast<void>(view.GetSubmittedArgument()));
+
+	view.SetText(":load assets/model.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+
+	const std::string_view argument = view.GetSubmittedArgument();
+	EXPECT_EQ(argument, std::string_view("assets/model.glb"));
+	EXPECT_EQ(argument.data(), view.GetSubmittedArgument().data());
+
+	view.SetText(":q");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::Quit);
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+}
+
 TEST(CommandBarView, test_clear_resets_text_and_cursor)
 {
 	virasa::editor::CommandBarView view;
+	view.SetText(":load command.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("command.glb"));
 	view.SetText("command");
 
 	virasa::ui::CommandBarConfig config;
@@ -107,6 +159,7 @@ TEST(CommandBarView, test_clear_resets_text_and_cursor)
 	view.Clear();
 
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 	EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().paddingX, 17.0f);
 }
@@ -115,12 +168,17 @@ TEST(CommandBarView, test_set_text_replaces_text_and_places_cursor_at_end)
 {
 	virasa::editor::CommandBarView view;
 
+	view.SetText(":load old.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("old.glb"));
+
 	view.SetText("old");
 	view.SetText(std::string_view("a\0b", 3));
 
 	EXPECT_EQ(view.GetText().size(), 3u);
 	EXPECT_EQ(view.GetText(), std::string_view("a\0b", 3));
 	EXPECT_EQ(view.GetCursorByte(), 3u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("old.glb"));
 }
 
 TEST(CommandBarView, test_get_panel_returns_underlying_command_bar)
@@ -150,10 +208,14 @@ TEST(CommandBarView, test_handle_key_dispatches_non_printable_keys)
 	using virasa::editor::CommandBarView;
 
 	CommandBarView view;
+	view.SetText(":load keep.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	EXPECT_EQ(view.HandleKey(KeyCode::A), CommandBarKeyResult::Consumed);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	view.SetText("A\xC3\xA9" "B");
 	EXPECT_EQ(view.GetCursorByte(), 4u);
@@ -161,26 +223,32 @@ TEST(CommandBarView, test_handle_key_dispatches_non_printable_keys)
 	EXPECT_EQ(view.HandleKey(KeyCode::Backspace), CommandBarKeyResult::Consumed);
 	EXPECT_EQ(view.GetText(), std::string_view("A\xC3\xA9"));
 	EXPECT_EQ(view.GetCursorByte(), 3u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	EXPECT_EQ(view.HandleKey(KeyCode::Backspace), CommandBarKeyResult::Consumed);
 	EXPECT_EQ(view.GetText(), std::string_view("A"));
 	EXPECT_EQ(view.GetCursorByte(), 1u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	EXPECT_EQ(view.HandleKey(KeyCode::Backspace), CommandBarKeyResult::Consumed);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	EXPECT_EQ(view.HandleKey(KeyCode::Backspace), CommandBarKeyResult::Consumed);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	view.SetText(":q");
 	EXPECT_EQ(view.HandleKey(KeyCode::Enter), CommandBarKeyResult::Submitted);
 	EXPECT_EQ(view.GetText(), std::string_view(":q"));
 	EXPECT_EQ(view.GetCursorByte(), 2u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("keep.glb"));
 
 	EXPECT_EQ(view.HandleKey(KeyCode::Escape), CommandBarKeyResult::Consumed);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 }
 
@@ -189,15 +257,20 @@ TEST(CommandBarView, test_handle_text_input_inserts_bytes_at_cursor)
 	using virasa::editor::CommandBarKeyResult;
 
 	virasa::editor::CommandBarView view;
+	view.SetText(":load arg.glb");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::LoadModel);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("arg.glb"));
 
 	EXPECT_EQ(view.HandleTextInput(""), CommandBarKeyResult::Consumed);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("arg.glb"));
 
 	view.SetText("ab");
 	EXPECT_EQ(view.HandleTextInput(std::string_view("\0x", 2)), CommandBarKeyResult::Consumed);
 	EXPECT_EQ(view.GetText(), std::string_view("ab\0x", 4));
 	EXPECT_EQ(view.GetCursorByte(), 4u);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("arg.glb"));
 }
 
 TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
@@ -209,26 +282,43 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 
 	EXPECT_EQ(view.Submit(), CommandResult::Close);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText(":");
 	EXPECT_EQ(view.Submit(), CommandResult::Close);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText(":ide");
 	EXPECT_EQ(view.Submit(), CommandResult::OpenEditor);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText(":tree");
 	EXPECT_EQ(view.Submit(), CommandResult::OpenHierarchy);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText(":q");
 	EXPECT_EQ(view.Submit(), CommandResult::Quit);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
+	view.SetText(":load scene.glb");
+	EXPECT_EQ(view.Submit(), CommandResult::LoadModel);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("scene.glb"));
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
+	view.SetText(":load ");
+	EXPECT_EQ(view.Submit(), CommandResult::None);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	virasa::ui::CommandBarConfig config;
@@ -237,6 +327,7 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 	view.SetText(":IDE");
 	EXPECT_EQ(view.Submit(), CommandResult::None);
 	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 	EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().paddingX, 23.0f);
 }

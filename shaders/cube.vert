@@ -3,10 +3,12 @@
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-// Matches virasa::Vertex { vec3 position; vec3 normal; vec2 uv; }
+// Matches virasa::Vertex { vec3 position; vec3 normal; vec4 tangent; vec2 uv; }
+// (48 bytes, scalar layout — offsets: pos=0, normal=12, tangent=24, uv=40)
 struct Vertex {
     vec3 position;
     vec3 normal;
+    vec4 tangent;
     vec2 uv;
 };
 

@@ -352,18 +352,26 @@ template <typename T>
 	const auto uvIt = primitive.attributes.find("TEXCOORD_0");
 	const auto tangentIt = primitive.attributes.find("TANGENT");
 
-	if (positionIt == primitive.attributes.end() || normalIt == primitive.attributes.end() ||
-		uvIt == primitive.attributes.end() || primitive.indices < 0)
+	if (positionIt == primitive.attributes.end())
 	{
+		QUILL_LOG_ERROR(GetEditorLogger(),
+			"BuildMeshData: primitive missing POSITION attribute");
 		return meshData;
 	}
-
+	if (normalIt == primitive.attributes.end())
+	{
+		QUILL_LOG_ERROR(GetEditorLogger(),
+			"BuildMeshData: primitive missing NORMAL attribute");
+		return meshData;
+	}
 	const tinygltf::Accessor& positionAccessor =
 		model.accessors[static_cast<std::size_t>(positionIt->second)];
 	const tinygltf::Accessor& normalAccessor =
 		model.accessors[static_cast<std::size_t>(normalIt->second)];
-	const tinygltf::Accessor& uvAccessor =
-		model.accessors[static_cast<std::size_t>(uvIt->second)];
+	const tinygltf::Accessor* uvAccessor =
+		uvIt != primitive.attributes.end()
+			? &model.accessors[static_cast<std::size_t>(uvIt->second)]
+			: nullptr;
 	const tinygltf::Accessor* tangentAccessor = nullptr;
 	if (tangentIt != primitive.attributes.end())
 	{
@@ -377,8 +385,10 @@ template <typename T>
 		GetAccessorData<std::byte>(model, positionAccessor));
 	const unsigned char* normalBytes = reinterpret_cast<const unsigned char*>(
 		GetAccessorData<std::byte>(model, normalAccessor));
-	const unsigned char* uvBytes =
-		reinterpret_cast<const unsigned char*>(GetAccessorData<std::byte>(model, uvAccessor));
+	const unsigned char* uvBytes = uvAccessor != nullptr
+		? reinterpret_cast<const unsigned char*>(
+			  GetAccessorData<std::byte>(model, *uvAccessor))
+		: nullptr;
 	const unsigned char* tangentBytes =
 		tangentAccessor != nullptr ? reinterpret_cast<const unsigned char*>(
 							     GetAccessorData<std::byte>(model, *tangentAccessor))
@@ -386,7 +396,8 @@ template <typename T>
 
 	const std::size_t positionStride = GetAccessorStride(model, positionAccessor);
 	const std::size_t normalStride = GetAccessorStride(model, normalAccessor);
-	const std::size_t uvStride = GetAccessorStride(model, uvAccessor);
+	const std::size_t uvStride =
+		uvAccessor != nullptr ? GetAccessorStride(model, *uvAccessor) : 0;
 	const std::size_t tangentStride =
 		tangentAccessor != nullptr ? GetAccessorStride(model, *tangentAccessor) : 0;
 
@@ -395,12 +406,19 @@ template <typename T>
 		const float* position =
 			reinterpret_cast<const float*>(positionBytes + i * positionStride);
 		const float* normal = reinterpret_cast<const float*>(normalBytes + i * normalStride);
-		const float* uv = reinterpret_cast<const float*>(uvBytes + i * uvStride);
 
 		meshData.vertices[i].position =
 			virasa::math::Vec3(position[0], position[1], position[2]);
 		meshData.vertices[i].normal = virasa::math::Vec3(normal[0], normal[1], normal[2]);
-		meshData.vertices[i].uv = virasa::math::Vec2(uv[0], uv[1]);
+		if (uvBytes != nullptr)
+		{
+			const float* uv = reinterpret_cast<const float*>(uvBytes + i * uvStride);
+			meshData.vertices[i].uv = virasa::math::Vec2(uv[0], uv[1]);
+		}
+		else
+		{
+			meshData.vertices[i].uv = virasa::math::Vec2(0.0f, 0.0f);
+		}
 
 		if (tangentBytes != nullptr)
 		{
@@ -411,30 +429,44 @@ template <typename T>
 		}
 	}
 
-	const tinygltf::Accessor& indexAccessor =
-		model.accessors[static_cast<std::size_t>(primitive.indices)];
-	meshData.indices.reserve(indexAccessor.count);
-
-	const unsigned char* indexBytes = reinterpret_cast<const unsigned char*>(
-		GetAccessorData<std::byte>(model, indexAccessor));
-	const std::size_t indexStride = GetAccessorStride(model, indexAccessor);
-
-	for (std::size_t i = 0; i < indexAccessor.count; ++i)
+	if (primitive.indices < 0)
 	{
-		const unsigned char* element = indexBytes + i * indexStride;
-		switch (indexAccessor.componentType)
+		meshData.indices.resize(vertexCount);
+		for (std::size_t i = 0; i < vertexCount; ++i)
 		{
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-				meshData.indices.push_back(*reinterpret_cast<const uint8_t*>(element));
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-				meshData.indices.push_back(*reinterpret_cast<const uint16_t*>(element));
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-				meshData.indices.push_back(*reinterpret_cast<const uint32_t*>(element));
-				break;
-			default:
-				break;
+			meshData.indices[i] = static_cast<uint32_t>(i);
+		}
+	}
+	else
+	{
+		const tinygltf::Accessor& indexAccessor =
+			model.accessors[static_cast<std::size_t>(primitive.indices)];
+		meshData.indices.reserve(indexAccessor.count);
+
+		const unsigned char* indexBytes = reinterpret_cast<const unsigned char*>(
+			GetAccessorData<std::byte>(model, indexAccessor));
+		const std::size_t indexStride = GetAccessorStride(model, indexAccessor);
+
+		for (std::size_t i = 0; i < indexAccessor.count; ++i)
+		{
+			const unsigned char* element = indexBytes + i * indexStride;
+			switch (indexAccessor.componentType)
+			{
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+					meshData.indices.push_back(
+						*reinterpret_cast<const uint8_t*>(element));
+					break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+					meshData.indices.push_back(
+						*reinterpret_cast<const uint16_t*>(element));
+					break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+					meshData.indices.push_back(
+						*reinterpret_cast<const uint32_t*>(element));
+					break;
+				default:
+					break;
+			}
 		}
 	}
 
@@ -472,6 +504,14 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 	}
 
 	tinygltf::TinyGLTF loader;
+	// We disable tinygltf's built-in image decode (TINYGLTF_NO_STB_IMAGE) and
+	// do our own via ImageLoader in Step 3, but tinygltf still demands a
+	// LoadImageData callback. Register a no-op so the parse succeeds; the
+	// raw image bytes are recovered from buffer views afterwards.
+	loader.SetImageLoader(
+		[](tinygltf::Image*, const int, std::string*, std::string*,
+			int, int, const unsigned char*, int, void*) -> bool { return true; },
+		nullptr);
 	tinygltf::Model model;
 	std::string warnings;
 	std::string errors;

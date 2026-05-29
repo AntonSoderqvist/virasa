@@ -177,7 +177,12 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 	return EventResult::Consumed;
 }
 
-EventResult ViewManager::ApplyCommandResult(CommandResult cmd) noexcept
+std::string_view ViewManager::GetPendingLoadPath() const noexcept
+{
+	return _pendingLoadPath;
+}
+
+EventResult ViewManager::ApplyCommandResult(CommandResult cmd)
 {
 	switch (cmd)
 	{
@@ -220,6 +225,10 @@ EventResult ViewManager::ApplyCommandResult(CommandResult cmd) noexcept
 			_rightPanelMode = RightPanelMode::Closed;
 			_focus = Focus::CommandBar;
 			return EventResult::QuitRequested;
+
+		case CommandResult::LoadModel:
+			_pendingLoadPath = std::string(_commandBarView.GetSubmittedArgument());
+			return EventResult::LoadModelRequested;
 	}
 
 	return EventResult::Consumed;

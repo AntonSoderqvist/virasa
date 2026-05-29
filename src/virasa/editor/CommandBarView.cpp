@@ -13,9 +13,15 @@ std::size_t CommandBarView::GetCursorByte() const noexcept
 	return _cursorByte;
 }
 
+std::string_view CommandBarView::GetSubmittedArgument() const noexcept
+{
+	return _argument;
+}
+
 void CommandBarView::Clear() noexcept
 {
 	_text.clear();
+	_argument.clear();
 	_cursorByte = 0u;
 }
 
@@ -71,28 +77,38 @@ CommandBarKeyResult CommandBarView::HandleTextInput(std::string_view utf8)
 	return CommandBarKeyResult::Consumed;
 }
 
-CommandResult CommandBarView::Submit() noexcept
+CommandResult CommandBarView::Submit()
 {
 	CommandResult result = CommandResult::None;
 
 	if (_text == ":ide")
 	{
+		_argument.clear();
 		result = CommandResult::OpenEditor;
 	}
 	else if (_text == ":tree")
 	{
+		_argument.clear();
 		result = CommandResult::OpenHierarchy;
 	}
 	else if (_text == ":q")
 	{
+		_argument.clear();
 		result = CommandResult::Quit;
 	}
 	else if (_text.empty() || _text == ":")
 	{
+		_argument.clear();
 		result = CommandResult::Close;
+	}
+	else if (_text.size() > 6u && _text.compare(0u, 6u, ":load ") == 0)
+	{
+		_argument = _text.substr(6u);
+		result = CommandResult::LoadModel;
 	}
 	else
 	{
+		_argument.clear();
 		result = CommandResult::None;
 	}
 
