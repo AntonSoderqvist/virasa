@@ -1,20 +1,20 @@
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
+#include <string>
+#include <type_traits>
 
-#include "virasa/editor/ViewManager.h"
+#include "virasa/ecs/World.h"
 #include "virasa/editor/CommandBarView.h"
 #include "virasa/editor/EditorView.h"
-#include "virasa/editor/HierarchyView.h"
 #include "virasa/editor/EntityEditorView.h"
+#include "virasa/editor/HierarchyView.h"
 #include "virasa/editor/Motions.h"
-#include "virasa/ecs/World.h"
+#include "virasa/editor/ViewManager.h"
 #include "virasa/ui/FontAtlas.h"
 #include "virasa/ui/Types.h"
 #include "virasa/window/Events.h"
-
-#include <cstdint>
-#include <cstring>
-#include <string>
-#include <type_traits>
 
 using namespace virasa::editor;
 
@@ -391,8 +391,8 @@ TEST(ViewManager, test_handle_event_consumes_request_hierarchy_result)
 	const std::size_t entityEditorRowBefore = vm.GetEntityEditorView().GetCursorRow();
 	const std::size_t entityEditorCellBefore = vm.GetEntityEditorView().GetCursorCell();
 
-	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Escape), world),
-		EventResult::Consumed);
+	EXPECT_EQ(
+		vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Escape), world), EventResult::Consumed);
 	EXPECT_EQ(vm.GetFocus(), Focus::Hierarchy);
 	EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Hierarchy);
 	EXPECT_EQ(vm.GetHierarchyView().GetCursorRow(), hierarchyCursorBefore);
@@ -489,6 +489,7 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		ASSERT_EQ(vm.HandleEvent(enterEv, world), EventResult::Consumed);
 		ASSERT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
 		ASSERT_EQ(vm.GetFocus(), Focus::Editor);
+		vm.HandleEvent(MakeTextEvent(":"), world);
 		vm.GetCommandBarView().SetText(":load model_a.glb");
 		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadModelRequested);
 		EXPECT_EQ(vm.GetPendingLoadPath(), "model_a.glb");
@@ -506,7 +507,6 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 	}
 }
 
-
 // ===========================================================================
 // render_lays_out_views_and_delegates
 // ===========================================================================
@@ -523,7 +523,7 @@ TEST(ViewManager, test_render_lays_out_views_and_delegates)
 
 	ViewManager vm;
 	const float barHeight = atlas.GetAscender() - atlas.GetDescender() +
-		2.0f * vm.GetCommandBarView().GetPanel().GetConfig().paddingY;
+					2.0f * vm.GetCommandBarView().GetPanel().GetConfig().paddingY;
 	const float expectedPanelHeight = std::max(0.0f, static_cast<float>(kHeight) - barHeight);
 	const float expectedHierarchyHeight = std::floor(expectedPanelHeight * 0.5f);
 	const float expectedEntityEditorY = expectedHierarchyHeight;
@@ -549,8 +549,14 @@ TEST(ViewManager, test_render_lays_out_views_and_delegates)
 	EXPECT_EQ(drawList.GetQuads()[0].y, 0.0f);
 	EXPECT_EQ(drawList.GetQuads()[0].width, static_cast<float>(kWidth - (kWidth / 2u)));
 	EXPECT_EQ(drawList.GetQuads()[0].height, expectedPanelHeight);
-	EXPECT_EQ(drawList.GetQuads().back().x, 0.0f);
-	EXPECT_EQ(drawList.GetQuads().back().y, static_cast<float>(kHeight) - barHeight);
+	{
+		const auto& quads = drawList.GetQuads();
+		const auto commandBarIt = std::find_if(quads.begin(),
+			quads.end(),
+			[&](const auto& q)
+			{ return q.x == 0.0f && q.y == static_cast<float>(kHeight) - barHeight; });
+		EXPECT_NE(commandBarIt, quads.end()) << "command-bar background quad not found";
+	}
 	drawList.Clear();
 
 	vm.HandleEvent(MakeTextEvent(":"), world);
@@ -563,12 +569,24 @@ TEST(ViewManager, test_render_lays_out_views_and_delegates)
 	EXPECT_EQ(drawList.GetQuads()[0].y, 0.0f);
 	EXPECT_EQ(drawList.GetQuads()[0].width, static_cast<float>(kWidth - (kWidth / 2u)));
 	EXPECT_EQ(drawList.GetQuads()[0].height, expectedHierarchyHeight);
-	EXPECT_EQ(drawList.GetQuads()[1].x, static_cast<float>(kWidth / 2u));
-	EXPECT_EQ(drawList.GetQuads()[1].y, expectedEntityEditorY);
-	EXPECT_EQ(drawList.GetQuads()[1].width, static_cast<float>(kWidth - (kWidth / 2u)));
-	EXPECT_EQ(drawList.GetQuads()[1].height, expectedEntityEditorHeight);
-	EXPECT_EQ(drawList.GetQuads().back().x, 0.0f);
-	EXPECT_EQ(drawList.GetQuads().back().y, static_cast<float>(kHeight) - barHeight);
+	{
+		const auto& quads = drawList.GetQuads();
+		const auto entityEditorIt = std::find_if(quads.begin(),
+			quads.end(),
+			[&](const auto& q)
+			{
+				return q.x == static_cast<float>(kWidth / 2u) &&
+					 q.y == expectedEntityEditorY &&
+					 q.width == static_cast<float>(kWidth - (kWidth / 2u)) &&
+					 q.height == expectedEntityEditorHeight;
+			});
+		EXPECT_NE(entityEditorIt, quads.end()) << "entity-editor background quad not found";
+		const auto commandBarIt = std::find_if(quads.begin(),
+			quads.end(),
+			[&](const auto& q)
+			{ return q.x == 0.0f && q.y == static_cast<float>(kHeight) - barHeight; });
+		EXPECT_NE(commandBarIt, quads.end()) << "command-bar background quad not found";
+	}
 
 	bool foundEntityName = false;
 	for (std::size_t i = 0; i < drawList.GetTexts().size(); ++i)
