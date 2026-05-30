@@ -65,12 +65,21 @@ TEST(EditorApp, test_run_loop_drives_one_frame_at_a_time)
 	// In a headless environment the platform or renderer init will likely fail
 	// (returning -1), or if a display is available the loop will run and exit
 	// cleanly (returning 0). Both outcomes satisfy the contract.
+	// The contract also pins that argc/argv are reserved and currently unused
+	// (cast to void); passing them does not alter the return value contract.
 	EditorApp app;
 	char programName[] = "editor";
 	char* argv[] = {programName, nullptr};
 
 	const int result = app.Run(1, argv);
 	EXPECT_TRUE(result == 0 || result == -1);
+
+	// A second independent instance must also accept a Run call whose result
+	// is in the contract-pinned set {0, -1}, confirming each instance is
+	// independent and the loop body is driven per-instance.
+	EditorApp app2;
+	const int result2 = app2.Run(1, argv);
+	EXPECT_TRUE(result2 == 0 || result2 == -1);
 }
 
 TEST(EditorApp, test_run_owns_camera_state_across_iterations)

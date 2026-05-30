@@ -495,20 +495,19 @@ template <typename T>
 }
 } // namespace
 
-virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs::World& world,
-	virasa::renderer::scene::SceneRenderer& scene_renderer)
+virasa::editor::io::GltfCpuAsset ParseGlb(const std::string& path)
 {
+	GltfCpuAsset asset;
+
+	// Step 1: read and parse
 	std::vector<unsigned char> fileBytes;
 	if (!ReadFileBytes(path, fileBytes))
 	{
-		return {virasa::ecs::Entity::Invalid(), GltfLoadError::FileNotFound};
+		asset.error = GltfLoadError::FileNotFound;
+		return asset;
 	}
 
 	tinygltf::TinyGLTF loader;
-	// We disable tinygltf's built-in image decode (TINYGLTF_NO_STB_IMAGE) and
-	// do our own via ImageLoader in Step 3, but tinygltf still demands a
-	// LoadImageData callback. Register a no-op so the parse succeeds; the
-	// raw image bytes are recovered from buffer views afterwards.
 	loader.SetImageLoader(
 		[](tinygltf::Image*, const int, std::string*, std::string*,
 			int, int, const unsigned char*, int, void*) -> bool { return true; },
@@ -528,15 +527,27 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 	if (!loaded)
 	{
 		QUILL_LOG_ERROR(GetEditorLogger(), "tinygltf parse failed: {}", errors);
-		return {virasa::ecs::Entity::Invalid(), GltfLoadError::ParseFailed};
+		asset.error = GltfLoadError::ParseFailed;
+		return asset;
 	}
 
+	// Step 2: feature gate
 	if (HasUnsupportedFeatures(model))
 	{
 		QUILL_LOG_ERROR(GetEditorLogger(), "glTF uses unsupported feature(s)");
-		return {virasa::ecs::Entity::Invalid(), GltfLoadError::UnsupportedFeature};
+		asset.error = GltfLoadError::UnsupportedFeature;
+		return asset;
 	}
 
+	// Step 3: textures
+	// Determine which texture indices are used in sRGB roles
+	std::vector<bool> isSrgb(model.textures.size(), false);
+	for (std::size_t ti = 0; ti < model.textures.size(); ++ti)
+	{
+		isSrgb[ti] = IsSrgbTextureRole(model, static_cast<int>(ti));
+	}
+
+	// Decode all images first
 	std::vector<virasa::editor::io::DecodedImage> decodedImages;
 	decodedImages.reserve(model.images.size());
 	for (std::size_t imageIndex = 0; imageIndex < model.images.size(); ++imageIndex)
@@ -564,13 +575,15 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 		{
 			QUILL_LOG_ERROR(
 				GetEditorLogger(), "Texture decode failed for image {}", imageIndex);
-			return {virasa::ecs::Entity::Invalid(), GltfLoadError::TextureDecodeFailed};
+			asset.error = GltfLoadError::TextureDecodeFailed;
+			return asset;
 		}
 
 		decodedImages.push_back(std::move(decoded));
 	}
 
-	std::unordered_map<int, uint32_t> textureSlots;
+	// Build GltfCpuTexture per model.textures entry
+	asset.textures.reserve(model.textures.size());
 	for (std::size_t textureIndex = 0; textureIndex < model.textures.size(); ++textureIndex)
 	{
 		const tinygltf::Texture& texture = model.textures[textureIndex];
@@ -579,7 +592,8 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 			QUILL_LOG_ERROR(GetEditorLogger(),
 				"Texture {} references invalid image source",
 				textureIndex);
-			return {virasa::ecs::Entity::Invalid(), GltfLoadError::TextureDecodeFailed};
+			asset.error = GltfLoadError::TextureDecodeFailed;
+			return asset;
 		}
 
 		virasa::SamplerConfig samplerConfig;
@@ -595,98 +609,64 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 			samplerConfig.addressModeW = samplerConfig.addressModeU;
 		}
 
-		const virasa::editor::io::DecodedImage& decoded =
+		GltfCpuTexture cpuTexture;
+		// Deep-copy the source image: several glTF textures may reference the
+		// same image source, so moving would empty it for all but the first.
+		const virasa::editor::io::DecodedImage& srcImage =
 			decodedImages[static_cast<std::size_t>(texture.source)];
-		virasa::TextureUpload upload;
-		upload.pixels =
-			std::span<const std::byte>(decoded.pixels.data(), decoded.pixels.size());
-		upload.width = decoded.width;
-		upload.height = decoded.height;
-		upload.format = IsSrgbTextureRole(model, static_cast<int>(textureIndex))
-					    ? VK_FORMAT_R8G8B8A8_SRGB
-					    : VK_FORMAT_R8G8B8A8_UNORM;
-		upload.sampler = samplerConfig;
-
-		uint32_t slot = 0;
-		const virasa::RegisterError registerError =
-			scene_renderer.RegisterTexture(upload, slot);
-		if (registerError != virasa::RegisterError::None)
-		{
-			QUILL_LOG_ERROR(GetEditorLogger(),
-				"Texture registration failed for texture {} with RegisterError {}",
-				textureIndex,
-				static_cast<int>(registerError));
-			return {virasa::ecs::Entity::Invalid(), GltfLoadError::TextureRegistrationFailed};
-		}
-
-		textureSlots.emplace(static_cast<int>(textureIndex), slot);
+		cpuTexture.image.pixels = srcImage.pixels;
+		cpuTexture.image.width = srcImage.width;
+		cpuTexture.image.height = srcImage.height;
+		cpuTexture.image.channels = srcImage.channels;
+		cpuTexture.image.error = srcImage.error;
+		cpuTexture.sampler = samplerConfig;
+		cpuTexture.format = isSrgb[textureIndex]
+			? VK_FORMAT_R8G8B8A8_SRGB
+			: VK_FORMAT_R8G8B8A8_UNORM;
+		asset.textures.push_back(std::move(cpuTexture));
 	}
 
-	std::unordered_map<int, uint32_t> materialIds;
+	// Step 4: materials
+	asset.materials.reserve(model.materials.size());
 	for (std::size_t materialIndex = 0; materialIndex < model.materials.size(); ++materialIndex)
 	{
 		const tinygltf::Material& material = model.materials[materialIndex];
-		virasa::VisualMaterial visualMaterial;
-		visualMaterial.factors.baseColorFactor = virasa::math::Vec4(
+		GltfCpuMaterial cpuMaterial;
+
+		cpuMaterial.material.factors.baseColorFactor = virasa::math::Vec4(
 			static_cast<float>(material.pbrMetallicRoughness.baseColorFactor[0]),
 			static_cast<float>(material.pbrMetallicRoughness.baseColorFactor[1]),
 			static_cast<float>(material.pbrMetallicRoughness.baseColorFactor[2]),
 			static_cast<float>(material.pbrMetallicRoughness.baseColorFactor[3]));
-		visualMaterial.factors.metallicFactor =
+		cpuMaterial.material.factors.metallicFactor =
 			static_cast<float>(material.pbrMetallicRoughness.metallicFactor);
-		visualMaterial.factors.roughnessFactor =
+		cpuMaterial.material.factors.roughnessFactor =
 			static_cast<float>(material.pbrMetallicRoughness.roughnessFactor);
-		visualMaterial.factors.emissiveFactor =
+		cpuMaterial.material.factors.emissiveFactor =
 			virasa::math::Vec3(static_cast<float>(material.emissiveFactor[0]),
 				static_cast<float>(material.emissiveFactor[1]),
 				static_cast<float>(material.emissiveFactor[2]));
-		visualMaterial.factors.normalScale = static_cast<float>(material.normalTexture.scale);
-		visualMaterial.factors.occlusionStrength =
+		cpuMaterial.material.factors.normalScale =
+			static_cast<float>(material.normalTexture.scale);
+		cpuMaterial.material.factors.occlusionStrength =
 			static_cast<float>(material.occlusionTexture.strength);
-		visualMaterial.factors.alphaCutoff = static_cast<float>(material.alphaCutoff);
-		visualMaterial.alphaMode = MapAlphaMode(material.alphaMode);
-		visualMaterial.doubleSided = material.doubleSided;
+		cpuMaterial.material.factors.alphaCutoff = static_cast<float>(material.alphaCutoff);
+		cpuMaterial.material.alphaMode = MapAlphaMode(material.alphaMode);
+		cpuMaterial.material.doubleSided = material.doubleSided;
 
-		if (material.pbrMetallicRoughness.baseColorTexture.index >= 0)
-		{
-			visualMaterial.baseColorTexture =
-				textureSlots[material.pbrMetallicRoughness.baseColorTexture.index];
-		}
-		if (material.normalTexture.index >= 0)
-		{
-			visualMaterial.normalTexture = textureSlots[material.normalTexture.index];
-		}
-		if (material.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0)
-		{
-			visualMaterial.metallicRoughnessTexture =
-				textureSlots[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
-		}
-		if (material.occlusionTexture.index >= 0)
-		{
-			visualMaterial.occlusionTexture = textureSlots[material.occlusionTexture.index];
-		}
-		if (material.emissiveTexture.index >= 0)
-		{
-			visualMaterial.emissiveTexture = textureSlots[material.emissiveTexture.index];
-		}
+		// Leave VisualMaterial texture fields at 0; record glTF-local indices
+		cpuMaterial.baseColorTexture =
+			material.pbrMetallicRoughness.baseColorTexture.index;
+		cpuMaterial.metallicRoughnessTexture =
+			material.pbrMetallicRoughness.metallicRoughnessTexture.index;
+		cpuMaterial.normalTexture = material.normalTexture.index;
+		cpuMaterial.occlusionTexture = material.occlusionTexture.index;
+		cpuMaterial.emissiveTexture = material.emissiveTexture.index;
 
-		uint32_t materialId = 0;
-		const virasa::RegisterError registerError =
-			scene_renderer.RegisterMaterial(visualMaterial, materialId);
-		if (registerError != virasa::RegisterError::None)
-		{
-			QUILL_LOG_ERROR(GetEditorLogger(),
-				"Material registration failed for material {} with RegisterError {}",
-				materialIndex,
-				static_cast<int>(registerError));
-			return {
-				virasa::ecs::Entity::Invalid(), GltfLoadError::MaterialRegistrationFailed};
-		}
-
-		materialIds.emplace(static_cast<int>(materialIndex), materialId);
+		asset.materials.push_back(cpuMaterial);
 	}
 
-	std::unordered_map<TexturePrimitiveKey, uint32_t, TexturePrimitiveKeyHash> meshIds;
+	// Step 5: meshes
 	for (std::size_t meshIndex = 0; meshIndex < model.meshes.size(); ++meshIndex)
 	{
 		const tinygltf::Mesh& mesh = model.meshes[meshIndex];
@@ -694,51 +674,30 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 			++primitiveIndex)
 		{
 			const tinygltf::Primitive& primitive = mesh.primitives[primitiveIndex];
-			virasa::MeshData meshData = BuildMeshData(model, primitive);
-
-			uint32_t meshId = 0;
-			const virasa::RegisterError registerError =
-				scene_renderer.RegisterMesh(meshData, meshId);
-			if (registerError != virasa::RegisterError::None)
-			{
-				QUILL_LOG_ERROR(GetEditorLogger(),
-					"Mesh registration failed for mesh {}, primitive {} with "
-					"RegisterError {}",
-					meshIndex,
-					primitiveIndex,
-					static_cast<int>(registerError));
-				return {virasa::ecs::Entity::Invalid(),
-					GltfLoadError::MeshRegistrationFailed};
-			}
-
-			meshIds.emplace(TexturePrimitiveKey(static_cast<int>(meshIndex),
-						    static_cast<int>(primitiveIndex)),
-				meshId);
+			GltfCpuMesh cpuMesh;
+			cpuMesh.data = BuildMeshData(model, primitive);
+			cpuMesh.meshIndex = static_cast<uint32_t>(meshIndex);
+			cpuMesh.primitiveIndex = static_cast<uint32_t>(primitiveIndex);
+			cpuMesh.material = primitive.material;
+			asset.meshes.push_back(std::move(cpuMesh));
 		}
 	}
 
-	std::vector<virasa::ecs::Entity> createdEntities;
-	const virasa::ecs::Entity root = world.CreateEntity("gltf_axis_bake");
-	createdEntities.push_back(root);
-
-	virasa::math::Transform rootTransform;
-	rootTransform.rotation =
-		glm::angleAxis(glm::radians(90.0f), virasa::math::Vec3(1.0f, 0.0f, 0.0f));
-	world.Transforms().Add(root, rootTransform);
-
-	std::vector<virasa::ecs::Entity> nodeEntities(
-		model.nodes.size(), virasa::ecs::Entity::Invalid());
-	for (std::size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+	// Step 6: nodes — ordered parent-before-child via BFS/scene-order walk
+	// Build a parent map first
+	std::vector<int> parentOf(model.nodes.size(), -1);
+	for (std::size_t ni = 0; ni < model.nodes.size(); ++ni)
 	{
-		const tinygltf::Node& node = model.nodes[nodeIndex];
-		std::string nodeName =
-			node.name.empty() ? std::string("node_") + std::to_string(nodeIndex) : node.name;
-
-		nodeEntities[nodeIndex] = world.CreateEntity(nodeName);
-		createdEntities.push_back(nodeEntities[nodeIndex]);
-		world.Transforms().Add(nodeEntities[nodeIndex], NodeToTransform(node));
+		for (int childIdx : model.nodes[ni].children)
+		{
+			if (childIdx >= 0 && childIdx < static_cast<int>(model.nodes.size()))
+			{
+				parentOf[static_cast<std::size_t>(childIdx)] = static_cast<int>(ni);
+			}
+		}
 	}
 
+	// Determine top-level nodes from the default scene
 	const int defaultSceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
 	std::vector<int> topLevelNodes;
 	if (!model.scenes.empty() && defaultSceneIndex < static_cast<int>(model.scenes.size()))
@@ -747,57 +706,275 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 	}
 	else
 	{
-		for (std::size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+		for (std::size_t ni = 0; ni < model.nodes.size(); ++ni)
 		{
-			topLevelNodes.push_back(static_cast<int>(nodeIndex));
+			if (parentOf[ni] < 0)
+			{
+				topLevelNodes.push_back(static_cast<int>(ni));
+			}
 		}
 	}
 
-	for (std::size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+	// BFS to produce parent-before-child ordering
+	std::vector<int> orderedNodes;
+	orderedNodes.reserve(model.nodes.size());
 	{
-		const tinygltf::Node& node = model.nodes[nodeIndex];
-		for (int childIndex : node.children)
+		std::vector<int> queue;
+		queue.reserve(model.nodes.size());
+		for (int topNode : topLevelNodes)
 		{
-			world.SetParent(nodeEntities[static_cast<std::size_t>(childIndex)],
-				nodeEntities[nodeIndex]);
+			queue.push_back(topNode);
+		}
+		for (std::size_t qi = 0; qi < queue.size(); ++qi)
+		{
+			const int nodeIdx = queue[qi];
+			orderedNodes.push_back(nodeIdx);
+			for (int childIdx : model.nodes[static_cast<std::size_t>(nodeIdx)].children)
+			{
+				queue.push_back(childIdx);
+			}
 		}
 	}
 
-	for (int topLevelNode : topLevelNodes)
+	// Map from original tinygltf node index -> index in asset.nodes
+	std::vector<int> nodeAssetIndex(model.nodes.size(), -1);
+	asset.nodes.reserve(orderedNodes.size());
+	for (int origIdx : orderedNodes)
 	{
-		world.SetParent(nodeEntities[static_cast<std::size_t>(topLevelNode)], root);
+		const std::size_t origIdxSz = static_cast<std::size_t>(origIdx);
+		const tinygltf::Node& node = model.nodes[origIdxSz];
+
+		GltfCpuNode cpuNode;
+		cpuNode.name = node.name.empty()
+			? std::string("node_") + std::to_string(origIdx)
+			: node.name;
+		cpuNode.transform = NodeToTransform(node);
+		// parent in asset.nodes space
+		const int origParent = parentOf[origIdxSz];
+		cpuNode.parent = (origParent >= 0) ? nodeAssetIndex[static_cast<std::size_t>(origParent)] : -1;
+		cpuNode.meshIndex = node.mesh;
+
+		nodeAssetIndex[origIdxSz] = static_cast<int>(asset.nodes.size());
+		asset.nodes.push_back(std::move(cpuNode));
 	}
 
-	for (std::size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+	// Step 7: success
+	asset.error = GltfLoadError::None;
+	return asset;
+}
+
+virasa::editor::io::GltfLoadResult CommitGlb(
+	const virasa::editor::io::GltfCpuAsset& asset,
+	virasa::ecs::World& world,
+	virasa::renderer::scene::SceneRenderer& scene_renderer)
+{
+	std::vector<virasa::ecs::Entity> createdEntities;
+
+	// Step 1: textures
+	std::vector<uint32_t> textureSlots;
+	textureSlots.reserve(asset.textures.size());
+	for (std::size_t ti = 0; ti < asset.textures.size(); ++ti)
 	{
-		const tinygltf::Node& node = model.nodes[nodeIndex];
-		if (node.mesh < 0 || node.mesh >= static_cast<int>(model.meshes.size()))
+		const GltfCpuTexture& cpuTex = asset.textures[ti];
+		virasa::TextureUpload upload;
+		upload.pixels = std::span<const std::byte>(
+			cpuTex.image.pixels.data(), cpuTex.image.pixels.size());
+		upload.width = cpuTex.image.width;
+		upload.height = cpuTex.image.height;
+		upload.format = cpuTex.format;
+		upload.sampler = cpuTex.sampler;
+
+		uint32_t slot = 0;
+		const virasa::RegisterError regErr = scene_renderer.RegisterTexture(upload, slot);
+		if (regErr != virasa::RegisterError::None)
+		{
+			QUILL_LOG_ERROR(GetEditorLogger(),
+				"Texture registration failed for texture {} with RegisterError {}",
+				ti, static_cast<int>(regErr));
+			RollbackEntities(world, createdEntities);
+			return {virasa::ecs::Entity::Invalid(), GltfLoadError::TextureRegistrationFailed};
+		}
+		textureSlots.push_back(slot);
+	}
+
+	// Step 2: materials
+	std::vector<uint32_t> materialIds;
+	materialIds.reserve(asset.materials.size());
+	for (std::size_t mi = 0; mi < asset.materials.size(); ++mi)
+	{
+		const GltfCpuMaterial& cpuMat = asset.materials[mi];
+		virasa::VisualMaterial visualMaterial = cpuMat.material;
+
+		if (cpuMat.baseColorTexture >= 0 &&
+			cpuMat.baseColorTexture < static_cast<int>(textureSlots.size()))
+		{
+			visualMaterial.baseColorTexture =
+				textureSlots[static_cast<std::size_t>(cpuMat.baseColorTexture)];
+		}
+		if (cpuMat.metallicRoughnessTexture >= 0 &&
+			cpuMat.metallicRoughnessTexture < static_cast<int>(textureSlots.size()))
+		{
+			visualMaterial.metallicRoughnessTexture =
+				textureSlots[static_cast<std::size_t>(cpuMat.metallicRoughnessTexture)];
+		}
+		if (cpuMat.normalTexture >= 0 &&
+			cpuMat.normalTexture < static_cast<int>(textureSlots.size()))
+		{
+			visualMaterial.normalTexture =
+				textureSlots[static_cast<std::size_t>(cpuMat.normalTexture)];
+		}
+		if (cpuMat.occlusionTexture >= 0 &&
+			cpuMat.occlusionTexture < static_cast<int>(textureSlots.size()))
+		{
+			visualMaterial.occlusionTexture =
+				textureSlots[static_cast<std::size_t>(cpuMat.occlusionTexture)];
+		}
+		if (cpuMat.emissiveTexture >= 0 &&
+			cpuMat.emissiveTexture < static_cast<int>(textureSlots.size()))
+		{
+			visualMaterial.emissiveTexture =
+				textureSlots[static_cast<std::size_t>(cpuMat.emissiveTexture)];
+		}
+
+		uint32_t materialId = 0;
+		const virasa::RegisterError regErr =
+			scene_renderer.RegisterMaterial(visualMaterial, materialId);
+		if (regErr != virasa::RegisterError::None)
+		{
+			QUILL_LOG_ERROR(GetEditorLogger(),
+				"Material registration failed for material {} with RegisterError {}",
+				mi, static_cast<int>(regErr));
+			RollbackEntities(world, createdEntities);
+			return {virasa::ecs::Entity::Invalid(), GltfLoadError::MaterialRegistrationFailed};
+		}
+		materialIds.push_back(materialId);
+	}
+
+	// Step 3: meshes — keyed by (meshIndex, primitiveIndex)
+	using MeshKey = std::pair<uint32_t, uint32_t>;
+	struct MeshKeyHash
+	{
+		std::size_t operator()(const MeshKey& k) const noexcept
+		{
+			const std::size_t h1 = std::hash<uint32_t>{}(k.first);
+			const std::size_t h2 = std::hash<uint32_t>{}(k.second);
+			return h1 ^ (h2 + 0x9e3779b9u + (h1 << 6u) + (h1 >> 2u));
+		}
+	};
+	std::unordered_map<MeshKey, uint32_t, MeshKeyHash> meshIdMap;
+
+	for (std::size_t i = 0; i < asset.meshes.size(); ++i)
+	{
+		const GltfCpuMesh& cpuMesh = asset.meshes[i];
+		uint32_t meshId = 0;
+		const virasa::RegisterError regErr =
+			scene_renderer.RegisterMesh(cpuMesh.data, meshId);
+		if (regErr != virasa::RegisterError::None)
+		{
+			QUILL_LOG_ERROR(GetEditorLogger(),
+				"Mesh registration failed for mesh {}, primitive {} with RegisterError {}",
+				cpuMesh.meshIndex, cpuMesh.primitiveIndex, static_cast<int>(regErr));
+			RollbackEntities(world, createdEntities);
+			return {virasa::ecs::Entity::Invalid(), GltfLoadError::MeshRegistrationFailed};
+		}
+		meshIdMap.emplace(MeshKey{cpuMesh.meshIndex, cpuMesh.primitiveIndex}, meshId);
+	}
+
+	// Step 4: entities
+	const virasa::ecs::Entity root = world.CreateEntity("gltf_axis_bake");
+	createdEntities.push_back(root);
+
+	virasa::math::Transform rootTransform;
+	rootTransform.rotation =
+		glm::angleAxis(glm::radians(90.0f), virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+	world.Transforms().Add(root, rootTransform);
+
+	// Create one entity per GltfCpuNode
+	std::vector<virasa::ecs::Entity> nodeEntities(asset.nodes.size(), virasa::ecs::Entity::Invalid());
+	for (std::size_t ni = 0; ni < asset.nodes.size(); ++ni)
+	{
+		const GltfCpuNode& cpuNode = asset.nodes[ni];
+		const virasa::ecs::Entity nodeEntity = world.CreateEntity(cpuNode.name);
+		createdEntities.push_back(nodeEntity);
+		world.Transforms().Add(nodeEntity, cpuNode.transform);
+		nodeEntities[ni] = nodeEntity;
+	}
+
+	// Wire parent/child relationships
+	for (std::size_t ni = 0; ni < asset.nodes.size(); ++ni)
+	{
+		const GltfCpuNode& cpuNode = asset.nodes[ni];
+		if (cpuNode.parent < 0)
+		{
+			world.SetParent(nodeEntities[ni], root);
+		}
+		else
+		{
+			world.SetParent(nodeEntities[ni],
+				nodeEntities[static_cast<std::size_t>(cpuNode.parent)]);
+		}
+	}
+
+	// Create primitive child entities for nodes with meshes
+	for (std::size_t ni = 0; ni < asset.nodes.size(); ++ni)
+	{
+		const GltfCpuNode& cpuNode = asset.nodes[ni];
+		if (cpuNode.meshIndex < 0)
 		{
 			continue;
 		}
+		const uint32_t gltfMeshIndex = static_cast<uint32_t>(cpuNode.meshIndex);
 
-		const tinygltf::Mesh& mesh = model.meshes[static_cast<std::size_t>(node.mesh)];
-		for (std::size_t primitiveIndex = 0; primitiveIndex < mesh.primitives.size();
-			++primitiveIndex)
+		for (std::size_t mi = 0; mi < asset.meshes.size(); ++mi)
 		{
-			const tinygltf::Primitive& primitive = mesh.primitives[primitiveIndex];
-			const virasa::ecs::Entity primitiveEntity = world.CreateEntity("mesh_primitive");
-			createdEntities.push_back(primitiveEntity);
-			world.Transforms().Add(primitiveEntity, virasa::math::Transform::Identity());
-			virasa::ecs::AddMesh(world, primitiveEntity,
-				virasa::ecs::MeshComponent{
-					.meshId = meshIds[TexturePrimitiveKey(static_cast<int>(node.mesh),
-						static_cast<int>(primitiveIndex))]});
-			virasa::ecs::AddVisual(world, primitiveEntity,
-				virasa::ecs::VisualComponent{
-					.materialId = primitive.material >= 0
-								  ? materialIds[primitive.material]
-								  : 0u});
-			world.SetParent(primitiveEntity, nodeEntities[nodeIndex]);
+			const GltfCpuMesh& cpuMesh = asset.meshes[mi];
+			if (cpuMesh.meshIndex != gltfMeshIndex)
+			{
+				continue;
+			}
+
+			const auto meshKeyIt =
+				meshIdMap.find(MeshKey{cpuMesh.meshIndex, cpuMesh.primitiveIndex});
+			if (meshKeyIt == meshIdMap.end())
+			{
+				continue;
+			}
+
+			// Resolve the primitive's material id from the GltfCpuMesh's
+			// material field (tinygltf material index), translated through the
+			// registered-material id-map built in Step 2. A material of -1 or
+			// out of range falls back to SceneRenderer's default material 0.
+			uint32_t materialId = 0u;
+			if (cpuMesh.material >= 0 &&
+				static_cast<std::size_t>(cpuMesh.material) < materialIds.size())
+			{
+				materialId = materialIds[static_cast<std::size_t>(cpuMesh.material)];
+			}
+
+			const virasa::ecs::Entity primEntity = world.CreateEntity("mesh_primitive");
+			createdEntities.push_back(primEntity);
+			world.Transforms().Add(primEntity, virasa::math::Transform{});
+			virasa::ecs::AddMesh(world, primEntity,
+				virasa::ecs::MeshComponent{.meshId = meshKeyIt->second});
+			virasa::ecs::AddVisual(world, primEntity,
+				virasa::ecs::VisualComponent{.materialId = materialId});
+			world.SetParent(primEntity, nodeEntities[ni]);
 		}
 	}
 
+	// Step 5: success
 	return {root, GltfLoadError::None};
+}
+
+virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs::World& world,
+	virasa::renderer::scene::SceneRenderer& scene_renderer)
+{
+	GltfCpuAsset asset = ParseGlb(path);
+	if (asset.error != GltfLoadError::None)
+	{
+		return {virasa::ecs::Entity::Invalid(), asset.error};
+	}
+	return CommitGlb(asset, world, scene_renderer);
 }
 } // namespace editor::io
 } // namespace virasa

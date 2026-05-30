@@ -7,6 +7,8 @@ add_executable(virasa_editor_tests
     test_EntityEditorView.cpp
     test_ViewManager.cpp
     test_EditorApp.cpp
+    io/test_ImageLoader.cpp
+    io/test_GltfLoader.cpp
 )
 
 target_link_libraries(virasa_editor_tests

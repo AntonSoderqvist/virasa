@@ -132,6 +132,15 @@ public:
 	[[nodiscard]] const std::vector<virasa::ecs::Entity>& GetNameComponentEntities() const noexcept;
 
 	/**
+	 * @brief Renames a live entity, re-running name-uniqueness resolution.
+	 * @param entity A live entity previously returned by CreateEntity.
+	 * @param name The requested new name; a dot-suffix is appended if it
+	 *        collides with another live entity's name. Renaming to the
+	 *        entity's current name is a no-op.
+	 */
+	void SetName(virasa::ecs::Entity entity, std::string_view name);
+
+	/**
 	 * @brief Registers a ComponentSystem and returns its assigned ComponentId.
 	 * @param system Non-null unique_ptr to the system to register.
 	 * @return The ComponentId assigned to the system.

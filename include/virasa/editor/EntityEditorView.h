@@ -36,6 +36,8 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 void EnterEditMode(EntityEditorView& view, const BuiltRows& built, const virasa::ecs::World& world, virasa::ecs::Entity entity);
 void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::Entity entity);
 void OverlayEditBuffer(EntityEditorView& view, BuiltRows& built);
+bool ParseFloatStrict(std::string_view text, float& outValue);
+void RemoveLastUtf8Codepoint(std::string& text);
 
 /**
  * @brief Inspects a single ECS entity and renders its components as a panel of labeled rows.

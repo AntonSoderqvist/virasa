@@ -656,4 +656,71 @@ void World::UpdateTransforms()
 	_transformSystem->ClearAllDirty();
 }
 
+// ---------------------------------------------------------------------------
+// SetName
+// ---------------------------------------------------------------------------
+
+void World::SetName(Entity entity, std::string_view name)
+{
+	assert(IsValid(entity));
+
+	uint32_t denseIdx = _nameSparse[entity.index];
+	assert(denseIdx != 0xFFFFFFFFu);
+
+	const std::string& currentName = _nameComponents[denseIdx].name;
+
+	// If the requested name equals the current name, it's a no-op.
+	if (currentName == name)
+		return;
+
+	// Resolve uniqueness, excluding the entity's own current name.
+	// We temporarily rename to empty so ResolveUniqueName won't see our own name.
+	// Instead, implement inline to exclude self.
+	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
+
+	// Check collision excluding self
+	auto collidesExcludingSelf = [&](const std::string& candidate) -> bool
+	{
+		for (size_t i = 0; i < _nameComponents.size(); ++i)
+		{
+			if (_nameEntities[i] == entity)
+				continue;
+			if (_nameComponents[i].name == candidate)
+				return true;
+		}
+		return false;
+	};
+
+	std::string finalName;
+	if (!collidesExcludingSelf(baseName))
+	{
+		finalName = baseName;
+	}
+	else
+	{
+		for (uint32_t suffix = 1; ; ++suffix)
+		{
+			std::string candidate;
+			if (suffix < 1000u)
+			{
+				char buf[8];
+				std::snprintf(buf, sizeof(buf), "%03u", suffix);
+				candidate = baseName + "." + buf;
+			}
+			else
+			{
+				candidate = baseName + "." + std::to_string(suffix);
+			}
+
+			if (!collidesExcludingSelf(candidate))
+			{
+				finalName = std::move(candidate);
+				break;
+			}
+		}
+	}
+
+	_nameComponents[denseIdx].name = std::move(finalName);
+}
+
 } // namespace virasa::ecs

@@ -5,15 +5,16 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <future>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "virasa/core/Logger.h"
-#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/ecs/Types.h"
 #include "virasa/ecs/World.h"
@@ -125,8 +126,16 @@ int EditorApp::Run(int argc, char** argv)
 	{
 		virasa::ecs::Entity cubeEntity = world.CreateEntity("Cube");
 		world.Transforms().Add(cubeEntity, virasa::math::Transform::Identity());
-		virasa::ecs::AddMesh(world, cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
-		virasa::ecs::AddVisual(world, cubeEntity, virasa::ecs::VisualComponent{kDefaultMaterialId});
+
+		virasa::ecs::ComponentId meshSysId = world.GetSystemId("Mesh");
+		virasa::ecs::MeshComponent meshComp;
+		meshComp.meshId = cubeMeshId;
+		world.GetSystem(meshSysId).AddRaw(cubeEntity, &meshComp);
+
+		virasa::ecs::ComponentId visualSysId = world.GetSystemId("Visual");
+		virasa::ecs::VisualComponent visualComp;
+		visualComp.materialId = kDefaultMaterialId;
+		world.GetSystem(visualSysId).AddRaw(cubeEntity, &visualComp);
 	}
 
 	// Directional light entity
@@ -136,7 +145,8 @@ int EditorApp::Run(int argc, char** argv)
 		light.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
 		light.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
 		light.intensity = 1.0f;
-		virasa::ecs::AddDirectionalLight(world, lightEntity, light);
+		virasa::ecs::ComponentId lightSysId = world.GetSystemId("DirectionalLight");
+		world.GetSystem(lightSysId).AddRaw(lightEntity, &light);
 	}
 
 	// Camera entity
@@ -153,7 +163,8 @@ int EditorApp::Run(int argc, char** argv)
 		cam.fovY = glm::radians(45.0f);
 		cam.nearPlane = 0.1f;
 		cam.farPlane = 100.0f;
-		virasa::ecs::AddCamera(world, cameraEntity, cam);
+		virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
+		world.GetSystem(camSysId).AddRaw(cameraEntity, &cam);
 	}
 
 	// Initialise camera yaw/pitch
@@ -185,6 +196,9 @@ int EditorApp::Run(int argc, char** argv)
 	// -------------------------------------------------------------------------
 	const float kCommandBarPaddingY =
 		viewManager.GetCommandBarView().GetPanel().GetConfig().paddingY;
+
+	// Pending async GLB parses (function-local, drained on shutdown)
+	std::vector<std::future<virasa::editor::io::GltfCpuAsset>> _pendingLoads;
 
 	bool running = true;
 	while (running)
@@ -225,25 +239,19 @@ int EditorApp::Run(int argc, char** argv)
 				}
 				else if (result == virasa::editor::EventResult::LoadModelRequested)
 				{
-					std::string_view path = viewManager.GetPendingLoadPath();
-					std::string resolved(path);
-					if (!resolved.empty() && resolved.front() == '~' &&
-						(resolved.size() == 1u || resolved[1] == '/'))
+					std::string path(viewManager.GetPendingLoadPath());
+					// Expand a leading '~' to $HOME (std::ifstream does not).
+					if (!path.empty() && path.front() == '~' &&
+						(path.size() == 1u || path[1] == '/'))
 					{
 						if (const char* home = std::getenv("HOME"))
 						{
-							resolved.replace(0u, 1u, home);
+							path.replace(0u, 1u, home);
 						}
 					}
-					virasa::editor::io::GltfLoadResult loadResult =
-						virasa::editor::io::LoadGlb(resolved, world, sceneRenderer);
-					if (loadResult.error != virasa::editor::io::GltfLoadError::None)
-					{
-						LOG_ERROR(logger,
-							"LoadGlb failed for '{}' with error {}.",
-							resolved,
-							static_cast<uint32_t>(loadResult.error));
-					}
+					_pendingLoads.push_back(std::async(std::launch::async,
+						[p = std::move(path)]() mutable
+						{ return virasa::editor::io::ParseGlb(p); }));
 				}
 			}
 
@@ -257,6 +265,45 @@ int EditorApp::Run(int argc, char** argv)
 		if (!running)
 		{
 			break;
+		}
+
+		// ------------------------------------------------------------------
+		// Step 1b: Commit completed parses
+		// ------------------------------------------------------------------
+		{
+			auto it = _pendingLoads.begin();
+			while (it != _pendingLoads.end())
+			{
+				if (it->wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+				{
+					virasa::editor::io::GltfCpuAsset asset = it->get();
+					it = _pendingLoads.erase(it);
+
+					if (asset.error == virasa::editor::io::GltfLoadError::None)
+					{
+						virasa::editor::io::GltfLoadResult commitResult =
+							virasa::editor::io::CommitGlb(
+								asset, world, sceneRenderer);
+						if (commitResult.error !=
+							virasa::editor::io::GltfLoadError::None)
+						{
+							LOG_ERROR(logger,
+								"CommitGlb failed with error {}.",
+								static_cast<uint32_t>(commitResult.error));
+						}
+					}
+					else
+					{
+						LOG_ERROR(logger,
+							"ParseGlb failed with error {}.",
+							static_cast<uint32_t>(asset.error));
+					}
+				}
+				else
+				{
+					++it;
+				}
+			}
 		}
 
 		// ------------------------------------------------------------------

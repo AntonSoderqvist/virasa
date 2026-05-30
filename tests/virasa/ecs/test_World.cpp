@@ -809,3 +809,60 @@ TEST(World, test_world_is_not_thread_safe_per_instance)
 	EXPECT_EQ(w1.GetEntityCount(), 1u);
 	EXPECT_EQ(w2.GetEntityCount(), 1u);
 }
+
+// ===========================================================================
+// world_set_name_renames_entity_with_collision_resolution
+// ===========================================================================
+TEST(World, test_world_set_name_renames_entity_with_collision_resolution)
+{
+	World world;
+
+	Entity e1 = world.CreateEntity("Alpha");
+	Entity e2 = world.CreateEntity("Beta");
+
+	// SetName to a unique name: stored verbatim.
+	world.SetName(e1, "Gamma");
+	EXPECT_EQ(world.GetNameComponent(e1).name, "Gamma");
+
+	// FindEntityByName reflects the new name.
+	EXPECT_EQ(world.FindEntityByName("Gamma"), e1);
+
+	// Old name is no longer findable.
+	EXPECT_EQ(world.FindEntityByName("Alpha"), Entity::Invalid());
+
+	// SetName to the entity's own current name is a no-op (no suffix appended).
+	world.SetName(e1, "Gamma");
+	EXPECT_EQ(world.GetNameComponent(e1).name, "Gamma");
+
+	// SetName to a name held by another entity: suffix is appended.
+	// e2 holds "Beta"; rename e1 to "Beta" -> should become "Beta.001".
+	world.SetName(e1, "Beta");
+	EXPECT_EQ(world.GetNameComponent(e1).name, "Beta.001");
+
+	// e2 still holds "Beta".
+	EXPECT_EQ(world.GetNameComponent(e2).name, "Beta");
+
+	// FindEntityByName resolves the suffixed name to e1.
+	EXPECT_EQ(world.FindEntityByName("Beta.001"), e1);
+	EXPECT_EQ(world.FindEntityByName("Beta"),     e2);
+
+	// SetName with collision chain: create entities to occupy "Delta",
+	// "Delta.001", then rename e1 to "Delta" -> should become "Delta.002".
+	Entity e3 = world.CreateEntity("Delta");     // holds "Delta"
+	Entity e4 = world.CreateEntity("Delta");     // holds "Delta.001"
+	world.SetName(e1, "Delta");
+	EXPECT_EQ(world.GetNameComponent(e1).name, "Delta.002");
+
+	// Renaming e3 (which holds "Delta") to its own name is a no-op.
+	world.SetName(e3, "Delta");
+	EXPECT_EQ(world.GetNameComponent(e3).name, "Delta");
+
+	// After SetName the entity count is unchanged (no add/remove).
+	EXPECT_EQ(world.GetEntityCount(), 4u);
+
+	// Every live entity still has exactly one NameComponent.
+	EXPECT_TRUE(world.HasNameComponent(e1));
+	EXPECT_TRUE(world.HasNameComponent(e2));
+	EXPECT_TRUE(world.HasNameComponent(e3));
+	EXPECT_TRUE(world.HasNameComponent(e4));
+}
