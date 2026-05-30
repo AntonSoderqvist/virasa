@@ -1,5 +1,6 @@
 #include "virasa/editor/EntityEditorView.h"
 
+#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Transform.h"
 #include "virasa/renderer/Types.h"
@@ -350,9 +351,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 	}
 	AddScalarRow(built, RowDescriptor{RowDescriptor::Kind::Name, 0u}, "Name", nameValue);
 
-	if (world.HasTransformComponent(entity))
+	if (world.GetTransforms().Has(entity))
 	{
-		const virasa::math::Transform& transform = world.GetTransformComponent(entity);
+		const virasa::math::Transform& transform = world.GetTransforms().GetLocal(entity);
 		AddSectionRow(built, kTransformSection, "Transform");
 		if (view._collapsed.count(kTransformSection) == 0u)
 		{
@@ -381,9 +382,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasMeshComponent(entity))
+	if (virasa::ecs::HasMesh(world, entity))
 	{
-		const virasa::ecs::MeshComponent& component = world.GetMeshComponent(entity);
+		const virasa::ecs::MeshComponent& component = virasa::ecs::GetMesh(world, entity);
 		AddSectionRow(built, kMeshSection, "Mesh");
 		if (view._collapsed.count(kMeshSection) == 0u)
 		{
@@ -395,9 +396,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasVisualComponent(entity))
+	if (virasa::ecs::HasVisual(world, entity))
 	{
-		const virasa::ecs::VisualComponent& component = world.GetVisualComponent(entity);
+		const virasa::ecs::VisualComponent& component = virasa::ecs::GetVisual(world, entity);
 		AddSectionRow(built, kVisualSection, "Visual");
 		if (view._collapsed.count(kVisualSection) == 0u)
 		{
@@ -409,10 +410,10 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasDirectionalLightComponent(entity))
+	if (virasa::ecs::HasDirectionalLight(world, entity))
 	{
 		const virasa::ecs::DirectionalLightComponent& component =
-			world.GetDirectionalLightComponent(entity);
+			virasa::ecs::GetDirectionalLight(world, entity);
 		AddSectionRow(built, kDirectionalLightSection, "DirectionalLight");
 		if (view._collapsed.count(kDirectionalLightSection) == 0u)
 		{
@@ -438,9 +439,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasPointLightComponent(entity))
+	if (virasa::ecs::HasPointLight(world, entity))
 	{
-		const virasa::ecs::PointLightComponent& component = world.GetPointLightComponent(entity);
+		const virasa::ecs::PointLightComponent& component = virasa::ecs::GetPointLight(world, entity);
 		AddSectionRow(built, kPointLightSection, "PointLight");
 		if (view._collapsed.count(kPointLightSection) == 0u)
 		{
@@ -464,9 +465,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasSpotLightComponent(entity))
+	if (virasa::ecs::HasSpotLight(world, entity))
 	{
-		const virasa::ecs::SpotLightComponent& component = world.GetSpotLightComponent(entity);
+		const virasa::ecs::SpotLightComponent& component = virasa::ecs::GetSpotLight(world, entity);
 		AddSectionRow(built, kSpotLightSection, "SpotLight");
 		if (view._collapsed.count(kSpotLightSection) == 0u)
 		{
@@ -500,9 +501,9 @@ BuiltRows BuildRows(const virasa::ecs::World& world, virasa::ecs::Entity entity,
 		}
 	}
 
-	if (world.HasCameraComponent(entity))
+	if (virasa::ecs::HasCamera(world, entity))
 	{
-		const virasa::ecs::CameraComponent& component = world.GetCameraComponent(entity);
+		const virasa::ecs::CameraComponent& component = virasa::ecs::GetCamera(world, entity);
 		AddSectionRow(built, kCameraSection, "Camera");
 		if (view._collapsed.count(kCameraSection) == 0u)
 		{
@@ -642,7 +643,7 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 			{
 				case RowDescriptor::Kind::TransformTranslation:
 				{
-					virasa::math::Transform& transform = world.GetTransformComponent(entity);
+					virasa::math::Transform transform = world.Transforms().GetLocal(entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: transform.translation.x = parsed; break;
@@ -650,11 +651,12 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: transform.translation.z = parsed; break;
 						default: break;
 					}
+					world.Transforms().SetLocal(entity, transform);
 					break;
 				}
 				case RowDescriptor::Kind::TransformRotation:
 				{
-					virasa::math::Transform& transform = world.GetTransformComponent(entity);
+					virasa::math::Transform transform = world.Transforms().GetLocal(entity);
 					glm::vec3 eulerDeg = DecomposeQuatToEulerDegreesXYZ(transform.rotation);
 					switch (componentIndexFromSlot())
 					{
@@ -664,11 +666,12 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						default: break;
 					}
 					transform.rotation = ComposeEulerDegreesXYZToQuat(eulerDeg);
+					world.Transforms().SetLocal(entity, transform);
 					break;
 				}
 				case RowDescriptor::Kind::TransformScale:
 				{
-					virasa::math::Transform& transform = world.GetTransformComponent(entity);
+					virasa::math::Transform transform = world.Transforms().GetLocal(entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: transform.scale.x = parsed; break;
@@ -676,11 +679,12 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: transform.scale.z = parsed; break;
 						default: break;
 					}
+					world.Transforms().SetLocal(entity, transform);
 					break;
 				}
 				case RowDescriptor::Kind::DirectionalLightDirection:
 				{
-					auto& component = world.GetDirectionalLightComponent(entity);
+					auto component = virasa::ecs::GetDirectionalLight(world, entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: component.direction.x = parsed; break;
@@ -688,11 +692,12 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: component.direction.z = parsed; break;
 						default: break;
 					}
+					virasa::ecs::SetDirectionalLight(world, entity, component);
 					break;
 				}
 				case RowDescriptor::Kind::DirectionalLightColor:
 				{
-					auto& component = world.GetDirectionalLightComponent(entity);
+					auto component = virasa::ecs::GetDirectionalLight(world, entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: component.color.x = parsed; break;
@@ -700,14 +705,19 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: component.color.z = parsed; break;
 						default: break;
 					}
+					virasa::ecs::SetDirectionalLight(world, entity, component);
 					break;
 				}
 				case RowDescriptor::Kind::DirectionalLightIntensity:
-					world.GetDirectionalLightComponent(entity).intensity = parsed;
+				{
+					auto component = virasa::ecs::GetDirectionalLight(world, entity);
+					component.intensity = parsed;
+					virasa::ecs::SetDirectionalLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::PointLightColor:
 				{
-					auto& component = world.GetPointLightComponent(entity);
+					auto component = virasa::ecs::GetPointLight(world, entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: component.color.x = parsed; break;
@@ -715,17 +725,26 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: component.color.z = parsed; break;
 						default: break;
 					}
+					virasa::ecs::SetPointLight(world, entity, component);
 					break;
 				}
 				case RowDescriptor::Kind::PointLightIntensity:
-					world.GetPointLightComponent(entity).intensity = parsed;
+				{
+					auto component = virasa::ecs::GetPointLight(world, entity);
+					component.intensity = parsed;
+					virasa::ecs::SetPointLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::PointLightRange:
-					world.GetPointLightComponent(entity).range = parsed;
+				{
+					auto component = virasa::ecs::GetPointLight(world, entity);
+					component.range = parsed;
+					virasa::ecs::SetPointLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::SpotLightColor:
 				{
-					auto& component = world.GetSpotLightComponent(entity);
+					auto component = virasa::ecs::GetSpotLight(world, entity);
 					switch (componentIndexFromSlot())
 					{
 						case 0: component.color.x = parsed; break;
@@ -733,32 +752,65 @@ void CommitEdit(EntityEditorView& view, virasa::ecs::World& world, virasa::ecs::
 						case 2: component.color.z = parsed; break;
 						default: break;
 					}
+					virasa::ecs::SetSpotLight(world, entity, component);
 					break;
 				}
 				case RowDescriptor::Kind::SpotLightIntensity:
-					world.GetSpotLightComponent(entity).intensity = parsed;
+				{
+					auto component = virasa::ecs::GetSpotLight(world, entity);
+					component.intensity = parsed;
+					virasa::ecs::SetSpotLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::SpotLightRange:
-					world.GetSpotLightComponent(entity).range = parsed;
+				{
+					auto component = virasa::ecs::GetSpotLight(world, entity);
+					component.range = parsed;
+					virasa::ecs::SetSpotLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::SpotLightInnerConeCos:
-					world.GetSpotLightComponent(entity).innerConeCos = parsed;
+				{
+					auto component = virasa::ecs::GetSpotLight(world, entity);
+					component.innerConeCos = parsed;
+					virasa::ecs::SetSpotLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::SpotLightOuterConeCos:
-					world.GetSpotLightComponent(entity).outerConeCos = parsed;
+				{
+					auto component = virasa::ecs::GetSpotLight(world, entity);
+					component.outerConeCos = parsed;
+					virasa::ecs::SetSpotLight(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::CameraFovY:
-					world.GetCameraComponent(entity).fovY = parsed;
+				{
+					auto component = virasa::ecs::GetCamera(world, entity);
+					component.fovY = parsed;
+					virasa::ecs::SetCamera(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::CameraAspect:
-					world.GetCameraComponent(entity).aspect = parsed;
+				{
+					auto component = virasa::ecs::GetCamera(world, entity);
+					component.aspect = parsed;
+					virasa::ecs::SetCamera(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::CameraNearPlane:
-					world.GetCameraComponent(entity).nearPlane = parsed;
+				{
+					auto component = virasa::ecs::GetCamera(world, entity);
+					component.nearPlane = parsed;
+					virasa::ecs::SetCamera(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::CameraFarPlane:
-					world.GetCameraComponent(entity).farPlane = parsed;
+				{
+					auto component = virasa::ecs::GetCamera(world, entity);
+					component.farPlane = parsed;
+					virasa::ecs::SetCamera(world, entity, component);
 					break;
+				}
 				case RowDescriptor::Kind::MeshId:
 				case RowDescriptor::Kind::VisualMaterialId:
 				case RowDescriptor::Kind::CameraDomain:

@@ -1,6 +1,8 @@
 add_executable(virasa_ecs_tests
     test_Types.cpp
     test_Components.cpp
+    test_ComponentSystem.cpp
+    test_TransformSystem.cpp
     test_World.cpp
 )
 

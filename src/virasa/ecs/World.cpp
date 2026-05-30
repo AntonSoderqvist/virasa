@@ -2,874 +2,658 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <string>
+#include <unordered_map>
 
 namespace virasa::ecs
 {
 
-static constexpr uint32_t kSparseNone = 0xFFFFFFFFu;
-
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Construction / destruction
 // ---------------------------------------------------------------------------
 
-void World::EnsureSparseCapacity(std::vector<uint32_t>& sparse, uint32_t index)
+World::World()
 {
-	if (index >= static_cast<uint32_t>(sparse.size()))
-	{
-		sparse.resize(static_cast<size_t>(index) + 1u, kSparseNone);
-	}
+	// Register built-in systems in the pinned order:
+	// 0 – Transform, 1 – Mesh, 2 – Visual, 3 – DirectionalLight,
+	// 4 – PointLight, 5 – SpotLight, 6 – Camera
+
+	auto transformSys = std::make_unique<TransformSystem>(0u);
+	_transformSystem = transformSys.get();
+	RegisterSystem(std::move(transformSys));
+
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		1u, "Mesh", sizeof(MeshComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		2u, "Visual", sizeof(VisualComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		3u, "DirectionalLight", sizeof(DirectionalLightComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		4u, "PointLight", sizeof(PointLightComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		5u, "SpotLight", sizeof(SpotLightComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		6u, "Camera", sizeof(CameraComponent)));
 }
-
-void World::RemoveFromRoots(virasa::ecs::Entity entity) noexcept
-{
-	auto it = std::find(_roots.begin(), _roots.end(), entity);
-	if (it != _roots.end())
-	{
-		*it = _roots.back();
-		_roots.pop_back();
-	}
-}
-
-void World::RemoveFromChildren(
-	std::vector<virasa::ecs::Entity>& children, virasa::ecs::Entity entity) noexcept
-{
-	auto it = std::find(children.begin(), children.end(), entity);
-	if (it != children.end())
-	{
-		*it = children.back();
-		children.pop_back();
-	}
-}
-
-std::string World::MakeUniqueEntityName(std::string_view name) const
-{
-	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
-
-	auto nameExists = [this](std::string_view candidate) -> bool
-	{
-		for (size_t i = 0; i < _nameValues.size(); ++i)
-		{
-			if (_nameValues[i].name == candidate)
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
-	if (!nameExists(baseName))
-	{
-		return baseName;
-	}
-
-	for (uint32_t suffix = 1u;; ++suffix)
-	{
-		std::string candidate = baseName;
-		candidate.push_back('.');
-		if (suffix <= 999u)
-		{
-			if (suffix < 10u)
-			{
-				candidate.append("00");
-			}
-			else if (suffix < 100u)
-			{
-				candidate.push_back('0');
-			}
-		}
-		candidate += std::to_string(suffix);
-
-		if (!nameExists(candidate))
-		{
-			return candidate;
-		}
-	}
-}
-
-void World::RemoveNameComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasNameComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _nameSparse[entity.index];
-	const uint32_t lastIdx = static_cast<uint32_t>(_nameValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
-	{
-		_nameValues[denseIdx] = std::move(_nameValues[lastIdx]);
-		_nameEntities[denseIdx] = _nameEntities[lastIdx];
-		_nameSparse[_nameEntities[denseIdx].index] = denseIdx;
-	}
-
-	_nameValues.pop_back();
-	_nameEntities.pop_back();
-	_nameSparse[entity.index] = kSparseNone;
-}
-
-void World::RemoveTransformComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasTransformComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _transformSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_transformValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
-	{
-		// Swap with last
-		_transformValues[denseIdx]   = std::move(_transformValues[lastIdx]);
-		_transformEntities[denseIdx] = _transformEntities[lastIdx];
-		_transformSparse[_transformEntities[denseIdx].index] = denseIdx;
-	}
-
-	_transformValues.pop_back();
-	_transformEntities.pop_back();
-	_transformSparse[entity.index] = kSparseNone;
-}
-
-void World::RemoveMeshComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasMeshComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _meshSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_meshValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
-	{
-		_meshValues[denseIdx]   = _meshValues[lastIdx];
-		_meshEntities[denseIdx] = _meshEntities[lastIdx];
-		_meshSparse[_meshEntities[denseIdx].index] = denseIdx;
-	}
-
-	_meshValues.pop_back();
-	_meshEntities.pop_back();
-	_meshSparse[entity.index] = kSparseNone;
-}
-
-void World::RemoveVisualComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasVisualComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _visualSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_visualValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
-	{
-		_visualValues[denseIdx]   = _visualValues[lastIdx];
-		_visualEntities[denseIdx] = _visualEntities[lastIdx];
-		_visualSparse[_visualEntities[denseIdx].index] = denseIdx;
-	}
-
-	_visualValues.pop_back();
-	_visualEntities.pop_back();
-	_visualSparse[entity.index] = kSparseNone;
-}
-
-void World::DestroyEntityInternal(virasa::ecs::Entity entity, bool detachFromParent)
-{
-	// Recursively destroy children first (depth-first)
-	// Copy children vector because we'll be mutating it during recursion
-	std::vector<virasa::ecs::Entity> childrenCopy = _children[entity.index];
-	for (virasa::ecs::Entity child : childrenCopy)
-	{
-		// Children don't need to detach from this entity (it's being destroyed)
-		DestroyEntityInternal(child, false);
-	}
-
-	// (a) Remove components
-	RemoveNameComponentInternal(entity);
-	RemoveTransformComponentInternal(entity);
-	RemoveMeshComponentInternal(entity);
-	RemoveVisualComponentInternal(entity);
-	RemoveDirectionalLightComponentInternal(entity);
-	RemovePointLightComponentInternal(entity);
-	RemoveSpotLightComponentInternal(entity);
-	RemoveCameraComponentInternal(entity);
-
-	// (b) Hierarchy detachment
-	if (detachFromParent)
-	{
-		virasa::ecs::Entity parentEntity = _parents[entity.index];
-		if (parentEntity != virasa::ecs::Entity::Invalid())
-		{
-			auto& parentChildren = _children[parentEntity.index];
-			RemoveFromChildren(parentChildren, entity);
-		}
-		else
-		{
-			RemoveFromRoots(entity);
-		}
-	}
-
-	// Clear this entity's children vector
-	_children[entity.index].clear();
-	_parents[entity.index] = virasa::ecs::Entity::Invalid();
-
-	// (c) Generation bump
-	_generations[entity.index]++;
-	_alive[entity.index] = false;
-
-	// (d) Free-list push
-	_freeList.push_back(entity.index);
-
-	--_entityCount;
-}
-
-// ---------------------------------------------------------------------------
-// Move operations
-// ---------------------------------------------------------------------------
 
 World::World(World&& other) noexcept
-	: _generations(std::move(other._generations))
-	, _alive(std::move(other._alive))
+	: _slots(std::move(other._slots))
 	, _parents(std::move(other._parents))
 	, _children(std::move(other._children))
-	, _freeList(std::move(other._freeList))
 	, _roots(std::move(other._roots))
+	, _freeList(std::move(other._freeList))
 	, _entityCount(other._entityCount)
-	, _nameValues(std::move(other._nameValues))
+	, _nameComponents(std::move(other._nameComponents))
 	, _nameEntities(std::move(other._nameEntities))
 	, _nameSparse(std::move(other._nameSparse))
-	, _transformValues(std::move(other._transformValues))
-	, _transformEntities(std::move(other._transformEntities))
-	, _transformSparse(std::move(other._transformSparse))
-	, _meshValues(std::move(other._meshValues))
-	, _meshEntities(std::move(other._meshEntities))
-	, _meshSparse(std::move(other._meshSparse))
-	, _visualValues(std::move(other._visualValues))
-	, _visualEntities(std::move(other._visualEntities))
-	, _visualSparse(std::move(other._visualSparse))
-	, _directionalLightValues(std::move(other._directionalLightValues))
-	, _directionalLightEntities(std::move(other._directionalLightEntities))
-	, _directionalLightSparse(std::move(other._directionalLightSparse))
-	, _pointLightValues(std::move(other._pointLightValues))
-	, _pointLightEntities(std::move(other._pointLightEntities))
-	, _pointLightSparse(std::move(other._pointLightSparse))
-	, _spotLightValues(std::move(other._spotLightValues))
-	, _spotLightEntities(std::move(other._spotLightEntities))
-	, _spotLightSparse(std::move(other._spotLightSparse))
-	, _cameraValues(std::move(other._cameraValues))
-	, _cameraEntities(std::move(other._cameraEntities))
-	, _cameraSparse(std::move(other._cameraSparse))
+	, _systems(std::move(other._systems))
+	, _systemNameToId(std::move(other._systemNameToId))
+	, _transformSystem(other._transformSystem)
 {
 	other._entityCount = 0u;
+	other._transformSystem = nullptr;
 }
 
 World& World::operator=(World&& other) noexcept
 {
-	if (this != &other)
-	{
-		_generations       = std::move(other._generations);
-		_alive             = std::move(other._alive);
-		_freeList          = std::move(other._freeList);
-		_roots             = std::move(other._roots);
-		_parents           = std::move(other._parents);
-		_children          = std::move(other._children);
-		_entityCount       = other._entityCount;
-		_nameValues        = std::move(other._nameValues);
-		_nameEntities      = std::move(other._nameEntities);
-		_nameSparse        = std::move(other._nameSparse);
-		_transformValues   = std::move(other._transformValues);
-		_transformEntities = std::move(other._transformEntities);
-		_transformSparse   = std::move(other._transformSparse);
-		_meshValues        = std::move(other._meshValues);
-		_meshEntities      = std::move(other._meshEntities);
-		_meshSparse        = std::move(other._meshSparse);
-		_visualValues               = std::move(other._visualValues);
-		_visualEntities             = std::move(other._visualEntities);
-		_visualSparse               = std::move(other._visualSparse);
-		_directionalLightValues     = std::move(other._directionalLightValues);
-		_directionalLightEntities   = std::move(other._directionalLightEntities);
-		_directionalLightSparse     = std::move(other._directionalLightSparse);
-		_pointLightValues           = std::move(other._pointLightValues);
-		_pointLightEntities         = std::move(other._pointLightEntities);
-		_pointLightSparse           = std::move(other._pointLightSparse);
-		_spotLightValues            = std::move(other._spotLightValues);
-		_spotLightEntities          = std::move(other._spotLightEntities);
-		_spotLightSparse            = std::move(other._spotLightSparse);
-		_cameraValues               = std::move(other._cameraValues);
-		_cameraEntities             = std::move(other._cameraEntities);
-		_cameraSparse               = std::move(other._cameraSparse);
-		other._entityCount          = 0u;
-	}
+	if (this == &other)
+		return *this;
+
+	// Tear down existing state (systems destroyed via unique_ptr)
+	_systems.clear();
+	_systemNameToId.clear();
+	_slots.clear();
+	_parents.clear();
+	_children.clear();
+	_roots.clear();
+	_freeList.clear();
+	_entityCount = 0u;
+	_nameComponents.clear();
+	_nameEntities.clear();
+	_nameSparse.clear();
+	_transformSystem = nullptr;
+
+	// Take ownership
+	_slots = std::move(other._slots);
+	_parents = std::move(other._parents);
+	_children = std::move(other._children);
+	_roots = std::move(other._roots);
+	_freeList = std::move(other._freeList);
+	_entityCount = other._entityCount;
+	_nameComponents = std::move(other._nameComponents);
+	_nameEntities = std::move(other._nameEntities);
+	_nameSparse = std::move(other._nameSparse);
+	_systems = std::move(other._systems);
+	_systemNameToId = std::move(other._systemNameToId);
+	_transformSystem = other._transformSystem;
+
+	other._entityCount = 0u;
+	other._transformSystem = nullptr;
+
 	return *this;
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Entity creation
 // ---------------------------------------------------------------------------
 
-virasa::ecs::Entity World::CreateEntity(std::string_view name)
+Entity World::CreateEntity(std::string_view name)
 {
-	uint32_t slotIndex = 0u;
-	uint32_t generation = 0u;
+	uint32_t index;
+	uint32_t generation;
 
 	if (!_freeList.empty())
 	{
-		slotIndex = _freeList.back();
+		index = _freeList.back();
 		_freeList.pop_back();
-		generation = _generations[slotIndex];
-		_alive[slotIndex] = true;
-		_parents[slotIndex] = virasa::ecs::Entity::Invalid();
-		_children[slotIndex].clear();
+		generation = _slots[index].generation;
+		_slots[index].live = true;
+		_parents[index] = Entity::Invalid();
+		_children[index].clear();
 	}
 	else
 	{
-		slotIndex = static_cast<uint32_t>(_generations.size());
+		index = static_cast<uint32_t>(_slots.size());
+		assert(index != 0xFFFFFFFFu && "Entity index space exhausted");
 		generation = 0u;
-		_generations.push_back(0u);
-		_alive.push_back(true);
-		_parents.push_back(virasa::ecs::Entity::Invalid());
+		_slots.push_back({ 0u, true });
+		_parents.push_back(Entity::Invalid());
 		_children.emplace_back();
 	}
 
-	virasa::ecs::Entity entity;
-	entity.index = slotIndex;
+	Entity entity;
+	entity.index = index;
 	entity.generation = generation;
 
-	EnsureSparseCapacity(_nameSparse, entity.index);
-	const uint32_t denseIdx = static_cast<uint32_t>(_nameValues.size());
-	_nameValues.push_back(virasa::ecs::NameComponent{MakeUniqueEntityName(name)});
-	_nameEntities.push_back(entity);
-	_nameSparse[entity.index] = denseIdx;
-
-	_roots.push_back(entity);
 	++_entityCount;
+
+	// Attach NameComponent
+	std::string uniqueName = ResolveUniqueName(name);
+	AddNameComponent(entity, std::move(uniqueName));
+
+	// New entity has no parent → it is a root
+	_roots.push_back(entity);
+
 	return entity;
 }
 
-void World::DestroyEntity(virasa::ecs::Entity entity)
+// ---------------------------------------------------------------------------
+// Entity destruction
+// ---------------------------------------------------------------------------
+
+void World::DestroyEntityInternal(Entity entity, bool isRoot)
 {
+	uint32_t idx = entity.index;
+
+	// Recurse into children first (depth-first)
+	// Copy children list since we'll be modifying it
+	std::vector<Entity> childrenCopy = _children[idx];
+	for (Entity child : childrenCopy)
+	{
+		DestroyEntityInternal(child, false);
+	}
+
+	// (a) Remove NameComponent
+	RemoveNameComponent(entity);
+
+	// (a) Remove from all registered component systems
+	for (auto& sys : _systems)
+	{
+		if (sys->Has(entity))
+		{
+			sys->Remove(entity);
+		}
+	}
+
+	// (b) Hierarchy detachment
+	Entity parent = _parents[idx];
+	if (parent != Entity::Invalid())
+	{
+		// Remove from parent's children vector (swap-and-pop)
+		auto& siblings = _children[parent.index];
+		for (size_t i = 0; i < siblings.size(); ++i)
+		{
+			if (siblings[i] == entity)
+			{
+				siblings[i] = siblings.back();
+				siblings.pop_back();
+				break;
+			}
+		}
+	}
+	else if (isRoot)
+	{
+		// Remove from roots vector (swap-and-pop)
+		for (size_t i = 0; i < _roots.size(); ++i)
+		{
+			if (_roots[i] == entity)
+			{
+				_roots[i] = _roots.back();
+				_roots.pop_back();
+				break;
+			}
+		}
+	}
+
+	_children[idx].clear();
+	_parents[idx] = Entity::Invalid();
+
+	// (c) Generation bump
+	_slots[idx].generation++;
+	_slots[idx].live = false;
+
+	// (d) Free-list push
+	_freeList.push_back(idx);
+
+	--_entityCount;
+}
+
+void World::DestroyEntity(Entity entity)
+{
+	assert(IsValid(entity));
 	DestroyEntityInternal(entity, true);
 }
 
-bool World::IsValid(virasa::ecs::Entity entity) const noexcept
+// ---------------------------------------------------------------------------
+// IsValid
+// ---------------------------------------------------------------------------
+
+bool World::IsValid(Entity entity) const noexcept
 {
-	if (entity.index >= static_cast<uint32_t>(_generations.size()))
+	if (entity.index >= static_cast<uint32_t>(_slots.size()))
 		return false;
-	if (!_alive[entity.index])
-		return false;
-	return _generations[entity.index] == entity.generation;
+	const Slot& slot = _slots[entity.index];
+	return slot.live && slot.generation == entity.generation;
 }
+
+// ---------------------------------------------------------------------------
+// Reserve
+// ---------------------------------------------------------------------------
 
 void World::Reserve(uint32_t entityCapacity)
 {
-	_generations.reserve(entityCapacity);
-	_alive.reserve(entityCapacity);
+	_slots.reserve(entityCapacity);
 	_parents.reserve(entityCapacity);
 	_children.reserve(entityCapacity);
 }
+
+// ---------------------------------------------------------------------------
+// GetEntityCount
+// ---------------------------------------------------------------------------
 
 uint32_t World::GetEntityCount() const noexcept
 {
 	return _entityCount;
 }
 
-virasa::ecs::EcsError World::SetParent(virasa::ecs::Entity child, virasa::ecs::Entity parent)
+// ---------------------------------------------------------------------------
+// Hierarchy
+// ---------------------------------------------------------------------------
+
+EcsError World::SetParent(Entity child, Entity parent)
 {
-	if (child == virasa::ecs::Entity::Invalid() || !IsValid(child))
-		return virasa::ecs::EcsError::InvalidEntity;
+	// (1) child must be valid
+	if (child == Entity::Invalid() || !IsValid(child))
+		return EcsError::InvalidEntity;
 
-	if (parent != virasa::ecs::Entity::Invalid() && !IsValid(parent))
-		return virasa::ecs::EcsError::InvalidEntity;
+	// (2) parent must be valid or Invalid()
+	if (parent != Entity::Invalid() && !IsValid(parent))
+		return EcsError::InvalidEntity;
 
+	// (3) self-parent
 	if (parent == child)
-		return virasa::ecs::EcsError::SelfParent;
+		return EcsError::SelfParent;
 
-	if (parent != virasa::ecs::Entity::Invalid())
+	// (4) cycle detection: walk up from parent
+	if (parent != Entity::Invalid())
 	{
-		virasa::ecs::Entity ancestor = parent;
-		while (ancestor != virasa::ecs::Entity::Invalid())
+		Entity ancestor = parent;
+		while (ancestor != Entity::Invalid())
 		{
 			if (ancestor == child)
-				return virasa::ecs::EcsError::CycleDetected;
+				return EcsError::CycleDetected;
 			ancestor = _parents[ancestor.index];
 		}
 	}
 
-	virasa::ecs::Entity currentParent = _parents[child.index];
-	if (currentParent == parent)
+	// (5) Perform the reparent
+	Entity oldParent = _parents[child.index];
+
+	// Detach from old parent
+	if (oldParent != Entity::Invalid())
 	{
-		return virasa::ecs::EcsError::None;
+		auto& siblings = _children[oldParent.index];
+		for (size_t i = 0; i < siblings.size(); ++i)
+		{
+			if (siblings[i] == child)
+			{
+				siblings[i] = siblings.back();
+				siblings.pop_back();
+				break;
+			}
+		}
 	}
 
-	if (currentParent != virasa::ecs::Entity::Invalid())
-	{
-		auto& siblings = _children[currentParent.index];
-		RemoveFromChildren(siblings, child);
-	}
-	else if (parent != virasa::ecs::Entity::Invalid())
-	{
-		RemoveFromRoots(child);
-	}
-
+	// Update parent entry
 	_parents[child.index] = parent;
 
-	if (parent != virasa::ecs::Entity::Invalid())
+	// Attach to new parent
+	if (parent != Entity::Invalid())
 	{
 		_children[parent.index].push_back(child);
 	}
-	else if (currentParent != virasa::ecs::Entity::Invalid())
+
+	// Roots maintenance
+	bool wasRoot = (oldParent == Entity::Invalid());
+	bool isRoot  = (parent == Entity::Invalid());
+
+	if (wasRoot && !isRoot)
+	{
+		// Remove from roots
+		for (size_t i = 0; i < _roots.size(); ++i)
+		{
+			if (_roots[i] == child)
+			{
+				_roots[i] = _roots.back();
+				_roots.pop_back();
+				break;
+			}
+		}
+	}
+	else if (!wasRoot && isRoot)
 	{
 		_roots.push_back(child);
 	}
 
-	return virasa::ecs::EcsError::None;
+	return EcsError::None;
 }
 
-virasa::ecs::Entity World::GetParent(virasa::ecs::Entity entity) const noexcept
+Entity World::GetParent(Entity entity) const noexcept
 {
 	return _parents[entity.index];
 }
 
-const std::vector<virasa::ecs::Entity>& World::GetChildren(virasa::ecs::Entity entity) const
+const std::vector<Entity>& World::GetChildren(Entity entity) const
 {
 	return _children[entity.index];
 }
 
-const std::vector<virasa::ecs::Entity>& World::GetRoots() const noexcept
+const std::vector<Entity>& World::GetRoots() const noexcept
 {
 	return _roots;
 }
 
-virasa::ecs::Entity World::FindEntityByName(std::string_view name) const
+// ---------------------------------------------------------------------------
+// Name component storage helpers
+// ---------------------------------------------------------------------------
+
+std::string World::ResolveUniqueName(std::string_view name) const
+{
+	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
+
+	// Check if baseName is already unique
+	bool found = false;
+	for (const auto& nc : _nameComponents)
+	{
+		if (nc.name == baseName)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+		return baseName;
+
+	// Try suffixes .001, .002, ...
+	for (uint32_t suffix = 1; ; ++suffix)
+	{
+		std::string candidate;
+		if (suffix < 1000u)
+		{
+			char buf[8];
+			std::snprintf(buf, sizeof(buf), "%03u", suffix);
+			candidate = baseName + "." + buf;
+		}
+		else
+		{
+			candidate = baseName + "." + std::to_string(suffix);
+		}
+
+		bool collision = false;
+		for (const auto& nc : _nameComponents)
+		{
+			if (nc.name == candidate)
+			{
+				collision = true;
+				break;
+			}
+		}
+		if (!collision)
+			return candidate;
+	}
+}
+
+void World::AddNameComponent(Entity entity, std::string uniqueName)
+{
+	// Grow sparse vector if needed
+	if (entity.index >= static_cast<uint32_t>(_nameSparse.size()))
+		_nameSparse.resize(entity.index + 1u, 0xFFFFFFFFu);
+
+	uint32_t denseIndex = static_cast<uint32_t>(_nameComponents.size());
+	_nameSparse[entity.index] = denseIndex;
+
+	NameComponent nc;
+	nc.name = std::move(uniqueName);
+	_nameComponents.push_back(std::move(nc));
+	_nameEntities.push_back(entity);
+}
+
+void World::RemoveNameComponent(Entity entity)
+{
+	if (entity.index >= static_cast<uint32_t>(_nameSparse.size()))
+		return;
+	uint32_t denseIdx = _nameSparse[entity.index];
+	if (denseIdx == 0xFFFFFFFFu)
+		return;
+
+	uint32_t lastIdx = static_cast<uint32_t>(_nameComponents.size()) - 1u;
+	if (denseIdx != lastIdx)
+	{
+		// Swap with last
+		_nameComponents[denseIdx] = std::move(_nameComponents[lastIdx]);
+		_nameEntities[denseIdx] = _nameEntities[lastIdx];
+		// Update sparse for swapped entity
+		_nameSparse[_nameEntities[denseIdx].index] = denseIdx;
+	}
+
+	_nameComponents.pop_back();
+	_nameEntities.pop_back();
+	_nameSparse[entity.index] = 0xFFFFFFFFu;
+}
+
+// ---------------------------------------------------------------------------
+// Name component accessors
+// ---------------------------------------------------------------------------
+
+Entity World::FindEntityByName(std::string_view name) const
 {
 	for (size_t i = 0; i < _nameEntities.size(); ++i)
 	{
-		if (_nameValues[i].name == name)
-		{
+		if (_nameComponents[i].name == name)
 			return _nameEntities[i];
-		}
 	}
-
-	return virasa::ecs::Entity::Invalid();
+	return Entity::Invalid();
 }
 
-bool World::HasNameComponent(virasa::ecs::Entity entity) const noexcept
+bool World::HasNameComponent(Entity entity) const noexcept
 {
 	if (!IsValid(entity))
 		return false;
 	if (entity.index >= static_cast<uint32_t>(_nameSparse.size()))
 		return false;
-	const uint32_t denseIdx = _nameSparse[entity.index];
-	if (denseIdx == kSparseNone)
+	uint32_t denseIdx = _nameSparse[entity.index];
+	if (denseIdx == 0xFFFFFFFFu)
 		return false;
 	return _nameEntities[denseIdx] == entity;
 }
 
-const virasa::ecs::NameComponent& World::GetNameComponent(virasa::ecs::Entity entity) const
+const NameComponent& World::GetNameComponent(Entity entity) const
 {
-	return _nameValues[_nameSparse[entity.index]];
+	assert(HasNameComponent(entity));
+	return _nameComponents[_nameSparse[entity.index]];
 }
 
-const std::vector<virasa::ecs::Entity>& World::GetNameComponentEntities() const noexcept
+const std::vector<Entity>& World::GetNameComponentEntities() const noexcept
 {
 	return _nameEntities;
 }
 
 // ---------------------------------------------------------------------------
-// Transform component
+// System registry
 // ---------------------------------------------------------------------------
 
-void World::AddTransformComponent(virasa::ecs::Entity entity, const virasa::math::Transform& transform)
+ComponentId World::RegisterSystem(std::unique_ptr<ComponentSystem> system)
 {
-	EnsureSparseCapacity(_transformSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_transformValues.size());
-	_transformValues.push_back(transform);
-	_transformEntities.push_back(entity);
-	_transformSparse[entity.index] = denseIdx;
+	assert(system != nullptr);
+	ComponentId id = static_cast<ComponentId>(_systems.size());
+	// Per the contract, RegisterSystem assigns the next dense id and writes it
+	// into the system so its own Id() returns the assigned value.
+	system->SetId(id);
+	_systemNameToId.emplace_back(system->Name(), id);
+	_systems.push_back(std::move(system));
+	return id;
 }
 
-void World::RemoveTransformComponent(virasa::ecs::Entity entity)
+ComponentId World::GetSystemId(std::string_view name) const noexcept
 {
-	RemoveTransformComponentInternal(entity);
-}
-
-bool World::HasTransformComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_transformSparse.size()))
-		return false;
-	const uint32_t denseIdx = _transformSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _transformEntities[denseIdx] == entity;
-}
-
-const virasa::math::Transform& World::GetTransformComponent(virasa::ecs::Entity entity) const
-{
-	return _transformValues[_transformSparse[entity.index]];
-}
-
-virasa::math::Transform& World::GetTransformComponent(virasa::ecs::Entity entity)
-{
-	return _transformValues[_transformSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetTransformComponentEntities() const noexcept
-{
-	return _transformEntities;
-}
-
-// ---------------------------------------------------------------------------
-// MeshComponent
-// ---------------------------------------------------------------------------
-
-void World::AddMeshComponent(virasa::ecs::Entity entity, virasa::ecs::MeshComponent component)
-{
-	EnsureSparseCapacity(_meshSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_meshValues.size());
-	_meshValues.push_back(component);
-	_meshEntities.push_back(entity);
-	_meshSparse[entity.index] = denseIdx;
-}
-
-void World::RemoveMeshComponent(virasa::ecs::Entity entity)
-{
-	RemoveMeshComponentInternal(entity);
-}
-
-bool World::HasMeshComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_meshSparse.size()))
-		return false;
-	const uint32_t denseIdx = _meshSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _meshEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::MeshComponent& World::GetMeshComponent(virasa::ecs::Entity entity) const
-{
-	return _meshValues[_meshSparse[entity.index]];
-}
-
-virasa::ecs::MeshComponent& World::GetMeshComponent(virasa::ecs::Entity entity)
-{
-	return _meshValues[_meshSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetMeshComponentEntities() const noexcept
-{
-	return _meshEntities;
-}
-
-// ---------------------------------------------------------------------------
-// VisualComponent
-// ---------------------------------------------------------------------------
-
-void World::AddVisualComponent(virasa::ecs::Entity entity, virasa::ecs::VisualComponent component)
-{
-	EnsureSparseCapacity(_visualSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_visualValues.size());
-	_visualValues.push_back(component);
-	_visualEntities.push_back(entity);
-	_visualSparse[entity.index] = denseIdx;
-}
-
-void World::RemoveVisualComponent(virasa::ecs::Entity entity)
-{
-	RemoveVisualComponentInternal(entity);
-}
-
-bool World::HasVisualComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_visualSparse.size()))
-		return false;
-	const uint32_t denseIdx = _visualSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _visualEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::VisualComponent& World::GetVisualComponent(virasa::ecs::Entity entity) const
-{
-	return _visualValues[_visualSparse[entity.index]];
-}
-
-virasa::ecs::VisualComponent& World::GetVisualComponent(virasa::ecs::Entity entity)
-{
-	return _visualValues[_visualSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetVisualComponentEntities() const noexcept
-{
-	return _visualEntities;
-}
-
-// ---------------------------------------------------------------------------
-// DirectionalLightComponent
-// ---------------------------------------------------------------------------
-
-void World::RemoveDirectionalLightComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasDirectionalLightComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _directionalLightSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_directionalLightValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
+	for (const auto& [sysName, sysId] : _systemNameToId)
 	{
-		_directionalLightValues[denseIdx]   = _directionalLightValues[lastIdx];
-		_directionalLightEntities[denseIdx] = _directionalLightEntities[lastIdx];
-		_directionalLightSparse[_directionalLightEntities[denseIdx].index] = denseIdx;
+		if (sysName == name)
+			return sysId;
+	}
+	return kInvalidComponentId;
+}
+
+ComponentSystem& World::GetSystem(ComponentId id)
+{
+	assert(id < static_cast<ComponentId>(_systems.size()));
+	return *_systems[id];
+}
+
+const ComponentSystem& World::GetSystem(ComponentId id) const
+{
+	assert(id < static_cast<ComponentId>(_systems.size()));
+	return *_systems[id];
+}
+
+ComponentSystem* World::FindSystem(std::string_view name) noexcept
+{
+	ComponentId id = GetSystemId(name);
+	if (id == kInvalidComponentId)
+		return nullptr;
+	return _systems[id].get();
+}
+
+// ---------------------------------------------------------------------------
+// GetEntities
+// ---------------------------------------------------------------------------
+
+std::vector<Entity> World::GetEntities(
+	std::initializer_list<ComponentId> components) const
+{
+	if (components.size() == 0)
+		return {};
+
+	// Find the system with the smallest Size()
+	const ComponentSystem* smallest = nullptr;
+	for (ComponentId id : components)
+	{
+		const ComponentSystem* sys = _systems[id].get();
+		if (smallest == nullptr || sys->Size() < smallest->Size())
+			smallest = sys;
 	}
 
-	_directionalLightValues.pop_back();
-	_directionalLightEntities.pop_back();
-	_directionalLightSparse[entity.index] = kSparseNone;
-}
+	std::vector<Entity> result;
+	result.reserve(smallest->Size());
 
-void World::AddDirectionalLightComponent(virasa::ecs::Entity entity, virasa::ecs::DirectionalLightComponent component)
-{
-	EnsureSparseCapacity(_directionalLightSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_directionalLightValues.size());
-	_directionalLightValues.push_back(component);
-	_directionalLightEntities.push_back(entity);
-	_directionalLightSparse[entity.index] = denseIdx;
-}
-
-void World::RemoveDirectionalLightComponent(virasa::ecs::Entity entity)
-{
-	RemoveDirectionalLightComponentInternal(entity);
-}
-
-bool World::HasDirectionalLightComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_directionalLightSparse.size()))
-		return false;
-	const uint32_t denseIdx = _directionalLightSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _directionalLightEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::DirectionalLightComponent& World::GetDirectionalLightComponent(virasa::ecs::Entity entity) const
-{
-	return _directionalLightValues[_directionalLightSparse[entity.index]];
-}
-
-virasa::ecs::DirectionalLightComponent& World::GetDirectionalLightComponent(virasa::ecs::Entity entity)
-{
-	return _directionalLightValues[_directionalLightSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetDirectionalLightComponentEntities() const noexcept
-{
-	return _directionalLightEntities;
-}
-
-// ---------------------------------------------------------------------------
-// PointLightComponent
-// ---------------------------------------------------------------------------
-
-void World::RemovePointLightComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasPointLightComponent(entity))
-		return;
-
-	const uint32_t denseIdx = _pointLightSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_pointLightValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
+	for (const Entity& entity : smallest->Entities())
 	{
-		_pointLightValues[denseIdx]   = _pointLightValues[lastIdx];
-		_pointLightEntities[denseIdx] = _pointLightEntities[lastIdx];
-		_pointLightSparse[_pointLightEntities[denseIdx].index] = denseIdx;
+		bool hasAll = true;
+		for (ComponentId id : components)
+		{
+			if (!_systems[id]->Has(entity))
+			{
+				hasAll = false;
+				break;
+			}
+		}
+		if (hasAll)
+			result.push_back(entity);
 	}
 
-	_pointLightValues.pop_back();
-	_pointLightEntities.pop_back();
-	_pointLightSparse[entity.index] = kSparseNone;
-}
-
-void World::AddPointLightComponent(virasa::ecs::Entity entity, virasa::ecs::PointLightComponent component)
-{
-	EnsureSparseCapacity(_pointLightSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_pointLightValues.size());
-	_pointLightValues.push_back(component);
-	_pointLightEntities.push_back(entity);
-	_pointLightSparse[entity.index] = denseIdx;
-}
-
-void World::RemovePointLightComponent(virasa::ecs::Entity entity)
-{
-	RemovePointLightComponentInternal(entity);
-}
-
-bool World::HasPointLightComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_pointLightSparse.size()))
-		return false;
-	const uint32_t denseIdx = _pointLightSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _pointLightEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::PointLightComponent& World::GetPointLightComponent(virasa::ecs::Entity entity) const
-{
-	return _pointLightValues[_pointLightSparse[entity.index]];
-}
-
-virasa::ecs::PointLightComponent& World::GetPointLightComponent(virasa::ecs::Entity entity)
-{
-	return _pointLightValues[_pointLightSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetPointLightComponentEntities() const noexcept
-{
-	return _pointLightEntities;
+	return result;
 }
 
 // ---------------------------------------------------------------------------
-// SpotLightComponent
+// Transform accessors
 // ---------------------------------------------------------------------------
 
-void World::RemoveSpotLightComponentInternal(virasa::ecs::Entity entity)
+TransformSystem& World::Transforms() noexcept
 {
-	if (!HasSpotLightComponent(entity))
+	return *_transformSystem;
+}
+
+const TransformSystem& World::GetTransforms() const noexcept
+{
+	return *_transformSystem;
+}
+
+// ---------------------------------------------------------------------------
+// UpdateTransforms
+// ---------------------------------------------------------------------------
+
+void World::UpdateTransformsRecursive(
+	Entity entity,
+	const virasa::math::Mat4* parentWorld)
+{
+	if (!_transformSystem->Has(entity))
 		return;
 
-	const uint32_t denseIdx = _spotLightSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_spotLightValues.size()) - 1u;
-
-	if (denseIdx != lastIdx)
+	virasa::math::Mat4 world;
+	if (parentWorld == nullptr)
 	{
-		_spotLightValues[denseIdx]   = _spotLightValues[lastIdx];
-		_spotLightEntities[denseIdx] = _spotLightEntities[lastIdx];
-		_spotLightSparse[_spotLightEntities[denseIdx].index] = denseIdx;
+		world = _transformSystem->GetLocal(entity).ToMatrix();
 	}
+	else
+	{
+		world = (*parentWorld) * _transformSystem->GetLocal(entity).ToMatrix();
+	}
+	_transformSystem->SetWorld(entity, world);
 
-	_spotLightValues.pop_back();
-	_spotLightEntities.pop_back();
-	_spotLightSparse[entity.index] = kSparseNone;
+	for (const Entity& child : _children[entity.index])
+	{
+		UpdateTransformsRecursive(child, &world);
+	}
 }
 
-void World::AddSpotLightComponent(virasa::ecs::Entity entity, virasa::ecs::SpotLightComponent component)
+void World::UpdateTransforms()
 {
-	EnsureSparseCapacity(_spotLightSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_spotLightValues.size());
-	_spotLightValues.push_back(component);
-	_spotLightEntities.push_back(entity);
-	_spotLightSparse[entity.index] = denseIdx;
-}
-
-void World::RemoveSpotLightComponent(virasa::ecs::Entity entity)
-{
-	RemoveSpotLightComponentInternal(entity);
-}
-
-bool World::HasSpotLightComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_spotLightSparse.size()))
-		return false;
-	const uint32_t denseIdx = _spotLightSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _spotLightEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::SpotLightComponent& World::GetSpotLightComponent(virasa::ecs::Entity entity) const
-{
-	return _spotLightValues[_spotLightSparse[entity.index]];
-}
-
-virasa::ecs::SpotLightComponent& World::GetSpotLightComponent(virasa::ecs::Entity entity)
-{
-	return _spotLightValues[_spotLightSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetSpotLightComponentEntities() const noexcept
-{
-	return _spotLightEntities;
-}
-
-// ---------------------------------------------------------------------------
-// CameraComponent
-// ---------------------------------------------------------------------------
-
-void World::RemoveCameraComponentInternal(virasa::ecs::Entity entity)
-{
-	if (!HasCameraComponent(entity))
+	// Collect the set of dirty entities
+	const std::vector<Entity>& dirtyVec = _transformSystem->Dirty();
+	if (dirtyVec.empty())
 		return;
 
-	const uint32_t denseIdx = _cameraSparse[entity.index];
-	const uint32_t lastIdx  = static_cast<uint32_t>(_cameraValues.size()) - 1u;
+	// For each dirty entity, walk up to find the highest ancestor that is
+	// also dirty or is the root of the affected subtree, then propagate
+	// downward from there.
+	// Strategy: collect all "subtree roots" — dirty entities whose parent
+	// either has no transform or is not dirty.
+	// We build a set of dirty entity indices for fast lookup.
+	std::vector<uint32_t> dirtyIndices;
+	dirtyIndices.reserve(dirtyVec.size());
+	for (const Entity& e : dirtyVec)
+		dirtyIndices.push_back(e.index);
 
-	if (denseIdx != lastIdx)
+	// Sort for binary search
+	std::sort(dirtyIndices.begin(), dirtyIndices.end());
+
+	auto isDirty = [&](uint32_t idx) -> bool
 	{
-		_cameraValues[denseIdx]   = _cameraValues[lastIdx];
-		_cameraEntities[denseIdx] = _cameraEntities[lastIdx];
-		_cameraSparse[_cameraEntities[denseIdx].index] = denseIdx;
+		return std::binary_search(dirtyIndices.begin(), dirtyIndices.end(), idx);
+	};
+
+	// Find subtree roots: dirty entities whose parent either doesn't have a
+	// transform or is not dirty.
+	std::vector<Entity> subtreeRoots;
+	for (const Entity& e : dirtyVec)
+	{
+		Entity parent = _parents[e.index];
+		bool parentDirty = false;
+		if (parent != Entity::Invalid() && _transformSystem->Has(parent))
+		{
+			parentDirty = isDirty(parent.index);
+		}
+		if (!parentDirty)
+			subtreeRoots.push_back(e);
 	}
 
-	_cameraValues.pop_back();
-	_cameraEntities.pop_back();
-	_cameraSparse[entity.index] = kSparseNone;
-}
+	// For each subtree root, propagate downward
+	for (const Entity& root : subtreeRoots)
+	{
+		Entity parent = _parents[root.index];
+		if (parent != Entity::Invalid() && _transformSystem->Has(parent))
+		{
+			const virasa::math::Mat4& parentWorld = _transformSystem->GetWorld(parent);
+			UpdateTransformsRecursive(root, &parentWorld);
+		}
+		else
+		{
+			UpdateTransformsRecursive(root, nullptr);
+		}
+	}
 
-void World::AddCameraComponent(virasa::ecs::Entity entity, virasa::ecs::CameraComponent component)
-{
-	EnsureSparseCapacity(_cameraSparse, entity.index);
-
-	const uint32_t denseIdx = static_cast<uint32_t>(_cameraValues.size());
-	_cameraValues.push_back(component);
-	_cameraEntities.push_back(entity);
-	_cameraSparse[entity.index] = denseIdx;
-}
-
-void World::RemoveCameraComponent(virasa::ecs::Entity entity)
-{
-	RemoveCameraComponentInternal(entity);
-}
-
-bool World::HasCameraComponent(virasa::ecs::Entity entity) const noexcept
-{
-	if (!IsValid(entity))
-		return false;
-	if (entity.index >= static_cast<uint32_t>(_cameraSparse.size()))
-		return false;
-	const uint32_t denseIdx = _cameraSparse[entity.index];
-	if (denseIdx == kSparseNone)
-		return false;
-	return _cameraEntities[denseIdx] == entity;
-}
-
-const virasa::ecs::CameraComponent& World::GetCameraComponent(virasa::ecs::Entity entity) const
-{
-	return _cameraValues[_cameraSparse[entity.index]];
-}
-
-virasa::ecs::CameraComponent& World::GetCameraComponent(virasa::ecs::Entity entity)
-{
-	return _cameraValues[_cameraSparse[entity.index]];
-}
-
-const std::vector<virasa::ecs::Entity>& World::GetCameraComponentEntities() const noexcept
-{
-	return _cameraEntities;
+	_transformSystem->ClearAllDirty();
 }
 
 } // namespace virasa::ecs

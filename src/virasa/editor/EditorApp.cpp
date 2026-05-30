@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/ecs/Types.h"
 #include "virasa/ecs/World.h"
@@ -123,9 +124,9 @@ int EditorApp::Run(int argc, char** argv)
 	// Cube entity
 	{
 		virasa::ecs::Entity cubeEntity = world.CreateEntity("Cube");
-		world.AddTransformComponent(cubeEntity, virasa::math::Transform::Identity());
-		world.AddMeshComponent(cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
-		world.AddVisualComponent(cubeEntity, virasa::ecs::VisualComponent{kDefaultMaterialId});
+		world.Transforms().Add(cubeEntity, virasa::math::Transform::Identity());
+		virasa::ecs::AddMesh(world, cubeEntity, virasa::ecs::MeshComponent{cubeMeshId});
+		virasa::ecs::AddVisual(world, cubeEntity, virasa::ecs::VisualComponent{kDefaultMaterialId});
 	}
 
 	// Directional light entity
@@ -135,7 +136,7 @@ int EditorApp::Run(int argc, char** argv)
 		light.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
 		light.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
 		light.intensity = 1.0f;
-		world.AddDirectionalLightComponent(lightEntity, light);
+		virasa::ecs::AddDirectionalLight(world, lightEntity, light);
 	}
 
 	// Camera entity
@@ -145,14 +146,14 @@ int EditorApp::Run(int argc, char** argv)
 
 		virasa::math::Transform camTransform;
 		camTransform.translation = _cameraPosition;
-		world.AddTransformComponent(cameraEntity, camTransform);
+		world.Transforms().Add(cameraEntity, camTransform);
 
 		virasa::ecs::CameraComponent cam;
 		cam.domain = virasa::CameraDomain::Editor;
 		cam.fovY = glm::radians(45.0f);
 		cam.nearPlane = 0.1f;
 		cam.farPlane = 100.0f;
-		world.AddCameraComponent(cameraEntity, cam);
+		virasa::ecs::AddCamera(world, cameraEntity, cam);
 	}
 
 	// Initialise camera yaw/pitch
@@ -323,9 +324,10 @@ int EditorApp::Run(int argc, char** argv)
 							 (wheelScrollY * kZoomSensitivity);
 			}
 
-			auto& camTransform = world.GetTransformComponent(cameraEntity);
+			virasa::math::Transform camTransform = world.Transforms().GetLocal(cameraEntity);
 			camTransform.translation = _cameraPosition;
 			camTransform.rotation = orientation;
+			world.Transforms().SetLocal(cameraEntity, camTransform);
 		}
 
 		// ------------------------------------------------------------------

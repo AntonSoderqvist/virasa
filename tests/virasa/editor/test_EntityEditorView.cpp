@@ -4,6 +4,7 @@
 #include "virasa/ui/EntityEditorPanel.h"
 #include "virasa/ui/Types.h"
 #include "virasa/ui/FontAtlas.h"
+#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/World.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Transform.h"
@@ -84,7 +85,7 @@ TEST(EntityEditorView, test_entity_editor_view_owns_panel_cursor_collapsed_and_e
 
     World world;
     const Entity entity = world.CreateEntity("OwnedState");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.GetCursorRow(), 1u);
@@ -148,13 +149,13 @@ TEST(EntityEditorView, test_component_section_order_is_fixed)
 
     const Entity entity = world.CreateEntity("OrderedEntity");
 
-    world.AddCameraComponent(entity, CameraComponent{});
-    world.AddSpotLightComponent(entity, SpotLightComponent{});
-    world.AddPointLightComponent(entity, PointLightComponent{});
-    world.AddDirectionalLightComponent(entity, DirectionalLightComponent{});
-    world.AddVisualComponent(entity, VisualComponent{});
-    world.AddMeshComponent(entity, MeshComponent{});
-    world.AddTransformComponent(entity, Transform{});
+    virasa::ecs::AddCamera(world, entity, CameraComponent{});
+    virasa::ecs::AddSpotLight(world, entity, SpotLightComponent{});
+    virasa::ecs::AddPointLight(world, entity, PointLightComponent{});
+    virasa::ecs::AddDirectionalLight(world, entity, DirectionalLightComponent{});
+    virasa::ecs::AddVisual(world, entity, VisualComponent{});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{});
+    world.Transforms().Add(entity, Transform{});
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
@@ -183,21 +184,21 @@ TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
     transform.translation = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
     transform.rotation = virasa::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
     transform.scale = virasa::math::Vec3(4.0f, 5.0f, 6.0f);
-    world.AddTransformComponent(entity, transform);
-    world.AddMeshComponent(entity, MeshComponent{42u});
-    world.AddVisualComponent(entity, VisualComponent{99u});
+    world.Transforms().Add(entity, transform);
+    virasa::ecs::AddMesh(world, entity, MeshComponent{42u});
+    virasa::ecs::AddVisual(world, entity, VisualComponent{99u});
 
     DirectionalLightComponent directional{};
     directional.direction = virasa::math::Vec3(7.0f, 8.0f, 9.0f);
     directional.color = virasa::math::Vec3(0.1f, 0.2f, 0.3f);
     directional.intensity = 1.5f;
-    world.AddDirectionalLightComponent(entity, directional);
+    virasa::ecs::AddDirectionalLight(world, entity, directional);
 
     PointLightComponent point{};
     point.color = virasa::math::Vec3(0.4f, 0.5f, 0.6f);
     point.intensity = 2.5f;
     point.range = 12.0f;
-    world.AddPointLightComponent(entity, point);
+    virasa::ecs::AddPointLight(world, entity, point);
 
     SpotLightComponent spot{};
     spot.color = virasa::math::Vec3(0.7f, 0.8f, 0.9f);
@@ -205,7 +206,7 @@ TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
     spot.range = 13.0f;
     spot.innerConeCos = 0.95f;
     spot.outerConeCos = 0.85f;
-    world.AddSpotLightComponent(entity, spot);
+    virasa::ecs::AddSpotLight(world, entity, spot);
 
     CameraComponent camera{};
     camera.domain = CameraDomain::Editor;
@@ -213,7 +214,7 @@ TEST(EntityEditorView, test_cell_layout_per_field_is_pinned)
     camera.aspect = 1.25f;
     camera.nearPlane = 0.2f;
     camera.farPlane = 500.0f;
-    world.AddCameraComponent(entity, camera);
+    virasa::ecs::AddCamera(world, entity, camera);
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
@@ -313,22 +314,22 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
     transform.rotation = virasa::math::Quat(glm::vec3(
         glm::radians(0.0f), glm::radians(1.5f), glm::radians(-0.1f)));
     transform.scale = virasa::math::Vec3(2.0f, -0.0f, 3.125f);
-    world.AddTransformComponent(entity, transform);
+    world.Transforms().Add(entity, transform);
 
-    world.AddMeshComponent(entity, MeshComponent{7u});
-    world.AddVisualComponent(entity, VisualComponent{0xFFFFFFFFu});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{7u});
+    virasa::ecs::AddVisual(world, entity, VisualComponent{0xFFFFFFFFu});
 
     DirectionalLightComponent directional{};
     directional.direction = virasa::math::Vec3(-0.0f, 2.0f, -3.25f);
     directional.color = virasa::math::Vec3(4.0f, -0.0f, 5.5f);
     directional.intensity = -0.0f;
-    world.AddDirectionalLightComponent(entity, directional);
+    virasa::ecs::AddDirectionalLight(world, entity, directional);
 
     PointLightComponent point{};
     point.color = virasa::math::Vec3(0.0f, -1.25f, 2.5f);
     point.intensity = 6.0f;
     point.range = -0.0f;
-    world.AddPointLightComponent(entity, point);
+    virasa::ecs::AddPointLight(world, entity, point);
 
     SpotLightComponent spot{};
     spot.color = virasa::math::Vec3(-0.0f, 0.0f, 9.0f);
@@ -336,7 +337,7 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
     spot.range = 10.0f;
     spot.innerConeCos = -0.0f;
     spot.outerConeCos = 0.875f;
-    world.AddSpotLightComponent(entity, spot);
+    virasa::ecs::AddSpotLight(world, entity, spot);
 
     CameraComponent camera{};
     camera.domain = static_cast<CameraDomain>(7);
@@ -344,7 +345,7 @@ TEST(EntityEditorView, test_field_value_formatting_rules)
     camera.aspect = 1.7777f;
     camera.nearPlane = 0.1f;
     camera.farPlane = 4294967294.0f;
-    world.AddCameraComponent(entity, camera);
+    virasa::ecs::AddCamera(world, entity, camera);
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
@@ -432,9 +433,9 @@ TEST(EntityEditorView, test_render_emits_name_row_then_sections_per_present_comp
     transform.translation = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
     transform.rotation = virasa::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
     transform.scale = virasa::math::Vec3(4.0f, 5.0f, 6.0f);
-    world.AddTransformComponent(entity, transform);
-    world.AddMeshComponent(entity, MeshComponent{42u});
-    world.AddVisualComponent(entity, VisualComponent{99u});
+    world.Transforms().Add(entity, transform);
+    virasa::ecs::AddMesh(world, entity, MeshComponent{42u});
+    virasa::ecs::AddVisual(world, entity, VisualComponent{99u});
 
     CameraComponent camera{};
     camera.domain = CameraDomain::Editor;
@@ -442,7 +443,7 @@ TEST(EntityEditorView, test_render_emits_name_row_then_sections_per_present_comp
     camera.aspect = 1.25f;
     camera.nearPlane = 0.2f;
     camera.farPlane = 500.0f;
-    world.AddCameraComponent(entity, camera);
+    virasa::ecs::AddCamera(world, entity, camera);
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
 
@@ -493,7 +494,7 @@ TEST(EntityEditorView, test_render_passes_cursor_coordinate_to_panel)
     FontAtlas atlas;
 
     const Entity entity = world.CreateEntity("ClampEntity");
-    world.AddMeshComponent(entity, MeshComponent{42u});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{42u});
 
     EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.GetCursorRow(), 2u);
@@ -519,8 +520,8 @@ TEST(EntityEditorView, test_visible_rows_dfs_traversal_excludes_collapsed_field_
     FontAtlas atlas;
 
     const Entity entity = world.CreateEntity("CollapsedEntity");
-    world.AddTransformComponent(entity, Transform{});
-    world.AddMeshComponent(entity, MeshComponent{7u});
+    world.Transforms().Add(entity, Transform{});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{7u});
 
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);
     ASSERT_EQ(out.GetTexts().size(), 27u);
@@ -544,8 +545,8 @@ TEST(EntityEditorView, test_handle_key_handles_enter_escape_and_edit_keys)
 {
     World world;
     const Entity entity = world.CreateEntity("KeyEntity");
-    world.AddMeshComponent(entity, MeshComponent{7u});
-    world.AddTransformComponent(entity, Transform{});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{7u});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
 
@@ -572,14 +573,14 @@ TEST(EntityEditorView, test_handle_key_handles_enter_escape_and_edit_keys)
 
     EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_FALSE(view.IsEditing());
-    EXPECT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+    EXPECT_EQ(world.Transforms().GetLocal(entity).translation.x, 0.0f);
 
     EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_TRUE(view.IsEditing());
     EXPECT_EQ(view.HandleTextInput("2.5", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_FALSE(view.IsEditing());
-    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+    EXPECT_FLOAT_EQ(world.Transforms().GetLocal(entity).translation.x, 0.0f);
 
     EXPECT_EQ(view.HandleKey(KeyCode::Unknown, world, entity), EntityEditorViewKeyResult::Consumed);
 }
@@ -588,7 +589,7 @@ TEST(EntityEditorView, test_handle_text_input_dispatches_by_codepoint)
 {
     World world;
     const Entity entity = world.CreateEntity("DispatchEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
 
@@ -624,7 +625,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_h_collapses_or_walks_left)
 {
     World world;
     const Entity entity = world.CreateEntity("HBinding");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
 
@@ -653,7 +654,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_l_expands_or_walks_right)
 {
     World world;
     const Entity entity = world.CreateEntity("LBinding");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
 
@@ -680,7 +681,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_j_moves_cursor_down_to_next
 {
     World world;
     const Entity entity = world.CreateEntity("JBinding");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
 
@@ -708,7 +709,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_k_moves_cursor_up_to_previo
 {
     World world;
     const Entity entity = world.CreateEntity("KBinding");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -738,7 +739,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_gg_moves_cursor_to_first_ro
 {
     World world;
     const Entity entity = world.CreateEntity("GGEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -756,7 +757,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_capital_G_moves_cursor_to_l
 {
     World world;
     const Entity entity = world.CreateEntity("GEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("G", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -776,7 +777,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_i_enters_edit_mode_on_value
 {
     World world;
     const Entity entity = world.CreateEntity("IEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -794,7 +795,7 @@ TEST(EntityEditorView, test_entity_editor_text_input_colon_requests_command_bar)
 {
     World world;
     const Entity entity = world.CreateEntity("ColonEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("g", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -814,7 +815,7 @@ TEST(EntityEditorView, test_edit_mode_enter_seeds_buffer_from_value_cell)
 {
     World world;
     const Entity entity = world.CreateEntity("SeedName");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("l", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -844,7 +845,7 @@ TEST(EntityEditorView, test_edit_mode_buffers_keystrokes_until_commit_or_cancel)
 {
     World world;
     const Entity entity = world.CreateEntity("BufferEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -871,7 +872,7 @@ TEST(EntityEditorView, test_render_overlays_edit_buffer_on_focused_value_cell)
 {
     World world;
     const Entity entity = world.CreateEntity("OverlayEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -893,8 +894,8 @@ TEST(EntityEditorView, test_edit_mode_commit_writes_buffer_to_component)
 {
     World world;
     const Entity entity = world.CreateEntity("CommitEntity");
-    world.AddTransformComponent(entity, Transform{});
-    world.AddMeshComponent(entity, MeshComponent{7u});
+    world.Transforms().Add(entity, Transform{});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{7u});
 
     EntityEditorView view;
 
@@ -909,7 +910,7 @@ TEST(EntityEditorView, test_edit_mode_commit_writes_buffer_to_component)
     EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleTextInput(" 2.5 ", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
-    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+    EXPECT_FLOAT_EQ(world.Transforms().GetLocal(entity).translation.x, 0.0f);
 
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -917,14 +918,14 @@ TEST(EntityEditorView, test_edit_mode_commit_writes_buffer_to_component)
     EXPECT_EQ(view.HandleTextInput("i", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleTextInput("123", world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_EQ(view.HandleKey(KeyCode::Enter, world, entity), EntityEditorViewKeyResult::Consumed);
-    EXPECT_EQ(world.GetMeshComponent(entity).meshId, 7u);
+    EXPECT_EQ(virasa::ecs::GetMesh(world, entity).meshId, 7u);
 }
 
 TEST(EntityEditorView, test_edit_mode_cancel_discards_buffer)
 {
     World world;
     const Entity entity = world.CreateEntity("CancelEntity");
-    world.AddTransformComponent(entity, Transform{});
+    world.Transforms().Add(entity, Transform{});
 
     EntityEditorView view;
     EXPECT_EQ(view.HandleTextInput("j", world, entity), EntityEditorViewKeyResult::Consumed);
@@ -935,7 +936,7 @@ TEST(EntityEditorView, test_edit_mode_cancel_discards_buffer)
 
     EXPECT_EQ(view.HandleKey(KeyCode::Escape, world, entity), EntityEditorViewKeyResult::Consumed);
     EXPECT_FALSE(view.IsEditing());
-    EXPECT_FLOAT_EQ(world.GetTransformComponent(entity).translation.x, 0.0f);
+    EXPECT_FLOAT_EQ(world.Transforms().GetLocal(entity).translation.x, 0.0f);
     EXPECT_EQ(view.GetCursorRow(), 2u);
     EXPECT_EQ(view.GetCursorCell(), 2u);
 }
@@ -948,7 +949,7 @@ TEST(EntityEditorView, test_render_consumes_references_for_duration_of_call)
     FontAtlas atlas;
 
     const Entity entity = world.CreateEntity("PersistentName");
-    world.AddMeshComponent(entity, MeshComponent{123u});
+    virasa::ecs::AddMesh(world, entity, MeshComponent{123u});
 
     out.AddText(1.0f, 2.0f, "prefix", {1.0f, 1.0f, 1.0f, 1.0f});
     view.Render(out, world, entity, atlas, kX, kY, kWidth, kHeight);

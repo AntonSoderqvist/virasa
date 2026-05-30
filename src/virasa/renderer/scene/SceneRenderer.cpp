@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Projection.h"
 #include "virasa/math/Transform.h"
@@ -641,10 +642,10 @@ uint32_t SceneRenderer::RenderWorld(
 	virasa::math::Mat4 viewMatrix(1.0f);
 	virasa::math::Mat4 projMatrix(1.0f);
 
-	if (world.HasTransformComponent(cameraEntity) && world.HasCameraComponent(cameraEntity))
+	if (world.GetTransforms().Has(cameraEntity) && virasa::ecs::HasCamera(world, cameraEntity))
 	{
-		const auto& transform = world.GetTransformComponent(cameraEntity);
-		const auto& cam = world.GetCameraComponent(cameraEntity);
+		const auto& transform = world.GetTransforms().GetLocal(cameraEntity);
+		const auto& cam = virasa::ecs::GetCamera(world, cameraEntity);
 
 		virasa::math::Vec3 eye = transform.translation;
 		virasa::math::Vec3 target = transform.translation + transform.Forward();
@@ -662,9 +663,9 @@ uint32_t SceneRenderer::RenderWorld(
 	std::vector<virasa::LightGPU> lights;
 
 	// Directional lights
-	for (auto entity : world.GetDirectionalLightComponentEntities())
+	for (auto entity : virasa::ecs::DirectionalLightEntities(world))
 	{
-		const auto& dl = world.GetDirectionalLightComponent(entity);
+		const auto& dl = virasa::ecs::GetDirectionalLight(world, entity);
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Directional);
 		light.direction = glm::normalize(dl.direction);
@@ -673,12 +674,12 @@ uint32_t SceneRenderer::RenderWorld(
 	}
 
 	// Point lights
-	for (auto entity : world.GetPointLightComponentEntities())
+	for (auto entity : virasa::ecs::PointLightEntities(world))
 	{
-		if (!world.HasTransformComponent(entity))
+		if (!world.GetTransforms().Has(entity))
 			continue;
-		const auto& pl = world.GetPointLightComponent(entity);
-		const auto& tr = world.GetTransformComponent(entity);
+		const auto& pl = virasa::ecs::GetPointLight(world, entity);
+		const auto& tr = world.GetTransforms().GetLocal(entity);
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Point);
 		light.position = tr.translation;
@@ -688,12 +689,12 @@ uint32_t SceneRenderer::RenderWorld(
 	}
 
 	// Spot lights
-	for (auto entity : world.GetSpotLightComponentEntities())
+	for (auto entity : virasa::ecs::SpotLightEntities(world))
 	{
-		if (!world.HasTransformComponent(entity))
+		if (!world.GetTransforms().Has(entity))
 			continue;
-		const auto& sl = world.GetSpotLightComponent(entity);
-		const auto& tr = world.GetTransformComponent(entity);
+		const auto& sl = virasa::ecs::GetSpotLight(world, entity);
+		const auto& tr = world.GetTransforms().GetLocal(entity);
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Spot);
 		light.position = tr.translation;
@@ -769,30 +770,30 @@ uint32_t SceneRenderer::RenderWorld(
 					0,
 					nullptr);
 
-				for (auto entity : world.GetVisualComponentEntities())
+				for (auto entity : virasa::ecs::VisualEntities(world))
 				{
-					if (!world.HasMeshComponent(entity))
+					if (!virasa::ecs::HasMesh(world, entity))
 					{
 						continue;
 					}
 
-					const auto& meshComp = world.GetMeshComponent(entity);
+					const auto& meshComp = virasa::ecs::GetMesh(world, entity);
 					if (!meshReg->IsAllocated(meshComp.meshId))
 					{
 						continue;
 					}
 
 					const auto& mesh = meshReg->Get(meshComp.meshId);
-					const auto& visualComp = world.GetVisualComponent(entity);
+					const auto& visualComp = virasa::ecs::GetVisual(world, entity);
 
 					virasa::math::Mat4 model(1.0f);
 					for (virasa::ecs::Entity node = entity;
 						node != virasa::ecs::Entity::Invalid();
 						node = world.GetParent(node))
 					{
-						if (world.HasTransformComponent(node))
+						if (world.GetTransforms().Has(node))
 						{
-							model = world.GetTransformComponent(node).ToMatrix() * model;
+							model = world.GetTransforms().GetLocal(node).ToMatrix() * model;
 						}
 					}
 

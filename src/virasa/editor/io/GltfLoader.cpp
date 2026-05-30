@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/editor/io/ImageLoader.h"
 #include "virasa/math/Transform.h"
@@ -723,7 +724,7 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 	virasa::math::Transform rootTransform;
 	rootTransform.rotation =
 		glm::angleAxis(glm::radians(90.0f), virasa::math::Vec3(1.0f, 0.0f, 0.0f));
-	world.AddTransformComponent(root, rootTransform);
+	world.Transforms().Add(root, rootTransform);
 
 	std::vector<virasa::ecs::Entity> nodeEntities(
 		model.nodes.size(), virasa::ecs::Entity::Invalid());
@@ -735,7 +736,7 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 
 		nodeEntities[nodeIndex] = world.CreateEntity(nodeName);
 		createdEntities.push_back(nodeEntities[nodeIndex]);
-		world.AddTransformComponent(nodeEntities[nodeIndex], NodeToTransform(node));
+		world.Transforms().Add(nodeEntities[nodeIndex], NodeToTransform(node));
 	}
 
 	const int defaultSceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
@@ -782,12 +783,12 @@ virasa::editor::io::GltfLoadResult LoadGlb(const std::string& path, virasa::ecs:
 			const tinygltf::Primitive& primitive = mesh.primitives[primitiveIndex];
 			const virasa::ecs::Entity primitiveEntity = world.CreateEntity("mesh_primitive");
 			createdEntities.push_back(primitiveEntity);
-			world.AddTransformComponent(primitiveEntity, virasa::math::Transform::Identity());
-			world.AddMeshComponent(primitiveEntity,
+			world.Transforms().Add(primitiveEntity, virasa::math::Transform::Identity());
+			virasa::ecs::AddMesh(world, primitiveEntity,
 				virasa::ecs::MeshComponent{
 					.meshId = meshIds[TexturePrimitiveKey(static_cast<int>(node.mesh),
 						static_cast<int>(primitiveIndex))]});
-			world.AddVisualComponent(primitiveEntity,
+			virasa::ecs::AddVisual(world, primitiveEntity,
 				virasa::ecs::VisualComponent{
 					.materialId = primitive.material >= 0
 								  ? materialIds[primitive.material]

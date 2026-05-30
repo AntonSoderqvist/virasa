@@ -1,4 +1,6 @@
 add_library(virasa_ecs_lib STATIC
+    ComponentSystem.cpp
+    TransformSystem.cpp
     World.cpp
 )
 
