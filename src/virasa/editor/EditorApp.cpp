@@ -369,6 +369,10 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 6: Render world
 		// ------------------------------------------------------------------
+		// Resolve cached world matrices before the renderer reads them;
+		// SceneRenderer::RenderWorld consumes TransformSystem's world cache
+		// and no longer walks the hierarchy itself.
+		world.UpdateTransforms();
 		uint32_t sceneSlot = sceneRenderer.RenderWorld(world, cameraEntity);
 		if (sceneSlot == 0xFFFFFFFFu)
 		{

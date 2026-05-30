@@ -644,12 +644,11 @@ uint32_t SceneRenderer::RenderWorld(
 
 	if (world.GetTransforms().Has(cameraEntity) && virasa::ecs::HasCamera(world, cameraEntity))
 	{
-		const auto& transform = world.GetTransforms().GetLocal(cameraEntity);
 		const auto& cam = virasa::ecs::GetCamera(world, cameraEntity);
 
-		virasa::math::Vec3 eye = transform.translation;
-		virasa::math::Vec3 target = transform.translation + transform.Forward();
-		viewMatrix = virasa::math::LookAtRH_ZUp(eye, target);
+		virasa::math::Vec3 eye = world.GetTransforms().GetWorldPosition(cameraEntity);
+		virasa::math::Vec3 forward = world.GetTransforms().GetWorldForward(cameraEntity);
+		viewMatrix = virasa::math::LookAtRH_ZUp(eye, eye + forward);
 
 		float aspect = (cam.aspect > 0.0f) ? cam.aspect
 							     : static_cast<float>(_frameSceneWidth) /
@@ -679,10 +678,9 @@ uint32_t SceneRenderer::RenderWorld(
 		if (!world.GetTransforms().Has(entity))
 			continue;
 		const auto& pl = virasa::ecs::GetPointLight(world, entity);
-		const auto& tr = world.GetTransforms().GetLocal(entity);
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Point);
-		light.position = tr.translation;
+		light.position = world.GetTransforms().GetWorldPosition(entity);
 		light.range = pl.range;
 		light.color = pl.color * pl.intensity;
 		lights.push_back(light);
@@ -694,13 +692,10 @@ uint32_t SceneRenderer::RenderWorld(
 		if (!world.GetTransforms().Has(entity))
 			continue;
 		const auto& sl = virasa::ecs::GetSpotLight(world, entity);
-		const auto& tr = world.GetTransforms().GetLocal(entity);
 		virasa::LightGPU light{};
 		light.type = static_cast<uint32_t>(virasa::LightType::Spot);
-		light.position = tr.translation;
-		virasa::math::Vec3 dir =
-			glm::normalize(tr.rotation * virasa::math::Vec3(0.0f, 1.0f, 0.0f));
-		light.direction = dir;
+		light.position = world.GetTransforms().GetWorldPosition(entity);
+		light.direction = world.GetTransforms().GetWorldForward(entity);
 		light.range = sl.range;
 		light.color = sl.color * sl.intensity;
 		light.innerConeCos = sl.innerConeCos;
@@ -786,16 +781,11 @@ uint32_t SceneRenderer::RenderWorld(
 					const auto& mesh = meshReg->Get(meshComp.meshId);
 					const auto& visualComp = virasa::ecs::GetVisual(world, entity);
 
-					virasa::math::Mat4 model(1.0f);
-					for (virasa::ecs::Entity node = entity;
-						node != virasa::ecs::Entity::Invalid();
-						node = world.GetParent(node))
+					if (!world.GetTransforms().Has(entity))
 					{
-						if (world.GetTransforms().Has(node))
-						{
-							model = world.GetTransforms().GetLocal(node).ToMatrix() * model;
-						}
+						continue;
 					}
+					const virasa::math::Mat4 model = world.GetTransforms().GetWorld(entity);
 
 					const virasa::math::Mat4 mvp = capturedProj * capturedView * model;
 
