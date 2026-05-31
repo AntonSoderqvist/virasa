@@ -10,6 +10,7 @@
 #include "virasa/math/Transform.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -20,6 +21,12 @@ namespace
 using namespace virasa;
 using namespace virasa::editor::io;
 using namespace virasa::ecs;
+
+[[nodiscard]] std::string MakeTempFilePath(const char* fileName)
+{
+	const std::filesystem::path tempDir = std::filesystem::temp_directory_path();
+	return (tempDir / fileName).string();
+}
 
 } // namespace
 
@@ -186,7 +193,7 @@ TEST(GltfLoader, test_gltf_parse_glb_produces_cpu_asset)
 	// ParseGlb on a path that exists but is not a valid GLB must return ParseFailed
 	// We create a tiny temp file with garbage bytes.
 	{
-		const std::string tmpPath = "/tmp/virasa_test_invalid.glb";
+		const std::string tmpPath = MakeTempFilePath("virasa_test_invalid.glb");
 		// Write a few garbage bytes
 		{
 			FILE* f = fopen(tmpPath.c_str(), "wb");
@@ -282,7 +289,7 @@ TEST(GltfLoader, test_gltf_load_glb_walks_scene_graph)
 
 	// Also verify with a file that exists but is not a valid GLB
 	{
-		const std::string tmpPath = "/tmp/virasa_test_loadglb_invalid.glb";
+		const std::string tmpPath = MakeTempFilePath("virasa_test_loadglb_invalid.glb");
 		{
 			FILE* f = fopen(tmpPath.c_str(), "wb");
 			if (f)

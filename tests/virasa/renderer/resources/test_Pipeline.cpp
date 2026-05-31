@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <thread>
 #include <vector>
@@ -361,7 +362,8 @@ static const uint32_t kMinimalFragSpirv[] = {0x07230203,
 // Write SPIR-V to a temp file and return the path.
 std::string WriteTempSpirv(const uint32_t* data, size_t wordCount, const char* suffix)
 {
-	std::string path = std::string("/tmp/virasa_test_") + suffix + ".spv";
+	const std::filesystem::path tempDir = std::filesystem::temp_directory_path();
+	std::string path = (tempDir / (std::string("virasa_test_") + suffix + ".spv")).string();
 	FILE* f = fopen(path.c_str(), "wb");
 	if (!f)
 		return "";

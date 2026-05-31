@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -23,10 +24,15 @@ using namespace virasa;
 namespace
 {
 
-// Path to a minimal valid SPIR-V file written out at test time.
-constexpr const char* kValidSpvPath = "/tmp/virasa_test_valid.spv";
-constexpr const char* kEmptySpvPath = "/tmp/virasa_test_empty.spv";
-constexpr const char* kOddSpvPath = "/tmp/virasa_test_odd.spv";
+[[nodiscard]] std::string MakeTempFilePath(const char* fileName)
+{
+	const std::filesystem::path tempDir = std::filesystem::temp_directory_path();
+	return (tempDir / fileName).string();
+}
+
+const std::string kValidSpvPath = MakeTempFilePath("virasa_test_valid.spv");
+const std::string kEmptySpvPath = MakeTempFilePath("virasa_test_empty.spv");
+const std::string kOddSpvPath = MakeTempFilePath("virasa_test_odd.spv");
 
 // Minimal SPIR-V binary: magic + version + generator + bound + schema
 // This is the smallest legal SPIR-V module (no instructions beyond header).
@@ -188,7 +194,7 @@ TEST(ShaderModule, test_shader_module_is_raii_movable_non_copyable_handle_owner)
 	}
 
 	SM src;
-	RenderError err = src.Initialize(ctx.device, kValidSpvPath);
+	RenderError err = src.Initialize(ctx.device, kValidSpvPath.c_str());
 	ASSERT_EQ(err, RenderError::None);
 	ASSERT_TRUE(src.IsInitialized());
 	VkShaderModule handle = src.GetHandle();
@@ -204,7 +210,7 @@ TEST(ShaderModule, test_shader_module_is_raii_movable_non_copyable_handle_owner)
 	// Move assignment: dst already owns a handle; assigning another module
 	// should destroy dst's prior handle and take ownership of the new one.
 	SM src2;
-	ASSERT_EQ(src2.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(src2.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	VkShaderModule handle2 = src2.GetHandle();
 	ASSERT_NE(handle2, VK_NULL_HANDLE);
 
@@ -231,7 +237,7 @@ TEST(ShaderModule, test_shader_module_borrows_vk_device_for_lifetime)
 	}
 
 	ShaderModule sm;
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	ASSERT_TRUE(sm.IsInitialized());
 
 	// The ShaderModule stores the VkDevice from device.GetHandle().
@@ -285,14 +291,14 @@ TEST(ShaderModule, test_shader_module_initialize_is_reentrant_and_clears_prior)
 	ShaderModule sm;
 
 	// First successful Initialize.
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	ASSERT_TRUE(sm.IsInitialized());
 	VkShaderModule firstHandle = sm.GetHandle();
 	ASSERT_NE(firstHandle, VK_NULL_HANDLE);
 
 	// Re-initialize with the same valid file: prior handle is destroyed,
 	// a new handle is created.
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	EXPECT_TRUE(sm.IsInitialized());
 	EXPECT_NE(sm.GetHandle(), VK_NULL_HANDLE);
 	// (The new handle may or may not equal the old one; we just verify it's valid.)
@@ -341,7 +347,8 @@ TEST(ShaderModule, test_shader_module_initialize_validates_file_path_and_size)
 	// Validation 2: non-existent file.
 	{
 		ShaderModule s;
-		EXPECT_EQ(s.Initialize(ctx.device, "/tmp/virasa_test_does_not_exist_xyz.spv"),
+		const std::string missingPath = MakeTempFilePath("virasa_test_does_not_exist_xyz.spv");
+		EXPECT_EQ(s.Initialize(ctx.device, missingPath.c_str()),
 			RenderError::ShaderLoadFailed);
 		EXPECT_FALSE(s.IsInitialized());
 		EXPECT_EQ(s.GetHandle(), VK_NULL_HANDLE);
@@ -350,7 +357,7 @@ TEST(ShaderModule, test_shader_module_initialize_validates_file_path_and_size)
 	// Validation 3a: zero-length file.
 	{
 		ShaderModule s;
-		EXPECT_EQ(s.Initialize(ctx.device, kEmptySpvPath), RenderError::ShaderLoadFailed);
+		EXPECT_EQ(s.Initialize(ctx.device, kEmptySpvPath.c_str()), RenderError::ShaderLoadFailed);
 		EXPECT_FALSE(s.IsInitialized());
 		EXPECT_EQ(s.GetHandle(), VK_NULL_HANDLE);
 	}
@@ -358,7 +365,7 @@ TEST(ShaderModule, test_shader_module_initialize_validates_file_path_and_size)
 	// Validation 3b: file size not a multiple of 4.
 	{
 		ShaderModule s;
-		EXPECT_EQ(s.Initialize(ctx.device, kOddSpvPath), RenderError::ShaderLoadFailed);
+		EXPECT_EQ(s.Initialize(ctx.device, kOddSpvPath.c_str()), RenderError::ShaderLoadFailed);
 		EXPECT_FALSE(s.IsInitialized());
 		EXPECT_EQ(s.GetHandle(), VK_NULL_HANDLE);
 	}
@@ -367,7 +374,7 @@ TEST(ShaderModule, test_shader_module_initialize_validates_file_path_and_size)
 	ASSERT_TRUE(WriteValidSpv());
 	{
 		ShaderModule s;
-		RenderError err = s.Initialize(ctx.device, kValidSpvPath);
+		RenderError err = s.Initialize(ctx.device, kValidSpvPath.c_str());
 		// May succeed or fail at the Vulkan call depending on driver, but must
 		// not return ShaderLoadFailed.
 		EXPECT_NE(err, RenderError::ShaderLoadFailed);
@@ -388,7 +395,7 @@ TEST(ShaderModule, test_shader_module_initialize_creates_vk_shader_module)
 	}
 
 	ShaderModule sm;
-	RenderError err = sm.Initialize(ctx.device, kValidSpvPath);
+	RenderError err = sm.Initialize(ctx.device, kValidSpvPath.c_str());
 
 	ASSERT_EQ(err, RenderError::None);
 	EXPECT_TRUE(sm.IsInitialized());
@@ -417,7 +424,7 @@ TEST(ShaderModule, test_shader_module_assumes_main_entry_point)
 	}
 
 	ShaderModule sm;
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 
 	// ShaderModule has no GetEntryPoint() or similar method — the entry point
 	// is not recorded.  The only observable state is the handle and IsInitialized.
@@ -450,7 +457,7 @@ TEST(ShaderModule, test_get_handle_returns_owned_vk_shader_module_or_null)
 
 	// After successful Initialize: non-null.
 	ShaderModule sm;
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	VkShaderModule h = sm.GetHandle();
 	EXPECT_NE(h, VK_NULL_HANDLE);
 
@@ -498,7 +505,7 @@ TEST(ShaderModule, test_is_initialized_reflects_owned_handle)
 	// After successful Initialize: true, consistent with GetHandle.
 	{
 		ShaderModule sm;
-		ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+		ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 		EXPECT_TRUE(sm.IsInitialized());
 		EXPECT_EQ(sm.IsInitialized(), sm.GetHandle() != VK_NULL_HANDLE);
 
@@ -531,7 +538,7 @@ TEST(ShaderModule, test_shader_module_methods_are_not_thread_safe_per_instance)
 	}
 
 	ShaderModule sm;
-	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath), RenderError::None);
+	ASSERT_EQ(sm.Initialize(ctx.device, kValidSpvPath.c_str()), RenderError::None);
 	ASSERT_TRUE(sm.IsInitialized());
 
 	// Call const observers from two threads concurrently — this is explicitly
