@@ -189,6 +189,24 @@ TEST(Sampler, test_sampler_initialize_creates_vk_sampler)
 	EXPECT_EQ(s2.Initialize(rd.device, cfg3), RenderError::None);
 	EXPECT_TRUE(s2.IsInitialized());
 	EXPECT_NE(s2.GetHandle(), VK_NULL_HANDLE);
+
+	// Verify compareEnable / compareOp path (shadow-map / PCF sampler).
+	Sampler s3;
+	SamplerConfig cfgShadow;
+	cfgShadow.compareEnable = true;
+	cfgShadow.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	EXPECT_EQ(s3.Initialize(rd.device, cfgShadow), RenderError::None);
+	EXPECT_TRUE(s3.IsInitialized());
+	EXPECT_NE(s3.GetHandle(), VK_NULL_HANDLE);
+
+	// Verify compareEnable false (default) still works and is distinct from the shadow sampler.
+	Sampler s4;
+	SamplerConfig cfgNoCompare;
+	cfgNoCompare.compareEnable = false;
+	cfgNoCompare.compareOp = VK_COMPARE_OP_ALWAYS;
+	EXPECT_EQ(s4.Initialize(rd.device, cfgNoCompare), RenderError::None);
+	EXPECT_TRUE(s4.IsInitialized());
+	EXPECT_NE(s4.GetHandle(), VK_NULL_HANDLE);
 }
 
 // ---------------------------------------------------------------------------

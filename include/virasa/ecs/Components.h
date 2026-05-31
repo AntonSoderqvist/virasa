@@ -63,6 +63,8 @@ public:
 	virasa::math::Vec3 color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
 	/// Scalar intensity multiplier applied to color at upload time.
 	float intensity = 1.0f;
+	/// Whether this light opts into the renderer's shadow budget.
+	bool castsShadows = true;
 };
 
 /**
@@ -101,6 +103,8 @@ public:
 	float innerConeCos = 0.95f;
 	/// Cosine of the outer cone half-angle (~32 degrees by default).
 	float outerConeCos = 0.85f;
+	/// Whether this light opts into the renderer's shadow budget.
+	bool castsShadows = true;
 };
 
 /**

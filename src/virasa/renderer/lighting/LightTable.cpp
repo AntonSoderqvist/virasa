@@ -84,7 +84,11 @@ RenderError LightTable::Initialize(const Device& device, uint32_t max_lights)
 
 	// Step 3: cache observers.
 	_capacity = max_lights;
-	_bufferAddress = _buffer.GetDeviceAddress(device);
+	// GetDeviceAddress requires a non-const Device reference in the Buffer API,
+	// but the contract takes a const Device&. We cast away const here because
+	// GetDeviceAddress is semantically a pure observer (vkGetBufferDeviceAddress
+	// cannot fail and does not mutate the device).
+	_bufferAddress = _buffer.GetDeviceAddress(const_cast<Device&>(device));
 	_lightCount = 0;
 
 	return RenderError::None;

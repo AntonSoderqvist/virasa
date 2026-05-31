@@ -85,6 +85,7 @@ TEST(BindlessTextureArray, test_default_constructed_state)
 	EXPECT_EQ(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), 0u);
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 0u);
 	EXPECT_FALSE(bta.IsInitialized());
 }
 
@@ -129,11 +130,13 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 	EXPECT_EQ(dst.GetDescriptorSet(), srcSet);
 	EXPECT_EQ(dst.GetLayout(), srcLayout);
 	EXPECT_EQ(dst.GetMaxTextures(), 4u);
+	EXPECT_EQ(dst.GetMaxShadowMaps(), 16u);
 	EXPECT_TRUE(dst.IsInitialized());
 
 	// src is in default-constructed-like state
 	EXPECT_EQ(src.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_EQ(src.GetLayout(), VK_NULL_HANDLE);
+	EXPECT_EQ(src.GetMaxShadowMaps(), 0u);
 	EXPECT_FALSE(src.IsInitialized());
 
 	// Move-assign: dst2 already has handles; move-assign from dst should tear down dst2's handles
@@ -146,11 +149,13 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 
 	EXPECT_EQ(dst2.GetDescriptorSet(), srcSet);
 	EXPECT_EQ(dst2.GetLayout(), srcLayout);
+	EXPECT_EQ(dst2.GetMaxShadowMaps(), 16u);
 	EXPECT_TRUE(dst2.IsInitialized());
 
 	// dst is now in default-constructed-like state
 	EXPECT_EQ(dst.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_EQ(dst.GetLayout(), VK_NULL_HANDLE);
+	EXPECT_EQ(dst.GetMaxShadowMaps(), 0u);
 	EXPECT_FALSE(dst.IsInitialized());
 
 	// Destroying a moved-from object is well-defined (no crash)
@@ -180,6 +185,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures);
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
 
 	// Re-initialization: should tear down prior resources and succeed again.
 	VkDescriptorSet firstSet = bta.GetDescriptorSet();
@@ -191,6 +197,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures * 2u);
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
 	// After re-init the handles are new (old pool was destroyed; set handle may differ)
 	// We can only assert they are non-null; handle values are implementation-defined.
 	(void)firstSet;
@@ -343,8 +350,164 @@ TEST(BindlessTextureArray, test_register_and_unregister)
 	uint32_t reused = bta.RegisterTexture(imageView, sampler);
 	EXPECT_EQ(reused, slot2); // slot2 was pushed back; it should be popped next
 
+	// --- RegisterShadowMap / UnregisterShadowMap (binding 1, kMaxShadowMaps = 16) ---
+	// Create a depth image + view + comparison sampler for shadow-map tests.
+	VkImageCreateInfo depthImgInfo{};
+	depthImgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	depthImgInfo.imageType = VK_IMAGE_TYPE_2D;
+	depthImgInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthImgInfo.extent = {1, 1, 1};
+	depthImgInfo.mipLevels = 1;
+	depthImgInfo.arrayLayers = 1;
+	depthImgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthImgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depthImgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	depthImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	depthImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	VkImage depthImage = VK_NULL_HANDLE;
+	if (vkCreateImage(vkDev, &depthImgInfo, nullptr, &depthImage) != VK_SUCCESS)
+	{
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not create depth VkImage for shadow-map test";
+	}
+
+	VkMemoryRequirements depthMemReqs{};
+	vkGetImageMemoryRequirements(vkDev, depthImage, &depthMemReqs);
+	uint32_t depthMemTypeIndex = UINT32_MAX;
+	for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+	{
+		if ((depthMemReqs.memoryTypeBits & (1u << i)) &&
+			(memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+		{
+			depthMemTypeIndex = i;
+			break;
+		}
+	}
+
+	if (depthMemTypeIndex == UINT32_MAX)
+	{
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "No suitable memory type for depth image";
+	}
+
+	VkMemoryAllocateInfo depthAllocInfo{};
+	depthAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	depthAllocInfo.allocationSize = depthMemReqs.size;
+	depthAllocInfo.memoryTypeIndex = depthMemTypeIndex;
+
+	VkDeviceMemory depthMem = VK_NULL_HANDLE;
+	if (vkAllocateMemory(vkDev, &depthAllocInfo, nullptr, &depthMem) != VK_SUCCESS)
+	{
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not allocate memory for depth image";
+	}
+	vkBindImageMemory(vkDev, depthImage, depthMem, 0);
+
+	VkImageViewCreateInfo depthViewInfo{};
+	depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	depthViewInfo.image = depthImage;
+	depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	depthViewInfo.format = VK_FORMAT_D32_SFLOAT;
+	depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	depthViewInfo.subresourceRange.levelCount = 1;
+	depthViewInfo.subresourceRange.layerCount = 1;
+
+	VkImageView depthView = VK_NULL_HANDLE;
+	if (vkCreateImageView(vkDev, &depthViewInfo, nullptr, &depthView) != VK_SUCCESS)
+	{
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not create depth VkImageView";
+	}
+
+	VkSamplerCreateInfo cmpSamplerInfo{};
+	cmpSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	cmpSamplerInfo.magFilter = VK_FILTER_LINEAR;
+	cmpSamplerInfo.minFilter = VK_FILTER_LINEAR;
+	cmpSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	cmpSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	cmpSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	cmpSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	cmpSamplerInfo.compareEnable = VK_TRUE;
+	cmpSamplerInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	cmpSamplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+
+	VkSampler cmpSampler = VK_NULL_HANDLE;
+	if (vkCreateSampler(vkDev, &cmpSamplerInfo, nullptr, &cmpSampler) != VK_SUCCESS)
+	{
+		vkDestroyImageView(vkDev, depthView, nullptr);
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not create comparison VkSampler";
+	}
+
+	// RegisterShadowMap returns a valid slot in [0, 16).
+	uint32_t smSlot0 = bta.RegisterShadowMap(depthView, cmpSampler);
+	EXPECT_NE(smSlot0, UINT32_MAX);
+	EXPECT_LT(smSlot0, 16u);
+
+	uint32_t smSlot1 = bta.RegisterShadowMap(depthView, cmpSampler);
+	EXPECT_NE(smSlot1, UINT32_MAX);
+	EXPECT_LT(smSlot1, 16u);
+	EXPECT_NE(smSlot1, smSlot0); // distinct slots
+
+	// Texture and shadow-map slot spaces are independent: same numeric value is fine.
+	// (slot0 and smSlot0 may coincide numerically; that is expected and correct.)
+
+	// Exhaust the remaining 14 shadow-map slots.
+	for (uint32_t i = 2; i < 16u; ++i)
+	{
+		uint32_t s = bta.RegisterShadowMap(depthView, cmpSampler);
+		EXPECT_NE(s, UINT32_MAX);
+		EXPECT_LT(s, 16u);
+	}
+
+	// All 16 shadow-map slots exhausted; next call must return UINT32_MAX.
+	uint32_t smOverflow = bta.RegisterShadowMap(depthView, cmpSampler);
+	EXPECT_EQ(smOverflow, UINT32_MAX);
+
+	// UnregisterShadowMap and re-register.
+	bta.UnregisterShadowMap(smSlot1);
+	uint32_t smReused = bta.RegisterShadowMap(depthView, cmpSampler);
+	EXPECT_EQ(smReused, smSlot1);
+
+	// Unregistering a shadow-map slot must not affect texture slots.
+	// (texture slots are still fully occupied from earlier; re-registering a texture
+	// slot should still require an UnregisterTexture first.)
+	uint32_t texOverflowAfterSmOp = bta.RegisterTexture(imageView, sampler);
+	EXPECT_EQ(texOverflowAfterSmOp, UINT32_MAX);
+
 	// Clean up Vulkan objects (bta destructor handles descriptor pool/layout).
 	ctx.device.WaitIdle();
+	vkDestroySampler(vkDev, cmpSampler, nullptr);
+	vkDestroyImageView(vkDev, depthView, nullptr);
+	vkFreeMemory(vkDev, depthMem, nullptr);
+	vkDestroyImage(vkDev, depthImage, nullptr);
 	vkDestroySampler(vkDev, sampler, nullptr);
 	vkDestroyImageView(vkDev, imageView, nullptr);
 	vkFreeMemory(vkDev, imageMem, nullptr);
@@ -362,6 +525,7 @@ TEST(BindlessTextureArray, test_observers)
 		EXPECT_EQ(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 		EXPECT_EQ(bta.GetLayout(), VK_NULL_HANDLE);
 		EXPECT_EQ(bta.GetMaxTextures(), 0u);
+		EXPECT_EQ(bta.GetMaxShadowMaps(), 0u);
 		EXPECT_FALSE(bta.IsInitialized());
 		EXPECT_EQ(bta.IsInitialized(), bta.GetDescriptorSet() != VK_NULL_HANDLE);
 	}
@@ -380,8 +544,12 @@ TEST(BindlessTextureArray, test_observers)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMax);
+	// kMaxShadowMaps is the fixed constant 16.
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
 	EXPECT_TRUE(bta.IsInitialized());
 	EXPECT_EQ(bta.IsInitialized(), bta.GetDescriptorSet() != VK_NULL_HANDLE);
+	// GetLayout returns a single layout containing both binding 0 and binding 1.
+	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 
 	ctx.device.WaitIdle();
 }

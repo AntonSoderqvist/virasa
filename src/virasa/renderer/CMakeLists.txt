@@ -14,6 +14,7 @@ add_library(virasa_renderer_lib STATIC
     resources/MeshRegistry.cpp
     material/Visual.cpp
     lighting/LightTable.cpp
+    lighting/ShadowTable.cpp
     graph/Graph.cpp
     graph/Pass.cpp
     graph/ImageRegistry.cpp

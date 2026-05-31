@@ -225,13 +225,23 @@ class PassBuilder final
 	PassBuilder& ColorAttachment(ImageHandle image, LoadOp loadOp, ClearColor clearColor);
 
 	/**
-	 * @brief Sets the depth attachment for the pass.
+	 * @brief Sets the depth attachment for the pass (DontCare store op).
 	 * @param image Image handle used as the depth attachment.
 	 * @param loadOp Load operation for the attachment.
 	 * @param clearDepth Clear depth used when loadOp is Clear.
 	 * @return This builder.
 	 */
 	PassBuilder& DepthAttachment(ImageHandle image, LoadOp loadOp, float clearDepth);
+
+	/**
+	 * @brief Sets the depth attachment for the pass with explicit store op.
+	 * @param image Image handle used as the depth attachment.
+	 * @param loadOp Load operation for the attachment.
+	 * @param storeOp Store operation for the attachment.
+	 * @param clearDepth Clear depth used when loadOp is Clear.
+	 * @return This builder.
+	 */
+	PassBuilder& DepthAttachment(ImageHandle image, LoadOp loadOp, StoreOp storeOp, float clearDepth);
 
 	/**
 	 * @brief Declares an image read by the pass.

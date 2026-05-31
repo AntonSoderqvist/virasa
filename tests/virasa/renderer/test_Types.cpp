@@ -682,6 +682,18 @@ TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
 		"anisotropyEnable must be bool");
 	static_assert(std::is_same_v<decltype(SamplerConfig::maxAnisotropy), float>,
 		"maxAnisotropy must be float");
+	static_assert(std::is_same_v<decltype(SamplerConfig::minLod), float>,
+		"minLod must be float");
+	static_assert(std::is_same_v<decltype(SamplerConfig::maxLod), float>,
+		"maxLod must be float");
+	static_assert(std::is_same_v<decltype(SamplerConfig::mipLodBias), float>,
+		"mipLodBias must be float");
+	static_assert(std::is_same_v<decltype(SamplerConfig::borderColor), VkBorderColor>,
+		"borderColor must be VkBorderColor");
+	static_assert(std::is_same_v<decltype(SamplerConfig::compareEnable), bool>,
+		"compareEnable must be bool");
+	static_assert(std::is_same_v<decltype(SamplerConfig::compareOp), VkCompareOp>,
+		"compareOp must be VkCompareOp");
 
 	SamplerConfig config;
 	EXPECT_EQ(config.magFilter, VK_FILTER_LINEAR);
@@ -692,6 +704,12 @@ TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
 	EXPECT_EQ(config.addressModeW, VK_SAMPLER_ADDRESS_MODE_REPEAT);
 	EXPECT_FALSE(config.anisotropyEnable);
 	EXPECT_FLOAT_EQ(config.maxAnisotropy, 1.0f);
+	EXPECT_FLOAT_EQ(config.minLod, 0.0f);
+	EXPECT_FLOAT_EQ(config.maxLod, VK_LOD_CLAMP_NONE);
+	EXPECT_FLOAT_EQ(config.mipLodBias, 0.0f);
+	EXPECT_EQ(config.borderColor, VK_BORDER_COLOR_INT_OPAQUE_BLACK);
+	EXPECT_FALSE(config.compareEnable);
+	EXPECT_EQ(config.compareOp, VK_COMPARE_OP_ALWAYS);
 
 	SamplerConfig sameDefaults;
 	EXPECT_TRUE(config == sameDefaults);
@@ -720,7 +738,26 @@ TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
 	different = config;
 	different.maxAnisotropy = 16.0f;
 	EXPECT_FALSE(config == different);
+	different = config;
+	different.minLod = 1.0f;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.maxLod = 4.0f;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.mipLodBias = 0.5f;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.compareEnable = true;
+	EXPECT_FALSE(config == different);
+	different = config;
+	different.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	EXPECT_FALSE(config == different);
 
+	// maxAnisotropy is still part of equality even when anisotropyEnable is false.
 	SamplerConfig anisotropyDisabledA{};
 	SamplerConfig anisotropyDisabledB{};
 	anisotropyDisabledA.anisotropyEnable = false;
@@ -728,6 +765,19 @@ TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
 	anisotropyDisabledA.maxAnisotropy = 1.0f;
 	anisotropyDisabledB.maxAnisotropy = 8.0f;
 	EXPECT_FALSE(anisotropyDisabledA == anisotropyDisabledB);
+
+	// compareEnable=true + compareOp=LESS_OR_EQUAL describes a shadow/PCF sampler.
+	SamplerConfig shadowSampler{};
+	shadowSampler.compareEnable = true;
+	shadowSampler.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	SamplerConfig shadowSampler2{};
+	shadowSampler2.compareEnable = true;
+	shadowSampler2.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	EXPECT_TRUE(shadowSampler == shadowSampler2);
+	SamplerConfig shadowSampler3{};
+	shadowSampler3.compareEnable = true;
+	shadowSampler3.compareOp = VK_COMPARE_OP_LESS;
+	EXPECT_FALSE(shadowSampler == shadowSampler3);
 
 	SamplerConfig customized{};
 	customized.magFilter = VK_FILTER_NEAREST;
@@ -738,6 +788,12 @@ TEST(Types, test_sampler_config_describes_vk_sampler_parameters)
 	customized.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 	customized.anisotropyEnable = true;
 	customized.maxAnisotropy = 4.0f;
+	customized.minLod = 0.5f;
+	customized.maxLod = 8.0f;
+	customized.mipLodBias = 0.25f;
+	customized.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	customized.compareEnable = true;
+	customized.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
 	SamplerConfig copy = customized;
 	EXPECT_TRUE(copy == customized);

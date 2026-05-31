@@ -76,7 +76,7 @@ TEST(LightTable, test_light_gpu_layout_is_64_bytes_scalar_compatible)
 	EXPECT_EQ(offsetof(LightGPU, color), 32u);
 	EXPECT_EQ(offsetof(LightGPU, innerConeCos), 44u);
 	EXPECT_EQ(offsetof(LightGPU, outerConeCos), 48u);
-	EXPECT_EQ(offsetof(LightGPU, _pad0), 52u);
+	EXPECT_EQ(offsetof(LightGPU, shadowIndex), 52u);
 	EXPECT_EQ(offsetof(LightGPU, _pad1), 56u);
 	EXPECT_EQ(offsetof(LightGPU, _pad2), 60u);
 
@@ -95,7 +95,7 @@ TEST(LightTable, test_light_gpu_layout_is_64_bytes_scalar_compatible)
 	EXPECT_FLOAT_EQ(g.color.z, 0.0f);
 	EXPECT_FLOAT_EQ(g.innerConeCos, 0.0f);
 	EXPECT_FLOAT_EQ(g.outerConeCos, 0.0f);
-	EXPECT_FLOAT_EQ(g._pad0, 0.0f);
+	EXPECT_EQ(g.shadowIndex, -1);
 	EXPECT_FLOAT_EQ(g._pad1, 0.0f);
 	EXPECT_FLOAT_EQ(g._pad2, 0.0f);
 

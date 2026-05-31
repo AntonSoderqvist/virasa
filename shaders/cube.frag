@@ -46,7 +46,7 @@ struct LightGPU {
     vec3  color;          // @ 32  (linear RGB * intensity)
     float innerConeCos;   // @ 44
     float outerConeCos;   // @ 48
-    float _pad0;          // @ 52
+    int   shadowIndex;    // @ 52  (-1 = unshadowed, else ShadowGPU index)
     float _pad1;          // @ 56
     float _pad2;          // @ 60
 };
@@ -55,7 +55,21 @@ layout(buffer_reference, scalar) readonly buffer LightTable {
     LightGPU lights[];
 };
 
+// Matches virasa::ShadowGPU (80 bytes, scalar layout).
+struct ShadowGPU {
+    mat4  lightViewProj;  // @  0  (world -> light clip)
+    uint  shadowMapSlot;  // @ 64  (bindless shadow-map slot, set 0 binding 1)
+    float depthBias;      // @ 68
+    float slopeBias;      // @ 72
+    uint  _pad0;          // @ 76
+};
+
+layout(buffer_reference, scalar) readonly buffer ShadowTable {
+    ShadowGPU shadows[];
+};
+
 layout(set = 0, binding = 0) uniform sampler2D textures[];
+layout(set = 0, binding = 1) uniform sampler2DShadow shadowMaps[];
 
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
@@ -64,9 +78,62 @@ layout(push_constant) uniform PushConstants {
     uint64_t indexBufferAddress;
     uint64_t materialBufferAddress;
     uint64_t lightBufferAddress;
+    uint64_t shadowBufferAddress;
     uint materialId;
     uint lightCount;
 } pc;
+
+// Hardware-PCF visibility for the light whose ShadowGPU record is at `idx`.
+// Samples the comparison-sampled shadow map (sampler2DShadow at binding 1):
+// each texture() tap performs the depth compare (compareOp LESS_OR_EQUAL) and,
+// with the sampler's VK_FILTER_LINEAR, bilinearly averages the four
+// neighbouring comparison results (2x2 PCF). A 5x5 grid of such taps is then
+// averaged for a smooth, grid-free edge. Returns 1.0 (fully lit) to 0.0.
+float shadowVisibility(int idx, vec3 worldPos, float NdotL) {
+    if (idx < 0 || pc.shadowBufferAddress == 0ul) {
+        return 1.0;
+    }
+    ShadowTable st = ShadowTable(pc.shadowBufferAddress);
+    ShadowGPU s = st.shadows[idx];
+
+    vec4 lc = s.lightViewProj * vec4(worldPos, 1.0);
+    if (lc.w <= 0.0) {
+        return 1.0;
+    }
+    vec3 ndc = lc.xyz / lc.w;
+
+    // Depth is already in [0,1] (Vulkan ZO). Fragments past the far plane
+    // are unshadowed.
+    float currentDepth = ndc.z;
+    if (currentDepth > 1.0) {
+        return 1.0;
+    }
+
+    // NDC xy in [-1,1] -> shadow-map UV in [0,1]. The light matrix already
+    // carries the Vulkan Y-flip, matching the depth pass rasterization.
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+        return 1.0; // outside the map: treat as lit (border is opaque white).
+    }
+
+    // Slope-scaled bias grows as the surface faces away from the light. The
+    // biased depth is the reference the sampler compares against the stored
+    // depth; smaller reference => more likely to pass (lit), combating acne.
+    float bias = s.depthBias + s.slopeBias * (1.0 - clamp(NdotL, 0.0, 1.0));
+    float refDepth = clamp(currentDepth - bias, 0.0, 1.0);
+
+    vec2 texel = 1.0 / vec2(textureSize(shadowMaps[s.shadowMapSlot], 0));
+    float lit = 0.0;
+    for (int x = -2; x <= 2; ++x) {
+        for (int y = -2; y <= 2; ++y) {
+            // Third coordinate is the reference depth; the result is the
+            // hardware-filtered fraction of texels that pass the compare.
+            lit += texture(shadowMaps[s.shadowMapSlot],
+                           vec3(uv + vec2(x, y) * texel, refDepth));
+        }
+    }
+    return lit / 25.0;
+}
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec3 fragWorldPos;
@@ -134,7 +201,8 @@ void main() {
             }
 
             float NdotL = max(dot(N, Ldir), 0.0);
-            lit += albedo * L.color * NdotL * atten;
+            float visibility = shadowVisibility(L.shadowIndex, fragWorldPos, NdotL);
+            lit += albedo * L.color * NdotL * atten * visibility;
         }
     }
 

@@ -120,11 +120,13 @@ TEST(Components, test_directional_light_component_describes_infinite_light)
 	EXPECT_FLOAT_EQ(defaultComp.color.y, 1.0f);
 	EXPECT_FLOAT_EQ(defaultComp.color.z, 1.0f);
 	EXPECT_FLOAT_EQ(defaultComp.intensity, 1.0f);
+	EXPECT_TRUE(defaultComp.castsShadows);
 
 	virasa::ecs::DirectionalLightComponent comp;
 	comp.direction = virasa::math::Vec3(3.0f, 4.0f, 0.0f);
 	comp.color = virasa::math::Vec3(2.5f, 0.5f, 4.0f);
 	comp.intensity = 2.5f;
+	comp.castsShadows = false;
 	EXPECT_FLOAT_EQ(comp.direction.x, 3.0f);
 	EXPECT_FLOAT_EQ(comp.direction.y, 4.0f);
 	EXPECT_FLOAT_EQ(comp.direction.z, 0.0f);
@@ -132,6 +134,7 @@ TEST(Components, test_directional_light_component_describes_infinite_light)
 	EXPECT_FLOAT_EQ(comp.color.y, 0.5f);
 	EXPECT_FLOAT_EQ(comp.color.z, 4.0f);
 	EXPECT_FLOAT_EQ(comp.intensity, 2.5f);
+	EXPECT_FALSE(comp.castsShadows);
 
 	virasa::ecs::DirectionalLightComponent copy = comp;
 	EXPECT_FLOAT_EQ(copy.direction.x, comp.direction.x);
@@ -141,6 +144,7 @@ TEST(Components, test_directional_light_component_describes_infinite_light)
 	EXPECT_FLOAT_EQ(copy.color.y, comp.color.y);
 	EXPECT_FLOAT_EQ(copy.color.z, comp.color.z);
 	EXPECT_FLOAT_EQ(copy.intensity, comp.intensity);
+	EXPECT_EQ(copy.castsShadows, comp.castsShadows);
 
 	virasa::ecs::DirectionalLightComponent assigned;
 	assigned = comp;
@@ -151,6 +155,7 @@ TEST(Components, test_directional_light_component_describes_infinite_light)
 	EXPECT_FLOAT_EQ(assigned.color.y, comp.color.y);
 	EXPECT_FLOAT_EQ(assigned.color.z, comp.color.z);
 	EXPECT_FLOAT_EQ(assigned.intensity, comp.intensity);
+	EXPECT_EQ(assigned.castsShadows, comp.castsShadows);
 
 	virasa::ecs::DirectionalLightComponent moved = std::move(copy);
 	EXPECT_FLOAT_EQ(moved.direction.x, comp.direction.x);
@@ -160,6 +165,7 @@ TEST(Components, test_directional_light_component_describes_infinite_light)
 	EXPECT_FLOAT_EQ(moved.color.y, comp.color.y);
 	EXPECT_FLOAT_EQ(moved.color.z, comp.color.z);
 	EXPECT_FLOAT_EQ(moved.intensity, comp.intensity);
+	EXPECT_EQ(moved.castsShadows, comp.castsShadows);
 
 	EXPECT_TRUE(std::is_trivially_destructible_v<virasa::ecs::DirectionalLightComponent>);
 	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::DirectionalLightComponent>);
@@ -228,6 +234,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_FLOAT_EQ(defaultComp.innerConeCos, 0.95f);
 	EXPECT_FLOAT_EQ(defaultComp.outerConeCos, 0.85f);
 	EXPECT_GE(defaultComp.innerConeCos, defaultComp.outerConeCos);
+	EXPECT_TRUE(defaultComp.castsShadows);
 
 	virasa::ecs::SpotLightComponent comp;
 	comp.color = virasa::math::Vec3(5.0f, 4.0f, 3.0f);
@@ -235,6 +242,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	comp.range = 15.0f;
 	comp.innerConeCos = 0.90f;
 	comp.outerConeCos = 0.75f;
+	comp.castsShadows = false;
 	EXPECT_FLOAT_EQ(comp.color.x, 5.0f);
 	EXPECT_FLOAT_EQ(comp.color.y, 4.0f);
 	EXPECT_FLOAT_EQ(comp.color.z, 3.0f);
@@ -243,6 +251,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_FLOAT_EQ(comp.innerConeCos, 0.90f);
 	EXPECT_FLOAT_EQ(comp.outerConeCos, 0.75f);
 	EXPECT_GE(comp.innerConeCos, comp.outerConeCos);
+	EXPECT_FALSE(comp.castsShadows);
 
 	virasa::ecs::SpotLightComponent copy = comp;
 	EXPECT_FLOAT_EQ(copy.color.x, comp.color.x);
@@ -252,6 +261,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_FLOAT_EQ(copy.range, comp.range);
 	EXPECT_FLOAT_EQ(copy.innerConeCos, comp.innerConeCos);
 	EXPECT_FLOAT_EQ(copy.outerConeCos, comp.outerConeCos);
+	EXPECT_EQ(copy.castsShadows, comp.castsShadows);
 
 	virasa::ecs::SpotLightComponent assigned;
 	assigned = comp;
@@ -262,6 +272,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_FLOAT_EQ(assigned.range, comp.range);
 	EXPECT_FLOAT_EQ(assigned.innerConeCos, comp.innerConeCos);
 	EXPECT_FLOAT_EQ(assigned.outerConeCos, comp.outerConeCos);
+	EXPECT_EQ(assigned.castsShadows, comp.castsShadows);
 
 	virasa::ecs::SpotLightComponent moved = std::move(copy);
 	EXPECT_FLOAT_EQ(moved.color.x, comp.color.x);
@@ -271,6 +282,7 @@ TEST(Components, test_spot_light_component_describes_cone_light)
 	EXPECT_FLOAT_EQ(moved.range, comp.range);
 	EXPECT_FLOAT_EQ(moved.innerConeCos, comp.innerConeCos);
 	EXPECT_FLOAT_EQ(moved.outerConeCos, comp.outerConeCos);
+	EXPECT_EQ(moved.castsShadows, comp.castsShadows);
 
 	EXPECT_TRUE(std::is_trivially_destructible_v<virasa::ecs::SpotLightComponent>);
 	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::SpotLightComponent>);

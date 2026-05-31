@@ -63,8 +63,8 @@ RenderError Sampler::Initialize(const Device& device, const SamplerConfig& confi
 	createInfo.mipLodBias = config.mipLodBias;
 	createInfo.anisotropyEnable = config.anisotropyEnable ? VK_TRUE : VK_FALSE;
 	createInfo.maxAnisotropy = config.maxAnisotropy;
-	createInfo.compareEnable = VK_FALSE;
-	createInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+	createInfo.compareEnable = config.compareEnable ? VK_TRUE : VK_FALSE;
+	createInfo.compareOp = config.compareOp;
 	createInfo.minLod = config.minLod;
 	createInfo.maxLod = config.maxLod;
 	createInfo.borderColor = config.borderColor;

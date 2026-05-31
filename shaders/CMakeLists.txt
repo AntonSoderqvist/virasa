@@ -10,6 +10,8 @@ set(SHADERS
     triangle.frag
     cube.vert
     cube.frag
+    shadow_depth.vert
+    shadow_depth.frag
     ui_quad.vert
     ui_quad.frag
     ui_text.vert

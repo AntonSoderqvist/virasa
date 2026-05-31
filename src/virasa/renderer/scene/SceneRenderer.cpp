@@ -13,7 +13,9 @@
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Projection.h"
 #include "virasa/math/Transform.h"
+#include <algorithm>
 #include "virasa/renderer/geometry/Primitives.h"
+#include "virasa/renderer/lighting/ShadowTable.h"
 #include "virasa/renderer/resources/Buffer.h"
 
 namespace virasa::renderer::scene
@@ -198,20 +200,41 @@ void LogRendererError(const char* message)
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Internal push-constant layout (168 bytes)
+// Internal push-constant layout (176 bytes)
 // ---------------------------------------------------------------------------
 struct PushConstants
 {
-	virasa::math::Mat4 mvp;		  // 64
-	virasa::math::Mat4 model;	  // 64
-	uint64_t vertexBufferAddress;	  //  8
-	uint64_t indexBufferAddress;	  //  8
-	uint64_t materialBufferAddress; //  8
-	uint64_t lightBufferAddress;	  //  8
-	uint32_t materialId;		  //  4
-	uint32_t lightCount;		  //  4
+	virasa::math::Mat4 mvp;            // 64
+	virasa::math::Mat4 model;          // 64
+	uint64_t vertexBufferAddress;      //  8
+	uint64_t indexBufferAddress;       //  8
+	uint64_t materialBufferAddress;    //  8
+	uint64_t lightBufferAddress;       //  8
+	uint64_t shadowBufferAddress;      //  8
+	uint32_t materialId;               //  4
+	uint32_t lightCount;               //  4
 };
-static_assert(sizeof(PushConstants) == 168, "PushConstants must be exactly 168 bytes");
+static_assert(sizeof(PushConstants) == 176, "PushConstants must be exactly 176 bytes");
+
+// ---------------------------------------------------------------------------
+// Shadow push-constant layout (80 bytes)
+// ---------------------------------------------------------------------------
+struct ShadowPushConstants
+{
+	virasa::math::Mat4 lightMvp;       // 64
+	uint64_t vertexBufferAddress;      //  8
+	uint64_t indexBufferAddress;       //  8
+};
+static_assert(sizeof(ShadowPushConstants) == 80, "ShadowPushConstants must be exactly 80 bytes");
+
+// Shadow rendering constants
+constexpr float kShadowNearPlane = 0.05f;
+constexpr float kDirectionalShadowDistance = 100.0f;
+constexpr float kDirectionalShadowExtent = 25.0f;
+constexpr uint32_t kShadowMapResolution = 2048u;
+constexpr uint32_t kMaxShadowMaps = 8u;
+constexpr float kShadowDepthBias = 0.0015f;
+constexpr float kShadowSlopeBias = 0.0025f;
 
 // ---------------------------------------------------------------------------
 // Initialize
@@ -249,6 +272,12 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			return err;
 		}
 		err = _lightTable.Initialize(device, 256);
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _shadowTable.Initialize(device, kMaxShadowMaps);
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
@@ -294,7 +323,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		}
 	}
 
-	// Step 6: initialize default sampler
+	// Step 6: initialize default sampler and shadow sampler
 	{
 		virasa::SamplerConfig samplerCfg{};
 		samplerCfg.magFilter = VK_FILTER_LINEAR;
@@ -305,6 +334,24 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		samplerCfg.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 
 		auto err = _defaultSampler.Initialize(device, samplerCfg);
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+
+		virasa::SamplerConfig shadowCfg{};
+		shadowCfg.magFilter = VK_FILTER_LINEAR;
+		shadowCfg.minFilter = VK_FILTER_LINEAR;
+		shadowCfg.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		shadowCfg.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		shadowCfg.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		shadowCfg.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		shadowCfg.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+		shadowCfg.compareEnable = true;
+		shadowCfg.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+		err = _shadowSampler.Initialize(device, shadowCfg);
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
@@ -338,7 +385,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		assert(id == 0u);
 	}
 
-	// Step 9: load forward shaders
+	// Step 9: load forward and shadow shaders
 	{
 		auto err = _forwardVertexShader.Initialize(device, "shaders/cube.vert.spv");
 		if (err != virasa::RenderError::None)
@@ -347,6 +394,18 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			return err;
 		}
 		err = _forwardFragmentShader.Initialize(device, "shaders/cube.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _shadowVertexShader.Initialize(device, "shaders/shadow_depth.vert.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _shadowFragmentShader.Initialize(device, "shaders/shadow_depth.frag.spv");
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
@@ -368,7 +427,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 				.SetDepthTest(true)
 				.SetDepthCompareOp(VK_COMPARE_OP_LESS)
 				.AddPushConstantRange(
-					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168)
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 176)
 				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
 			return b;
 		};
@@ -427,6 +486,27 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 				_initialized = false;
 				return err;
 			}
+		}
+	}
+
+	// Step 10b: build shadow pipeline (depth-only)
+	{
+		virasa::PipelineBuilder b;
+		b.SetVertexShader(_shadowVertexShader)
+			.SetFragmentShader(_shadowFragmentShader)
+			.SetDepthFormat(VK_FORMAT_D32_SFLOAT)
+			.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+			.SetCullMode(VK_CULL_MODE_BACK_BIT)
+			.SetDepthTest(true)
+			.SetDepthWrite(true)
+			.SetDepthCompareOp(VK_COMPARE_OP_LESS)
+			.SetBlendEnabled(false)
+			.AddPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, 80);
+		auto err = b.Build(device, _shadowPipeline);
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
 		}
 	}
 
@@ -805,7 +885,7 @@ uint32_t SceneRenderer::RenderWorld(
 		}
 	}
 
-	_lightTable.UploadFrame(std::span<const virasa::LightGPU>(lights));
+	// (light upload deferred until after shadow index assignment)
 
 	// --- Build drawable list ---
 	struct Drawable
@@ -887,6 +967,346 @@ uint32_t SceneRenderer::RenderWorld(
 	for (auto& d : blendDrawables)
 		allDrawables.push_back(d);
 
+	// --- Shadow rendering ---
+	// Select shadow-casting lights and render depth maps
+	std::vector<virasa::ShadowGPU> shadowRecords;
+
+	{
+		auto* logger = virasa::Logger::GetLogger("renderer");
+		(void)logger;
+
+		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
+
+		// We need to find directional and spot lights that cast shadows
+		// Walk the lights vector we already built and match back to components
+		// We need to re-walk the component systems to get castsShadows flag
+		const virasa::ecs::ComponentSystem* dlSys = [&world]() -> const virasa::ecs::ComponentSystem*
+		{
+			const virasa::ecs::ComponentId id = world.GetSystemId("DirectionalLight");
+			if (id == 0xFFFFFFFFu) return nullptr;
+			return &world.GetSystem(id);
+		}();
+		const virasa::ecs::ComponentSystem* slSys = [&world]() -> const virasa::ecs::ComponentSystem*
+		{
+			const virasa::ecs::ComponentId id = world.GetSystemId("SpotLight");
+			if (id == 0xFFFFFFFFu) return nullptr;
+			return &world.GetSystem(id);
+		}();
+
+		// Build a list of shadow-casting light candidates in the same order lights[] was built
+		// We need to correlate lights[] entries back to their source components.
+		// We rebuild the shadow candidate list by re-walking the same component systems
+		// in the same order used to build lights[].
+		struct ShadowCandidate
+		{
+			virasa::math::Mat4 lightViewProj;
+			size_t lightIndex; // index into lights[]
+		};
+
+		uint32_t shadowBudgetUsed = 0u;
+		size_t lightIdx = 0u;
+
+		// Process directional lights first (same order as light gathering above)
+		if (dlSys != nullptr)
+		{
+			for (auto entity : dlSys->Entities())
+			{
+				const auto* dlPtr = static_cast<const virasa::ecs::DirectionalLightComponent*>(
+					dlSys->GetRaw(entity));
+				if (dlPtr == nullptr)
+					continue;
+				const auto& dl = *dlPtr;
+
+				if (dl.castsShadows)
+				{
+					if (shadowBudgetUsed >= kMaxShadowMaps)
+					{
+						// Log warning: shadow budget exceeded
+						(void)logger;
+					}
+					else
+					{
+						// Compute light-space view-projection for directional light
+						virasa::math::Vec3 dir = glm::normalize(dl.direction);
+						virasa::math::Vec3 eye = cameraEye - dir * kDirectionalShadowDistance;
+						virasa::math::Mat4 lightView = virasa::math::LookAtRH_ZUp(eye, cameraEye);
+						const float H = kDirectionalShadowExtent;
+						virasa::math::Mat4 lightProj = virasa::math::OrthoRH_ZO(
+							-H, H, -H, H, kShadowNearPlane, 2.0f * kDirectionalShadowDistance);
+						virasa::math::Mat4 lightViewProj = lightProj * lightView;
+
+						// Declare transient shadow map
+						virasa::renderer::graph::GraphImageDesc shadowDesc{};
+						shadowDesc.width = kShadowMapResolution;
+						shadowDesc.height = kShadowMapResolution;
+						shadowDesc.format = VK_FORMAT_D32_SFLOAT;
+						shadowDesc.usage =
+							VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+						shadowDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+						virasa::renderer::graph::ImageHandle shadowMapHandle =
+							_graph.DeclareImage(shadowDesc);
+
+						// Capture for shadow pass record callback
+						virasa::math::Mat4 capturedLVP = lightViewProj;
+						virasa::Pipeline* shadowPipeline = &_shadowPipeline;
+						virasa::renderer::MeshRegistry* meshRegPtr = &_meshRegistry;
+						const virasa::Device* devPtr = _device;
+						std::vector<Drawable> opaqueForShadow;
+						for (const auto& d : opaqueDrawables)
+							opaqueForShadow.push_back(d);
+
+						_graph.AddPass("shadow")
+							.DepthAttachment(shadowMapHandle,
+								virasa::renderer::graph::LoadOp::Clear,
+								virasa::renderer::graph::StoreOp::Store,
+								1.0f)
+							.Record(
+								[shadowPipeline,
+									meshRegPtr,
+									devPtr,
+									capturedLVP,
+									opaqueForShadow = std::move(opaqueForShadow)](
+									const virasa::renderer::graph::GraphContext& gc)
+								{
+									VkCommandBuffer cmd = gc.GetCommandBuffer();
+
+									VkViewport vp{};
+									vp.x = 0.0f;
+									vp.y = 0.0f;
+									vp.width = static_cast<float>(kShadowMapResolution);
+									vp.height = static_cast<float>(kShadowMapResolution);
+									vp.minDepth = 0.0f;
+									vp.maxDepth = 1.0f;
+									vkCmdSetViewport(cmd, 0, 1, &vp);
+
+									VkRect2D sc{};
+									sc.offset = {0, 0};
+									sc.extent = {kShadowMapResolution, kShadowMapResolution};
+									vkCmdSetScissor(cmd, 0, 1, &sc);
+
+									shadowPipeline->Bind(cmd);
+
+									for (const auto& d : opaqueForShadow)
+									{
+										if (!meshRegPtr->IsAllocated(d.meshId))
+											continue;
+										const auto& mesh = meshRegPtr->Get(d.meshId);
+
+										ShadowPushConstants spc{};
+										spc.lightMvp = capturedLVP * d.model;
+										spc.vertexBufferAddress =
+											mesh.GetVertexBufferAddress(*devPtr);
+										spc.indexBufferAddress =
+											mesh.GetIndexBufferAddress(*devPtr);
+
+										vkCmdPushConstants(cmd,
+											shadowPipeline->GetLayout(),
+											VK_SHADER_STAGE_VERTEX_BIT,
+											0,
+											sizeof(ShadowPushConstants),
+											&spc);
+
+										vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+									}
+								});
+
+						// Register shadow map view into bindless shadow-map slot (with caching)
+						VkImageView shadowView = _imageRegistry.Get(shadowMapHandle).GetView();
+						uint32_t shadowSlot = kInvalidSlot;
+						auto shadowIt = _shadowSlotCache.find(shadowView);
+						if (shadowIt != _shadowSlotCache.end())
+						{
+							shadowSlot = shadowIt->second;
+						}
+						else
+						{
+							shadowSlot = _bindlessTextures.RegisterShadowMap(
+								shadowView, _shadowSampler.GetHandle());
+							if (shadowSlot != kInvalidSlot)
+							{
+								_shadowSlotCache[shadowView] = shadowSlot;
+							}
+						}
+
+						if (shadowSlot != kInvalidSlot)
+						{
+							// Assign shadow index to the light
+							const uint32_t shadowRecordIdx =
+								static_cast<uint32_t>(shadowRecords.size());
+							lights[lightIdx].shadowIndex =
+								static_cast<int32_t>(shadowRecordIdx);
+
+							virasa::ShadowGPU shadowRec{};
+							shadowRec.lightViewProj = lightViewProj;
+							shadowRec.shadowMapSlot = shadowSlot;
+							shadowRec.depthBias = kShadowDepthBias;
+							shadowRec.slopeBias = kShadowSlopeBias;
+							shadowRec._pad0 = 0u;
+							shadowRecords.push_back(shadowRec);
+						}
+
+						++shadowBudgetUsed;
+					}
+				}
+
+				++lightIdx;
+			}
+		}
+
+		// Process spot lights (same order as light gathering above)
+		if (slSys != nullptr)
+		{
+			for (auto entity : slSys->Entities())
+			{
+				if (!transforms.Has(entity))
+					continue;
+				const auto* slPtr = static_cast<const virasa::ecs::SpotLightComponent*>(
+					slSys->GetRaw(entity));
+				if (slPtr == nullptr)
+					continue;
+				const auto& sl = *slPtr;
+
+				if (sl.castsShadows)
+				{
+					if (shadowBudgetUsed >= kMaxShadowMaps)
+					{
+						// Log warning: shadow budget exceeded
+						(void)logger;
+					}
+					else
+					{
+						virasa::math::Vec3 pos = transforms.GetWorldPosition(entity);
+						virasa::math::Vec3 dir = transforms.GetWorldForward(entity);
+						virasa::math::Mat4 lightView = virasa::math::LookAtRH_ZUp(pos, pos + dir);
+						const float outerCos =
+							glm::clamp(sl.outerConeCos, -1.0f, 1.0f);
+						const float fovY = 2.0f * std::acos(outerCos);
+						virasa::math::Mat4 lightProj = virasa::math::PerspectiveRH_ZO(
+							fovY, 1.0f, kShadowNearPlane, sl.range);
+						virasa::math::Mat4 lightViewProj = lightProj * lightView;
+
+						// Declare transient shadow map
+						virasa::renderer::graph::GraphImageDesc shadowDesc{};
+						shadowDesc.width = kShadowMapResolution;
+						shadowDesc.height = kShadowMapResolution;
+						shadowDesc.format = VK_FORMAT_D32_SFLOAT;
+						shadowDesc.usage =
+							VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+						shadowDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+						virasa::renderer::graph::ImageHandle shadowMapHandle =
+							_graph.DeclareImage(shadowDesc);
+
+						// Capture for shadow pass record callback
+						virasa::math::Mat4 capturedLVP = lightViewProj;
+						virasa::Pipeline* shadowPipeline = &_shadowPipeline;
+						virasa::renderer::MeshRegistry* meshRegPtr = &_meshRegistry;
+						const virasa::Device* devPtr = _device;
+						std::vector<Drawable> opaqueForShadow;
+						for (const auto& d : opaqueDrawables)
+							opaqueForShadow.push_back(d);
+
+						_graph.AddPass("shadow")
+							.DepthAttachment(shadowMapHandle,
+								virasa::renderer::graph::LoadOp::Clear,
+								virasa::renderer::graph::StoreOp::Store,
+								1.0f)
+							.Record(
+								[shadowPipeline,
+									meshRegPtr,
+									devPtr,
+									capturedLVP,
+									opaqueForShadow = std::move(opaqueForShadow)](
+									const virasa::renderer::graph::GraphContext& gc)
+								{
+									VkCommandBuffer cmd = gc.GetCommandBuffer();
+
+									VkViewport vp{};
+									vp.x = 0.0f;
+									vp.y = 0.0f;
+									vp.width = static_cast<float>(kShadowMapResolution);
+									vp.height = static_cast<float>(kShadowMapResolution);
+									vp.minDepth = 0.0f;
+									vp.maxDepth = 1.0f;
+									vkCmdSetViewport(cmd, 0, 1, &vp);
+
+									VkRect2D sc{};
+									sc.offset = {0, 0};
+									sc.extent = {kShadowMapResolution, kShadowMapResolution};
+									vkCmdSetScissor(cmd, 0, 1, &sc);
+
+									shadowPipeline->Bind(cmd);
+
+									for (const auto& d : opaqueForShadow)
+									{
+										if (!meshRegPtr->IsAllocated(d.meshId))
+											continue;
+										const auto& mesh = meshRegPtr->Get(d.meshId);
+
+										ShadowPushConstants spc{};
+										spc.lightMvp = capturedLVP * d.model;
+										spc.vertexBufferAddress =
+											mesh.GetVertexBufferAddress(*devPtr);
+										spc.indexBufferAddress =
+											mesh.GetIndexBufferAddress(*devPtr);
+
+										vkCmdPushConstants(cmd,
+											shadowPipeline->GetLayout(),
+											VK_SHADER_STAGE_VERTEX_BIT,
+											0,
+											sizeof(ShadowPushConstants),
+											&spc);
+
+										vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+									}
+								});
+
+						// Register shadow map view into bindless shadow-map slot (with caching)
+						VkImageView shadowView = _imageRegistry.Get(shadowMapHandle).GetView();
+						uint32_t shadowSlot = kInvalidSlot;
+						auto shadowIt = _shadowSlotCache.find(shadowView);
+						if (shadowIt != _shadowSlotCache.end())
+						{
+							shadowSlot = shadowIt->second;
+						}
+						else
+						{
+							shadowSlot = _bindlessTextures.RegisterShadowMap(
+								shadowView, _shadowSampler.GetHandle());
+							if (shadowSlot != kInvalidSlot)
+							{
+								_shadowSlotCache[shadowView] = shadowSlot;
+							}
+						}
+
+						if (shadowSlot != kInvalidSlot)
+						{
+							const uint32_t shadowRecordIdx =
+								static_cast<uint32_t>(shadowRecords.size());
+							lights[lightIdx].shadowIndex =
+								static_cast<int32_t>(shadowRecordIdx);
+
+							virasa::ShadowGPU shadowRec{};
+							shadowRec.lightViewProj = lightViewProj;
+							shadowRec.shadowMapSlot = shadowSlot;
+							shadowRec.depthBias = kShadowDepthBias;
+							shadowRec.slopeBias = kShadowSlopeBias;
+							shadowRec._pad0 = 0u;
+							shadowRecords.push_back(shadowRec);
+						}
+
+						++shadowBudgetUsed;
+					}
+				}
+
+				++lightIdx;
+			}
+		}
+	}
+
+	// Upload shadow and light tables (shadow indices now assigned)
+	_shadowTable.UploadFrame(std::span<const virasa::ShadowGPU>(shadowRecords));
+	_lightTable.UploadFrame(std::span<const virasa::LightGPU>(lights));
+
 	// --- Capture state for the record callback ---
 	virasa::math::Mat4 capturedView = viewMatrix;
 	virasa::math::Mat4 capturedProj = projMatrix;
@@ -900,6 +1320,7 @@ uint32_t SceneRenderer::RenderWorld(
 	virasa::renderer::MeshRegistry* meshReg = &_meshRegistry;
 	virasa::VisualMaterialTable* matTable = &_materialTable;
 	virasa::LightTable* lightTable = &_lightTable;
+	virasa::ShadowTable* shadowTable = &_shadowTable;
 	const virasa::Device* dev = _device;
 
 	// --- Add forward pass ---
@@ -917,6 +1338,7 @@ uint32_t SceneRenderer::RenderWorld(
 				meshReg,
 				matTable,
 				lightTable,
+				shadowTable,
 				dev,
 				capturedView,
 				capturedProj,
@@ -979,19 +1401,13 @@ uint32_t SceneRenderer::RenderWorld(
 					}
 
 					PushConstants pc{};
-					pc.model = {}; // will be set below — placeholder
 					pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
 					pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
 					pc.materialBufferAddress = matTable->GetBufferAddress();
 					pc.lightBufferAddress = lightTable->GetBufferAddress();
+					pc.shadowBufferAddress = shadowTable->GetBufferAddress();
 					pc.materialId = d.materialId;
 					pc.lightCount = lightTable->GetLightCount();
-
-					// We need the world matrix — it was pre-gathered; store it in the drawable
-					// We stored it via allDrawables which captured world matrices at build time.
-					// Since we can't call world.GetTransforms() here (world not captured),
-					// we need to capture the model matrix in the Drawable struct.
-					// NOTE: model matrix is stored in d.model (see below — we add it to Drawable)
 					pc.model = d.model;
 					pc.mvp = capturedProj * capturedView * d.model;
 

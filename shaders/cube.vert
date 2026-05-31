@@ -20,13 +20,16 @@ layout(buffer_reference, scalar) readonly buffer IndexBuffer {
     uint indices[];
 };
 
-// 96-byte push constant block (vertex+fragment):
-//   mat4     mvp                    @  0  (64 bytes)
-//   uint64_t vertexBufferAddress    @ 64  (8 bytes)
-//   uint64_t indexBufferAddress     @ 72  (8 bytes)
-//   uint64_t materialBufferAddress  @ 80  (8 bytes)
-//   uint32_t materialId             @ 88  (4 bytes)
-//   uint32_t _pad                   @ 92  (4 bytes)
+// 176-byte push constant block (vertex+fragment):
+//   mat4     mvp                    @   0  (64 bytes)
+//   mat4     model                  @  64  (64 bytes)
+//   uint64_t vertexBufferAddress    @ 128  (8 bytes)
+//   uint64_t indexBufferAddress     @ 136  (8 bytes)
+//   uint64_t materialBufferAddress  @ 144  (8 bytes)
+//   uint64_t lightBufferAddress     @ 152  (8 bytes)
+//   uint64_t shadowBufferAddress    @ 160  (8 bytes)
+//   uint32_t materialId             @ 168  (4 bytes)
+//   uint32_t lightCount             @ 172  (4 bytes)
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
@@ -34,6 +37,7 @@ layout(push_constant) uniform PushConstants {
     uint64_t indexBufferAddress;
     uint64_t materialBufferAddress;
     uint64_t lightBufferAddress;
+    uint64_t shadowBufferAddress;
     uint materialId;
     uint lightCount;
 } pc;

@@ -309,6 +309,12 @@ struct SamplerConfig
 	/** @brief Border color for CLAMP_TO_BORDER address modes. */
 	VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
 
+	/** @brief Whether depth-comparison sampling is enabled. */
+	bool compareEnable = false;
+
+	/** @brief Comparison operator used when compareEnable is true. */
+	VkCompareOp compareOp = VK_COMPARE_OP_ALWAYS;
+
 	/**
 	 * @brief Compares two sampler configurations for equality.
 	 * @param other The other sampler configuration.

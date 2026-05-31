@@ -50,8 +50,9 @@ struct LightGPU
 	float innerConeCos = 0.0f;
 	/// Cosine of the outer cone half-angle (Spot only).
 	float outerConeCos = 0.0f;
+	/// Index into the shadow-record buffer; -1 means no shadow.
+	int32_t shadowIndex = -1;
 	/// Padding to reach 64-byte boundary — must not be read by shaders.
-	float _pad0 = 0.0f;
 	float _pad1 = 0.0f;
 	float _pad2 = 0.0f;
 };

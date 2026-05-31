@@ -16,6 +16,7 @@ add_executable(virasa_renderer_tests
     geometry/test_Primitives.cpp
     material/test_Visual.cpp
     lighting/test_LightTable.cpp
+    lighting/test_ShadowTable.cpp
     graph/test_Graph.cpp
     graph/test_Types.cpp
     graph/test_Pass.cpp

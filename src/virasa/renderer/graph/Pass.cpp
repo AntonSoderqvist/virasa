@@ -172,6 +172,19 @@ PassBuilder& PassBuilder::DepthAttachment(ImageHandle image, LoadOp loadOp, floa
 	return *this;
 }
 
+PassBuilder& PassBuilder::DepthAttachment(
+	ImageHandle image, LoadOp loadOp, StoreOp storeOp, float clearDepth)
+{
+	_pass->_depthAttachment = DepthAttachmentInfo{
+		.image = image,
+		.loadOp = loadOp,
+		.storeOp = storeOp,
+		.clearDepth = clearDepth,
+		.present = true,
+	};
+	return *this;
+}
+
 PassBuilder& PassBuilder::Read(ImageHandle image, ResourceUsage usage)
 {
 	_pass->_imageReads.push_back(ImageAccess{.image = image, .usage = usage});

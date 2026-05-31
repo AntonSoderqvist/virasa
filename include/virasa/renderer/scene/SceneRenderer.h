@@ -17,6 +17,7 @@
 #include "virasa/renderer/graph/Pass.h"
 #include "virasa/renderer/graph/Types.h"
 #include "virasa/renderer/lighting/LightTable.h"
+#include "virasa/renderer/lighting/ShadowTable.h"
 #include "virasa/renderer/material/Visual.h"
 #include "virasa/renderer/resources/BindlessTextureArray.h"
 #include "virasa/renderer/resources/Image.h"
@@ -152,16 +153,21 @@ class SceneRenderer final
 	MeshRegistry _meshRegistry = {};
 	virasa::VisualMaterialTable _materialTable = {};
 	virasa::LightTable _lightTable = {};
+	virasa::ShadowTable _shadowTable = {};
 	virasa::BindlessTextureArray _bindlessTextures = {};
 	virasa::Sampler _defaultSampler = {};
+	virasa::Sampler _shadowSampler = {};
 	virasa::Image _whiteImage = {};
 
 	virasa::ShaderModule _forwardVertexShader = {};
 	virasa::ShaderModule _forwardFragmentShader = {};
+	virasa::ShaderModule _shadowVertexShader = {};
+	virasa::ShaderModule _shadowFragmentShader = {};
 	virasa::Pipeline _opaquePipeline = {};
 	virasa::Pipeline _opaqueDoubleSidedPipeline = {};
 	virasa::Pipeline _blendPipeline = {};
 	virasa::Pipeline _blendDoubleSidedPipeline = {};
+	virasa::Pipeline _shadowPipeline = {};
 
 	virasa::renderer::graph::ImageRegistry _imageRegistry = {};
 	virasa::renderer::graph::BufferRegistry _bufferRegistry = {};
@@ -178,6 +184,7 @@ class SceneRenderer final
 	uint32_t _frameSceneSlot = 0xFFFFFFFFu;
 
 	std::unordered_map<VkImageView, uint32_t> _sceneSlotCache = {};
+	std::unordered_map<VkImageView, uint32_t> _shadowSlotCache = {};
 	std::vector<std::pair<virasa::SamplerConfig, virasa::Sampler>> _samplerCache = {};
 	std::vector<virasa::Image> _textureImages = {};
 

@@ -250,11 +250,15 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 		LOG_ERROR(logger, "PipelineBuilder::Build: vertex shader is VK_NULL_HANDLE (required)");
 		return RenderError::PipelineCreateFailed;
 	}
-	if (_colorFormat == VK_FORMAT_UNDEFINED)
+	// A color attachment is not mandatory when a depth attachment is present
+	// (depth-only pipeline, e.g. a shadow-map pass). Reject only when neither
+	// a color nor a depth target was recorded.
+	const bool hasColorAttachment = (_colorFormat != VK_FORMAT_UNDEFINED);
+	if (!hasColorAttachment && _depthFormat == VK_FORMAT_UNDEFINED)
 	{
 		LOG_ERROR(logger,
-			"PipelineBuilder::Build: color attachment format is VK_FORMAT_UNDEFINED "
-			"(required)");
+			"PipelineBuilder::Build: pipeline has neither a color attachment "
+			"format nor a depth attachment format (at least one is required)");
 		return RenderError::PipelineCreateFailed;
 	}
 
@@ -436,8 +440,9 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 	colorBlend.pNext = nullptr;
 	colorBlend.flags = 0;
 	colorBlend.logicOpEnable = VK_FALSE;
-	colorBlend.attachmentCount = 1;
-	colorBlend.pAttachments = &blendAttachment;
+	// Depth-only pipelines (no color attachment) carry zero blend attachments.
+	colorBlend.attachmentCount = hasColorAttachment ? 1u : 0u;
+	colorBlend.pAttachments = hasColorAttachment ? &blendAttachment : nullptr;
 
 	// --- Dynamic state ---
 	std::vector<VkDynamicState> dynamicStates;
@@ -463,8 +468,8 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 	renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
 	renderingInfo.pNext = nullptr;
 	renderingInfo.viewMask = 0;
-	renderingInfo.colorAttachmentCount = 1;
-	renderingInfo.pColorAttachmentFormats = &_colorFormat;
+	renderingInfo.colorAttachmentCount = hasColorAttachment ? 1u : 0u;
+	renderingInfo.pColorAttachmentFormats = hasColorAttachment ? &_colorFormat : nullptr;
 	renderingInfo.depthAttachmentFormat = _depthFormat;
 	renderingInfo.stencilAttachmentFormat = _stencilFormat;
 

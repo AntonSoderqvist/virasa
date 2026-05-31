@@ -312,6 +312,9 @@ TEST(Pass, test_pass_builder_is_fluent_authoring_surface)
 		std::declval<ImageHandle>(), std::declval<LoadOp>(), std::declval<ClearColor>())), PassBuilder&>);
 	static_assert(std::same_as<decltype(std::declval<PassBuilder&>().DepthAttachment(
 		std::declval<ImageHandle>(), std::declval<LoadOp>(), std::declval<float>())), PassBuilder&>);
+	// Four-argument DepthAttachment overload (with explicit StoreOp)
+	static_assert(std::same_as<decltype(std::declval<PassBuilder&>().DepthAttachment(
+		std::declval<ImageHandle>(), std::declval<LoadOp>(), std::declval<StoreOp>(), std::declval<float>())), PassBuilder&>);
 	static_assert(std::same_as<decltype(std::declval<PassBuilder&>().Read(
 		std::declval<ImageHandle>(), std::declval<ResourceUsage>())), PassBuilder&>);
 	static_assert(std::same_as<decltype(std::declval<PassBuilder&>().Read(

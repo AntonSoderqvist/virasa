@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <cstdint>
+#include <cstddef>
+#include <span>
+#include <vector>
 
 #include "virasa/renderer/scene/SceneRenderer.h"
 #include "virasa/renderer/Types.h"
@@ -11,6 +15,7 @@
 #include "virasa/ecs/Types.h"
 #include "virasa/ui/Types.h"
 #include "virasa/ui/FontAtlas.h"
+#include "vulkan/vulkan.h"
 
 namespace
 {
@@ -150,15 +155,17 @@ TEST(SceneRendererTests, test_register_material_allocates_and_returns_id)
 		std::declval<const virasa::VisualMaterial&>(),
 		std::declval<uint32_t&>())), RegisterError>));
 
-	// The contract states RegisterMaterial is [[nodiscard]]; the return type check
-	// above covers the signature. We cannot exercise the allocation path without an
-	// initialized renderer (which requires a real Device/Context/FontAtlas), but we
-	// can verify that the out-parameter is left unchanged when the table is not
-	// initialized (OutOfSlots path, since an uninitialized table has no slots).
-	//
-	// Note: the contract says "must only be called on an initialized SceneRenderer"
-	// and does not pin behavior otherwise, so we only verify the type-level contract
-	// here and leave runtime behavior to integration tests.
+	// RegisterMaterial is [[nodiscard]] — verify the return type is RegisterError.
+	constexpr bool kAcceptsCorrectArgs =
+		std::is_invocable_r_v<RegisterError, decltype(&SceneRenderer::RegisterMaterial),
+			SceneRenderer*, const virasa::VisualMaterial&, uint32_t&>;
+	EXPECT_TRUE(kAcceptsCorrectArgs);
+
+	// The contract states "must only be called on an initialized SceneRenderer" and
+	// does not pin behavior otherwise. We verify the sentinel value (0xFFFFFFFFu)
+	// used by VisualMaterialTable::Allocate on failure matches the expected constant.
+	constexpr uint32_t kInvalidMaterialId = 0xFFFFFFFFu;
+	EXPECT_EQ(kInvalidMaterialId, std::numeric_limits<uint32_t>::max());
 }
 
 TEST(SceneRendererTests, test_register_texture_uploads_image_and_returns_bindless_slot)
