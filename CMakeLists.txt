@@ -31,7 +31,11 @@ add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
 find_package(Vulkan REQUIRED)
 
 # GLM
-find_package(glm REQUIRED)
+# Keep GLM header-only to match previous package-manager usage.
+set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(vendor/glm EXCLUDE_FROM_ALL)
 
 # FreeType (FTL-licensed; disable optional deps for a clean static build)
 set(FT_DISABLE_ZLIB     TRUE CACHE BOOL "" FORCE)

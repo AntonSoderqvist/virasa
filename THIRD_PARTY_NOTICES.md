@@ -42,7 +42,7 @@ Full license text: see `vendor/googletest/LICENSE`.
 
 - Source: https://github.com/g-truc/glm
 - License: The Happy Bunny License (Modified MIT) or MIT
-- Used via: `find_package(glm)` (system / package-managed dependency, not vendored).
+- Location: `vendor/glm/`
 
 ---
 
