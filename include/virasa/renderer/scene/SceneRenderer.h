@@ -20,6 +20,7 @@
 #include "virasa/renderer/lighting/ShadowTable.h"
 #include "virasa/renderer/material/Visual.h"
 #include "virasa/renderer/resources/BindlessTextureArray.h"
+#include "virasa/renderer/resources/Buffer.h"
 #include "virasa/renderer/resources/Image.h"
 #include "virasa/renderer/resources/Mesh.h"
 #include "virasa/renderer/resources/MeshRegistry.h"
@@ -151,7 +152,20 @@ public:
 	 */
 	void WaitIdle();
 
-	private:
+	/**
+	 * @brief Records a deferred pick request for the next RenderWorld call.
+	 * @param x Scene-target pixel x coordinate.
+	 * @param y Scene-target pixel y coordinate.
+	 */
+	void RequestPick(uint32_t x, uint32_t y);
+
+	/**
+	 * @brief Returns the most recently completed deferred pick result.
+	 * @return The latest completed pick result, reported at most once.
+	 */
+	[[nodiscard]] virasa::PickResult GetPickResult();
+
+private:
 	const Device* _device = nullptr;
 	const Context* _context = nullptr;
 
@@ -185,6 +199,18 @@ public:
 	virasa::ShaderModule _jfaStepShader = {};
 
 	virasa::Sampler _outlineSampler = {};
+
+	virasa::ShaderModule _pickIdVertexShader = {};
+	virasa::ShaderModule _pickIdFragmentShader = {};
+	virasa::ShaderModule _pickClearFragmentShader = {};
+	virasa::Pipeline _pickIdPipeline = {};
+	virasa::Pipeline _pickClearPipeline = {};
+	std::vector<virasa::Buffer> _pickReadbackBuffers = {};
+	std::vector<uint8_t> _pickPending = {};
+	bool _pickRequested = false;
+	uint32_t _pickX = 0u;
+	uint32_t _pickY = 0u;
+	virasa::PickResult _pickResult = {};
 
 	virasa::renderer::graph::ImageRegistry _imageRegistry = {};
 	virasa::renderer::graph::BufferRegistry _bufferRegistry = {};

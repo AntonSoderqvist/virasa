@@ -57,6 +57,53 @@ const virasa::editor::EntityEditorView& ViewManager::GetEntityEditorView() const
 	return _entityEditorView;
 }
 
+std::string_view ViewManager::GetPendingLoadPath() const noexcept
+{
+	return _pendingLoadPath;
+}
+
+void ViewManager::SetSelection(virasa::ecs::Entity entity)
+{
+	_selection.clear();
+	if (entity.IsValid())
+	{
+		_selection.push_back(entity);
+	}
+}
+
+void ViewManager::ClearSelection()
+{
+	_selection.clear();
+}
+
+bool ViewManager::IsSelected(virasa::ecs::Entity entity) const noexcept
+{
+	for (const virasa::ecs::Entity selected : _selection)
+	{
+		if (selected == entity)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+virasa::ecs::Entity ViewManager::GetActiveSelection() const noexcept
+{
+	if (_selection.empty())
+	{
+		return virasa::ecs::Entity::Invalid();
+	}
+
+	return _selection.front();
+}
+
+std::span<const virasa::ecs::Entity> ViewManager::GetSelection() const noexcept
+{
+	return _selection;
+}
+
 EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::ecs::World& world)
 {
 	if (event.type == virasa::EventType::KeyDown)
@@ -95,6 +142,7 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 				}
 				else if (result == HierarchyViewKeyResult::RequestEntityEditor)
 				{
+					SetSelection(_hierarchyView.GetCursorEntity(world));
 					_focus = Focus::EntityEditor;
 				}
 				return EventResult::Consumed;
@@ -152,6 +200,7 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 				}
 				else if (result == HierarchyViewKeyResult::RequestEntityEditor)
 				{
+					SetSelection(_hierarchyView.GetCursorEntity(world));
 					_focus = Focus::EntityEditor;
 				}
 				return EventResult::Consumed;
@@ -175,11 +224,6 @@ EventResult ViewManager::HandleEvent(const virasa::Event& event, const virasa::e
 	}
 
 	return EventResult::Consumed;
-}
-
-std::string_view ViewManager::GetPendingLoadPath() const noexcept
-{
-	return _pendingLoadPath;
 }
 
 EventResult ViewManager::ApplyCommandResult(CommandResult cmd)

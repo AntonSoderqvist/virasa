@@ -508,6 +508,63 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 }
 
 // ===========================================================================
+// selection_holds_committed_entities
+// ===========================================================================
+TEST(ViewManager, test_selection_holds_committed_entities)
+{
+	virasa::ecs::World world;
+	ViewManager vm;
+
+	// Default: empty selection
+	EXPECT_TRUE(vm.GetSelection().empty());
+	EXPECT_EQ(vm.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+
+	// SetSelection with a valid entity
+	const virasa::ecs::Entity entityA = world.CreateEntity("SelectionA");
+	vm.SetSelection(entityA);
+	EXPECT_EQ(vm.GetSelection().size(), std::size_t{1});
+	EXPECT_TRUE(vm.IsSelected(entityA));
+	EXPECT_EQ(vm.GetActiveSelection(), entityA);
+
+	// SetSelection replaces the previous selection
+	const virasa::ecs::Entity entityB = world.CreateEntity("SelectionB");
+	vm.SetSelection(entityB);
+	EXPECT_EQ(vm.GetSelection().size(), std::size_t{1});
+	EXPECT_FALSE(vm.IsSelected(entityA));
+	EXPECT_TRUE(vm.IsSelected(entityB));
+	EXPECT_EQ(vm.GetActiveSelection(), entityB);
+
+	// IsSelected: stale handle (same index, different generation) is not selected
+	virasa::ecs::Entity stale = entityB;
+	stale.generation += 1u;
+	EXPECT_FALSE(vm.IsSelected(stale));
+
+	// SetSelection with Entity::Invalid() clears the selection
+	vm.SetSelection(virasa::ecs::Entity::Invalid());
+	EXPECT_TRUE(vm.GetSelection().empty());
+	EXPECT_EQ(vm.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(vm.IsSelected(entityB));
+
+	// ClearSelection empties the selection
+	vm.SetSelection(entityA);
+	EXPECT_FALSE(vm.GetSelection().empty());
+	vm.ClearSelection();
+	EXPECT_TRUE(vm.GetSelection().empty());
+	EXPECT_EQ(vm.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(vm.IsSelected(entityA));
+
+	// GetSelection span is valid and reflects current state
+	vm.SetSelection(entityA);
+	const std::span<const virasa::ecs::Entity> span = vm.GetSelection();
+	EXPECT_EQ(span.size(), std::size_t{1});
+	EXPECT_EQ(span[0], entityA);
+
+	// SetSelection does not modify focus or right panel mode
+	EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+}
+
+// ===========================================================================
 // render_lays_out_views_and_delegates
 // ===========================================================================
 TEST(ViewManager, test_render_lays_out_views_and_delegates)

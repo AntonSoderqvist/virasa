@@ -10,6 +10,7 @@
 #include <vector>
 #include <type_traits>
 
+#include "virasa/ecs/Types.h"
 #include "virasa/math/Types.h"
 
 namespace virasa
@@ -348,6 +349,21 @@ struct TextureUpload
 };
 
 /**
+ * @brief Holds the outcome of a deferred viewport pick query.
+ *
+ * When valid is true, entity contains the resolved entity for the queried
+ * pixel, or Entity::Invalid() if the pixel contained no pickable geometry.
+ */
+struct PickResult
+{
+	/** @brief Resolved entity, or Entity::Invalid() for background. */
+	virasa::ecs::Entity entity;
+
+	/** @brief Whether this result contains a completed pick outcome. */
+	bool valid = false;
+};
+
+/**
  * @brief Writes the string representation of a RenderError to an ostream.
  *
  * For known values, writes the identifier (e.g., "None"). For unknown values,
@@ -404,6 +420,17 @@ inline std::ostream& operator<<(std::ostream& os, RenderError error)
 		default:
 			return os << "RenderError(" << static_cast<int>(error) << ")";
 	}
+}
+
+/**
+ * @brief Decodes a GPU pick-id pair into an entity handle.
+ * @param index The encoded entity index component.
+ * @param generation The encoded entity generation component.
+ * @return An entity with the supplied index and generation.
+ */
+[[nodiscard]] inline virasa::ecs::Entity DecodePickId(uint32_t index, uint32_t generation) noexcept
+{
+	return virasa::ecs::Entity{index, generation};
 }
 
 } // namespace virasa

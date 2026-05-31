@@ -3,7 +3,6 @@
 #include "virasa/ecs/Components.h"
 
 #include <vector>
-#include <string_view>
 
 namespace virasa::editor
 {
@@ -54,6 +53,21 @@ std::vector<VisibleRow> ComputeVisibleRows(
 		BuildVisibleRows(world, root, 0u, expanded, rows);
 	}
 	return rows;
+}
+
+std::size_t FindVisibleRowIndex(
+	const std::vector<VisibleRow>& rows,
+	virasa::ecs::Entity entity)
+{
+	for (std::size_t i = 0u; i < rows.size(); ++i)
+	{
+		if (rows[i].entity == entity)
+		{
+			return i;
+		}
+	}
+
+	return rows.size();
 }
 
 /**
@@ -153,6 +167,32 @@ virasa::ecs::Entity HierarchyView::GetCursorEntity(const virasa::ecs::World& wor
 	return rows[_cursorRow].entity;
 }
 
+void HierarchyView::SetCursorToEntity(
+	const virasa::ecs::World& world,
+	virasa::ecs::Entity entity)
+{
+	if (entity == virasa::ecs::Entity::Invalid())
+	{
+		return;
+	}
+
+	virasa::ecs::Entity parent = world.GetParent(entity);
+	while (parent != virasa::ecs::Entity::Invalid())
+	{
+		_expanded.insert(parent.index);
+		parent = world.GetParent(parent);
+	}
+
+	auto rows = ComputeVisibleRows(world, _expanded);
+	const std::size_t rowIndex = FindVisibleRowIndex(rows, entity);
+	if (rowIndex != rows.size())
+	{
+		_cursorRow = rowIndex;
+	}
+
+	_pendingG = false;
+}
+
 HierarchyViewKeyResult HierarchyView::HandleKey(
 	virasa::KeyCode key,
 	const virasa::ecs::World& world)
@@ -178,10 +218,8 @@ HierarchyViewKeyResult HierarchyView::HandleTextInput(
 	std::string_view utf8,
 	const virasa::ecs::World& world)
 {
-	// Compute visible rows and clamp cursor before processing any codepoints.
 	auto rows = ComputeVisibleRows(world, _expanded);
-	const std::size_t n = rows.size();
-	_cursorRow = ClampCursor(_cursorRow, n);
+	_cursorRow = ClampCursor(_cursorRow, rows.size());
 
 	bool requestCommandBar = false;
 
@@ -192,70 +230,45 @@ HierarchyViewKeyResult HierarchyView::HandleTextInput(
 	{
 		uint32_t cp = NextCodepoint(pos, end);
 		if (cp == 0xFFFFFFFFu)
-			continue;
-
-		// Handle pending 'g' state first.
-		if (_pendingG)
 		{
-			if (cp == 0x0067u) // 'g'
-			{
-				// gg — move to first row
-				_cursorRow = 0u;
-				_pendingG = false;
-				// Recompute rows after state change (rows unchanged here)
-				continue;
-			}
-			else
-			{
-				// Clear pending and reprocess this codepoint as fresh
-				_pendingG = false;
-				// Fall through to normal dispatch below
-			}
+			continue;
+		}
+
+		if (_pendingG && cp != 0x0067u)
+		{
+			_pendingG = false;
+		}
+		else if (_pendingG && cp == 0x0067u)
+		{
+			_cursorRow = 0u;
+			_pendingG = false;
+			continue;
 		}
 
 		switch (cp)
 		{
-		case 0x0068u: // 'h' — collapse or walk to parent
+		case 0x0068u:
 		{
-			if (n == 0u)
+			if (!rows.empty())
 			{
-				_pendingG = false;
-				break;
-			}
-			virasa::ecs::Entity cursorEntity = rows[_cursorRow].entity;
-			if (!world.IsValid(cursorEntity))
-			{
-				_pendingG = false;
-				break;
-			}
-			const bool isExpanded = _expanded.count(cursorEntity.index) > 0u;
-			const bool hasChildren = !world.GetChildren(cursorEntity).empty();
-			if (isExpanded && hasChildren)
-			{
-				// Collapse the subtree
-				_expanded.erase(cursorEntity.index);
-				// _cursorRow unchanged
-				// Recompute rows for subsequent codepoints
-				rows = ComputeVisibleRows(world, _expanded);
-			}
-			else
-			{
-				// Walk to parent
-				virasa::ecs::Entity parentEntity = world.GetParent(cursorEntity);
-				if (parentEntity == virasa::ecs::Entity::Invalid())
+				const virasa::ecs::Entity cursorEntity = rows[_cursorRow].entity;
+				const bool isExpanded = _expanded.count(cursorEntity.index) > 0u;
+				const bool hasChildren = !world.GetChildren(cursorEntity).empty();
+				if (isExpanded && hasChildren)
 				{
-					// Already a root — no-op
-					_pendingG = false;
-					break;
+					_expanded.erase(cursorEntity.index);
+					rows = ComputeVisibleRows(world, _expanded);
 				}
-				// Find parent in the post-collapse visible-rows list
-				for (std::size_t i = 0u; i < rows.size(); ++i)
+				else
 				{
-					if (rows[i].entity.index == parentEntity.index &&
-						rows[i].entity.generation == parentEntity.generation)
+					const virasa::ecs::Entity parentEntity = world.GetParent(cursorEntity);
+					if (parentEntity != virasa::ecs::Entity::Invalid())
 					{
-						_cursorRow = i;
-						break;
+						const std::size_t parentRow = FindVisibleRowIndex(rows, parentEntity);
+						if (parentRow != rows.size())
+						{
+							_cursorRow = parentRow;
+						}
 					}
 				}
 			}
@@ -263,47 +276,27 @@ HierarchyViewKeyResult HierarchyView::HandleTextInput(
 			break;
 		}
 
-		case 0x006Cu: // 'l' — expand or walk to first child
+		case 0x006Cu:
 		{
-			if (n == 0u)
+			if (!rows.empty())
 			{
-				_pendingG = false;
-				break;
-			}
-			virasa::ecs::Entity cursorEntity = rows[_cursorRow].entity;
-			if (!world.IsValid(cursorEntity))
-			{
-				_pendingG = false;
-				break;
-			}
-			const auto& children = world.GetChildren(cursorEntity);
-			if (children.empty())
-			{
-				// Leaf — no-op
-				_pendingG = false;
-				break;
-			}
-			const bool isExpanded = _expanded.count(cursorEntity.index) > 0u;
-			if (!isExpanded)
-			{
-				// Expand the subtree
-				_expanded.insert(cursorEntity.index);
-				// _cursorRow unchanged
-				// Recompute rows for subsequent codepoints
-				rows = ComputeVisibleRows(world, _expanded);
-			}
-			else
-			{
-				// Already expanded — descend to first child
-				virasa::ecs::Entity firstChild = children[0];
-				// Recompute rows (already expanded, rows should be current)
-				for (std::size_t i = 0u; i < rows.size(); ++i)
+				const virasa::ecs::Entity cursorEntity = rows[_cursorRow].entity;
+				const auto& children = world.GetChildren(cursorEntity);
+				if (!children.empty())
 				{
-					if (rows[i].entity.index == firstChild.index &&
-						rows[i].entity.generation == firstChild.generation)
+					const bool isExpanded = _expanded.count(cursorEntity.index) > 0u;
+					if (!isExpanded)
 					{
-						_cursorRow = i;
-						break;
+						_expanded.insert(cursorEntity.index);
+						rows = ComputeVisibleRows(world, _expanded);
+					}
+					else
+					{
+						const std::size_t childRow = FindVisibleRowIndex(rows, children.front());
+						if (childRow != rows.size())
+						{
+							_cursorRow = childRow;
+						}
 					}
 				}
 			}
@@ -311,49 +304,48 @@ HierarchyViewKeyResult HierarchyView::HandleTextInput(
 			break;
 		}
 
-		case 0x006Au: // 'j' — move cursor down
+		case 0x006Au:
 		{
-			const std::size_t currentN = rows.size();
-			if (currentN > 0u && _cursorRow < currentN - 1u)
+			if (!rows.empty() && _cursorRow < rows.size() - 1u)
+			{
 				++_cursorRow;
+			}
 			_pendingG = false;
 			break;
 		}
 
-		case 0x006Bu: // 'k' — move cursor up
+		case 0x006Bu:
 		{
 			if (_cursorRow > 0u)
+			{
 				--_cursorRow;
+			}
 			_pendingG = false;
 			break;
 		}
 
-		case 0x0067u: // 'g' — first keystroke of "gg"
+		case 0x0067u:
 		{
-			// _pendingG was false here (handled above if it was true)
 			_pendingG = true;
 			break;
 		}
 
-		case 0x0047u: // 'G' — move cursor to last row
+		case 0x0047u:
 		{
-			const std::size_t currentN = rows.size();
-			_cursorRow = (currentN > 0u) ? (currentN - 1u) : 0u;
+			_cursorRow = rows.empty() ? 0u : (rows.size() - 1u);
 			_pendingG = false;
 			break;
 		}
 
-		case 0x003Au: // ':' — request command bar
+		case 0x003Au:
 		{
 			_pendingG = false;
 			requestCommandBar = true;
-			// Stop processing further codepoints
 			goto done;
 		}
 
 		default:
 		{
-			// Unmatched codepoint — silently consumed, clear pendingG
 			_pendingG = false;
 			break;
 		}

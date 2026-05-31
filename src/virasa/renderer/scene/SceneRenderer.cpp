@@ -242,11 +242,24 @@ static_assert(sizeof(PushConstants) == 192, "PushConstants must be exactly 192 b
 // ---------------------------------------------------------------------------
 struct ShadowPushConstants
 {
-	virasa::math::Mat4 lightMvp;       // 64
-	uint64_t vertexBufferAddress;      //  8
-	uint64_t indexBufferAddress;       //  8
+	virasa::math::Mat4 lightMvp;	// 64
+	uint64_t vertexBufferAddress; //  8
+	uint64_t indexBufferAddress;	//  8
 };
 static_assert(sizeof(ShadowPushConstants) == 80, "ShadowPushConstants must be exactly 80 bytes");
+
+// ---------------------------------------------------------------------------
+// Pick push-constant layout (80 bytes)
+// ---------------------------------------------------------------------------
+struct PickPushConstants
+{
+	virasa::math::Mat4 mvp;
+	uint64_t vertexBufferAddress;
+	uint64_t indexBufferAddress;
+	uint32_t entityIndex;
+	uint32_t entityGeneration;
+};
+static_assert(sizeof(PickPushConstants) == 88, "PickPushConstants must be exactly 88 bytes");
 
 // Shadow rendering constants
 constexpr float kShadowNearPlane = 0.05f;
@@ -453,7 +466,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		assert(id == 0u);
 	}
 
-	// Step 9: load forward, shadow, and outline shaders
+	// Step 9: load forward, shadow, outline, and picking shaders
 	{
 		auto err = _forwardVertexShader.Initialize(device, "shaders/cube.vert.spv");
 		if (err != virasa::RenderError::None)
@@ -510,6 +523,24 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			_initialized = false;
 			return err;
 		}
+		err = _pickIdVertexShader.Initialize(device, "shaders/pick_id.vert.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _pickIdFragmentShader.Initialize(device, "shaders/pick_id.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _pickClearFragmentShader.Initialize(device, "shaders/pick_clear.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
 	}
 
 	// Step 10: build four forward pipeline permutations
@@ -534,9 +565,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		// _opaquePipeline: back-face cull, depth write on, blend off
 		{
 			auto b = makeBase();
-			b.SetCullMode(VK_CULL_MODE_BACK_BIT)
-				.SetDepthWrite(true)
-				.SetBlendEnabled(false);
+			b.SetCullMode(VK_CULL_MODE_BACK_BIT).SetDepthWrite(true).SetBlendEnabled(false);
 			auto err = b.Build(device, _opaquePipeline);
 			if (err != virasa::RenderError::None)
 			{
@@ -548,9 +577,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		// _opaqueDoubleSidedPipeline: no cull, depth write on, blend off
 		{
 			auto b = makeBase();
-			b.SetCullMode(VK_CULL_MODE_NONE)
-				.SetDepthWrite(true)
-				.SetBlendEnabled(false);
+			b.SetCullMode(VK_CULL_MODE_NONE).SetDepthWrite(true).SetBlendEnabled(false);
 			auto err = b.Build(device, _opaqueDoubleSidedPipeline);
 			if (err != virasa::RenderError::None)
 			{
@@ -562,9 +589,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		// _blendPipeline: back-face cull, depth write OFF, blend on
 		{
 			auto b = makeBase();
-			b.SetCullMode(VK_CULL_MODE_BACK_BIT)
-				.SetDepthWrite(false)
-				.SetBlendEnabled(true);
+			b.SetCullMode(VK_CULL_MODE_BACK_BIT).SetDepthWrite(false).SetBlendEnabled(true);
 			auto err = b.Build(device, _blendPipeline);
 			if (err != virasa::RenderError::None)
 			{
@@ -576,9 +601,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		// _blendDoubleSidedPipeline: no cull, depth write OFF, blend on
 		{
 			auto b = makeBase();
-			b.SetCullMode(VK_CULL_MODE_NONE)
-				.SetDepthWrite(false)
-				.SetBlendEnabled(true);
+			b.SetCullMode(VK_CULL_MODE_NONE).SetDepthWrite(false).SetBlendEnabled(true);
 			auto err = b.Build(device, _blendDoubleSidedPipeline);
 			if (err != virasa::RenderError::None)
 			{
@@ -683,6 +706,50 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		}
 	}
 
+	// Step 10d: build picking pipelines
+	{
+		{
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_fullscreenVertexShader)
+				.SetFragmentShader(_pickClearFragmentShader)
+				.SetColorFormat(VK_FORMAT_R32G32_UINT)
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetCullMode(VK_CULL_MODE_NONE)
+				.SetDepthTest(false)
+				.SetDepthWrite(false)
+				.SetBlendEnabled(false);
+			auto err = b.Build(device, _pickClearPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		{
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_pickIdVertexShader)
+				.SetFragmentShader(_pickIdFragmentShader)
+				.SetColorFormat(VK_FORMAT_R32G32_UINT)
+				.SetDepthFormat(context.GetDepthFormat())
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetCullMode(VK_CULL_MODE_BACK_BIT)
+				.SetDepthTest(true)
+				.SetDepthWrite(true)
+				.SetDepthCompareOp(VK_COMPARE_OP_LESS)
+				.SetBlendEnabled(false)
+				.AddPushConstantRange(
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+					sizeof(PickPushConstants));
+			auto err = b.Build(device, _pickIdPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+	}
+
 	// Step 11: initialize graph
 	{
 		auto err = _graph.Initialize(device, _imageRegistry, _bufferRegistry);
@@ -701,6 +768,31 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			_initialized = false;
 			return err;
 		}
+	}
+
+	// Step 13: create picking readback ring
+	{
+		const uint32_t frameCount = context.GetMaxFramesInFlight();
+		_pickReadbackBuffers.resize(frameCount);
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			virasa::BufferConfig cfg{};
+			cfg.size = 2u * sizeof(uint32_t);
+			cfg.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			cfg.memoryProperties =
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+			auto err = _pickReadbackBuffers[i].Initialize(device, cfg);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+		_pickPending.assign(frameCount, 0u);
+		_pickRequested = false;
+		_pickX = 0u;
+		_pickY = 0u;
+		_pickResult = virasa::PickResult{};
 	}
 
 	_initialized = true;
@@ -895,6 +987,18 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 	_lightTable.SetFrameIndex(frameIndex);
 	_shadowTable.SetFrameIndex(frameIndex);
 
+	if (frameIndex < _pickPending.size() && _pickPending[frameIndex] != 0u)
+	{
+		void* mapped = _pickReadbackBuffers[frameIndex].Map();
+		if (mapped != nullptr)
+		{
+			const uint32_t* words = static_cast<const uint32_t*>(mapped);
+			_pickResult.entity = virasa::DecodePickId(words[0], words[1]);
+			_pickResult.valid = true;
+		}
+		_pickPending[frameIndex] = 0u;
+	}
+
 	_graph.Begin();
 
 	// Import swapchain image
@@ -948,8 +1052,8 @@ uint32_t SceneRenderer::RenderWorld(
 		const virasa::ecs::ComponentSystem* camSys = FindSystem(world, "Camera");
 		if (camSys != nullptr && camSys->Has(cameraEntity) && transforms.Has(cameraEntity))
 		{
-			const auto* camPtr =
-				static_cast<const virasa::ecs::CameraComponent*>(camSys->GetRaw(cameraEntity));
+			const auto* camPtr = static_cast<const virasa::ecs::CameraComponent*>(
+				camSys->GetRaw(cameraEntity));
 			if (camPtr != nullptr)
 			{
 				const virasa::ecs::CameraComponent& cam = *camPtr;
@@ -958,9 +1062,9 @@ uint32_t SceneRenderer::RenderWorld(
 				viewMatrix = virasa::math::LookAtRH_ZUp(cameraEye, cameraEye + forward);
 
 				float aspect = (cam.aspect > 0.0f)
-					? cam.aspect
-					: static_cast<float>(_frameSceneWidth) /
-						  static_cast<float>(_frameSceneHeight);
+							   ? cam.aspect
+							   : static_cast<float>(_frameSceneWidth) /
+								     static_cast<float>(_frameSceneHeight);
 
 				projMatrix = virasa::math::PerspectiveRH_ZO(
 					cam.fovY, aspect, cam.nearPlane, cam.farPlane);
@@ -980,8 +1084,9 @@ uint32_t SceneRenderer::RenderWorld(
 		{
 			for (auto entity : dlSys->Entities())
 			{
-				const auto* dlPtr = static_cast<const virasa::ecs::DirectionalLightComponent*>(
-					dlSys->GetRaw(entity));
+				const auto* dlPtr =
+					static_cast<const virasa::ecs::DirectionalLightComponent*>(
+						dlSys->GetRaw(entity));
 				if (dlPtr == nullptr)
 					continue;
 				const auto& dl = *dlPtr;
@@ -1051,7 +1156,7 @@ uint32_t SceneRenderer::RenderWorld(
 		uint32_t materialId;
 		virasa::AlphaMode alphaMode;
 		bool doubleSided;
-		float eyeDistance;		   // used for blend bucket sorting
+		float eyeDistance;	  // used for blend bucket sorting
 		virasa::math::Mat4 model; // cached world matrix for push constants
 	};
 
@@ -1069,8 +1174,8 @@ uint32_t SceneRenderer::RenderWorld(
 			{
 				if (!meshSys->Has(entity))
 					continue;
-				const auto* meshCompPtr =
-					static_cast<const virasa::ecs::MeshComponent*>(meshSys->GetRaw(entity));
+				const auto* meshCompPtr = static_cast<const virasa::ecs::MeshComponent*>(
+					meshSys->GetRaw(entity));
 				if (meshCompPtr == nullptr)
 					continue;
 				if (!_meshRegistry.IsAllocated(meshCompPtr->meshId))
@@ -1079,7 +1184,8 @@ uint32_t SceneRenderer::RenderWorld(
 					continue;
 
 				const auto* visualCompPtr =
-					static_cast<const virasa::ecs::VisualComponent*>(visualSys->GetRaw(entity));
+					static_cast<const virasa::ecs::VisualComponent*>(
+						visualSys->GetRaw(entity));
 				if (visualCompPtr == nullptr)
 					continue;
 
@@ -1098,7 +1204,8 @@ uint32_t SceneRenderer::RenderWorld(
 				{
 					virasa::math::Vec3 worldPos = transforms.GetWorldPosition(entity);
 					virasa::math::Vec3 diff = worldPos - cameraEye;
-					d.eyeDistance = glm::dot(diff, diff); // squared distance, sufficient for sort
+					d.eyeDistance =
+						glm::dot(diff, diff); // squared distance, sufficient for sort
 					blendDrawables.push_back(d);
 				}
 				else
@@ -1161,8 +1268,9 @@ uint32_t SceneRenderer::RenderWorld(
 		{
 			for (auto entity : dlSys->Entities())
 			{
-				const auto* dlPtr = static_cast<const virasa::ecs::DirectionalLightComponent*>(
-					dlSys->GetRaw(entity));
+				const auto* dlPtr =
+					static_cast<const virasa::ecs::DirectionalLightComponent*>(
+						dlSys->GetRaw(entity));
 				if (dlPtr == nullptr)
 					continue;
 				const auto& dl = *dlPtr;
@@ -1178,11 +1286,17 @@ uint32_t SceneRenderer::RenderWorld(
 					{
 						// Compute light-space view-projection for directional light
 						virasa::math::Vec3 dir = glm::normalize(dl.direction);
-						virasa::math::Vec3 eye = cameraEye - dir * kDirectionalShadowDistance;
-						virasa::math::Mat4 lightView = virasa::math::LookAtRH_ZUp(eye, cameraEye);
+						virasa::math::Vec3 eye =
+							cameraEye - dir * kDirectionalShadowDistance;
+						virasa::math::Mat4 lightView =
+							virasa::math::LookAtRH_ZUp(eye, cameraEye);
 						const float H = kDirectionalShadowExtent;
-						virasa::math::Mat4 lightProj = virasa::math::OrthoRH_ZO(
-							-H, H, -H, H, kShadowNearPlane, 2.0f * kDirectionalShadowDistance);
+						virasa::math::Mat4 lightProj = virasa::math::OrthoRH_ZO(-H,
+							H,
+							-H,
+							H,
+							kShadowNearPlane,
+							2.0f * kDirectionalShadowDistance);
 						virasa::math::Mat4 lightViewProj = lightProj * lightView;
 
 						// Declare transient shadow map
@@ -1190,8 +1304,8 @@ uint32_t SceneRenderer::RenderWorld(
 						shadowDesc.width = kShadowMapResolution;
 						shadowDesc.height = kShadowMapResolution;
 						shadowDesc.format = VK_FORMAT_D32_SFLOAT;
-						shadowDesc.usage =
-							VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+						shadowDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+									 VK_IMAGE_USAGE_SAMPLED_BIT;
 						shadowDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
 						virasa::renderer::graph::ImageHandle shadowMapHandle =
 							_graph.DeclareImage(shadowDesc);
@@ -1216,22 +1330,26 @@ uint32_t SceneRenderer::RenderWorld(
 									devPtr,
 									capturedLVP,
 									opaqueForShadow = std::move(opaqueForShadow)](
-									const virasa::renderer::graph::GraphContext& gc)
+									const virasa::renderer::graph::GraphContext&
+										gc)
 								{
 									VkCommandBuffer cmd = gc.GetCommandBuffer();
 
 									VkViewport vp{};
 									vp.x = 0.0f;
 									vp.y = 0.0f;
-									vp.width = static_cast<float>(kShadowMapResolution);
-									vp.height = static_cast<float>(kShadowMapResolution);
+									vp.width = static_cast<float>(
+										kShadowMapResolution);
+									vp.height = static_cast<float>(
+										kShadowMapResolution);
 									vp.minDepth = 0.0f;
 									vp.maxDepth = 1.0f;
 									vkCmdSetViewport(cmd, 0, 1, &vp);
 
 									VkRect2D sc{};
 									sc.offset = {0, 0};
-									sc.extent = {kShadowMapResolution, kShadowMapResolution};
+									sc.extent = {kShadowMapResolution,
+										kShadowMapResolution};
 									vkCmdSetScissor(cmd, 0, 1, &sc);
 
 									shadowPipeline->Bind(cmd);
@@ -1240,14 +1358,17 @@ uint32_t SceneRenderer::RenderWorld(
 									{
 										if (!meshRegPtr->IsAllocated(d.meshId))
 											continue;
-										const auto& mesh = meshRegPtr->Get(d.meshId);
+										const auto& mesh =
+											meshRegPtr->Get(d.meshId);
 
 										ShadowPushConstants spc{};
 										spc.lightMvp = capturedLVP * d.model;
 										spc.vertexBufferAddress =
-											mesh.GetVertexBufferAddress(*devPtr);
+											mesh.GetVertexBufferAddress(
+												*devPtr);
 										spc.indexBufferAddress =
-											mesh.GetIndexBufferAddress(*devPtr);
+											mesh.GetIndexBufferAddress(
+												*devPtr);
 
 										vkCmdPushConstants(cmd,
 											shadowPipeline->GetLayout(),
@@ -1256,12 +1377,18 @@ uint32_t SceneRenderer::RenderWorld(
 											sizeof(ShadowPushConstants),
 											&spc);
 
-										vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+										vkCmdDraw(cmd,
+											mesh.GetIndexCount(),
+											1,
+											0,
+											0);
 									}
 								});
 
-						// Register shadow map view into bindless shadow-map slot (with caching)
-						VkImageView shadowView = _imageRegistry.Get(shadowMapHandle).GetView();
+						// Register shadow map view into bindless shadow-map slot (with
+						// caching)
+						VkImageView shadowView =
+							_imageRegistry.Get(shadowMapHandle).GetView();
 						uint32_t shadowSlot = kInvalidSlot;
 						auto shadowIt = _shadowSlotCache.find(shadowView);
 						if (shadowIt != _shadowSlotCache.end())
@@ -1331,9 +1458,9 @@ uint32_t SceneRenderer::RenderWorld(
 					{
 						virasa::math::Vec3 pos = transforms.GetWorldPosition(entity);
 						virasa::math::Vec3 dir = transforms.GetWorldForward(entity);
-						virasa::math::Mat4 lightView = virasa::math::LookAtRH_ZUp(pos, pos + dir);
-						const float outerCos =
-							glm::clamp(sl.outerConeCos, -1.0f, 1.0f);
+						virasa::math::Mat4 lightView =
+							virasa::math::LookAtRH_ZUp(pos, pos + dir);
+						const float outerCos = glm::clamp(sl.outerConeCos, -1.0f, 1.0f);
 						const float fovY = 2.0f * std::acos(outerCos);
 						virasa::math::Mat4 lightProj = virasa::math::PerspectiveRH_ZO(
 							fovY, 1.0f, kShadowNearPlane, sl.range);
@@ -1344,8 +1471,8 @@ uint32_t SceneRenderer::RenderWorld(
 						shadowDesc.width = kShadowMapResolution;
 						shadowDesc.height = kShadowMapResolution;
 						shadowDesc.format = VK_FORMAT_D32_SFLOAT;
-						shadowDesc.usage =
-							VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+						shadowDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+									 VK_IMAGE_USAGE_SAMPLED_BIT;
 						shadowDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
 						virasa::renderer::graph::ImageHandle shadowMapHandle =
 							_graph.DeclareImage(shadowDesc);
@@ -1370,22 +1497,26 @@ uint32_t SceneRenderer::RenderWorld(
 									devPtr,
 									capturedLVP,
 									opaqueForShadow = std::move(opaqueForShadow)](
-									const virasa::renderer::graph::GraphContext& gc)
+									const virasa::renderer::graph::GraphContext&
+										gc)
 								{
 									VkCommandBuffer cmd = gc.GetCommandBuffer();
 
 									VkViewport vp{};
 									vp.x = 0.0f;
 									vp.y = 0.0f;
-									vp.width = static_cast<float>(kShadowMapResolution);
-									vp.height = static_cast<float>(kShadowMapResolution);
+									vp.width = static_cast<float>(
+										kShadowMapResolution);
+									vp.height = static_cast<float>(
+										kShadowMapResolution);
 									vp.minDepth = 0.0f;
 									vp.maxDepth = 1.0f;
 									vkCmdSetViewport(cmd, 0, 1, &vp);
 
 									VkRect2D sc{};
 									sc.offset = {0, 0};
-									sc.extent = {kShadowMapResolution, kShadowMapResolution};
+									sc.extent = {kShadowMapResolution,
+										kShadowMapResolution};
 									vkCmdSetScissor(cmd, 0, 1, &sc);
 
 									shadowPipeline->Bind(cmd);
@@ -1394,14 +1525,17 @@ uint32_t SceneRenderer::RenderWorld(
 									{
 										if (!meshRegPtr->IsAllocated(d.meshId))
 											continue;
-										const auto& mesh = meshRegPtr->Get(d.meshId);
+										const auto& mesh =
+											meshRegPtr->Get(d.meshId);
 
 										ShadowPushConstants spc{};
 										spc.lightMvp = capturedLVP * d.model;
 										spc.vertexBufferAddress =
-											mesh.GetVertexBufferAddress(*devPtr);
+											mesh.GetVertexBufferAddress(
+												*devPtr);
 										spc.indexBufferAddress =
-											mesh.GetIndexBufferAddress(*devPtr);
+											mesh.GetIndexBufferAddress(
+												*devPtr);
 
 										vkCmdPushConstants(cmd,
 											shadowPipeline->GetLayout(),
@@ -1410,12 +1544,18 @@ uint32_t SceneRenderer::RenderWorld(
 											sizeof(ShadowPushConstants),
 											&spc);
 
-										vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+										vkCmdDraw(cmd,
+											mesh.GetIndexCount(),
+											1,
+											0,
+											0);
 									}
 								});
 
-						// Register shadow map view into bindless shadow-map slot (with caching)
-						VkImageView shadowView = _imageRegistry.Get(shadowMapHandle).GetView();
+						// Register shadow map view into bindless shadow-map slot (with
+						// caching)
+						VkImageView shadowView =
+							_imageRegistry.Get(shadowMapHandle).GetView();
 						uint32_t shadowSlot = kInvalidSlot;
 						auto shadowIt = _shadowSlotCache.find(shadowView);
 						if (shadowIt != _shadowSlotCache.end())
@@ -1498,120 +1638,119 @@ uint32_t SceneRenderer::RenderWorld(
 	// contract; its omission caused stale/black shadow reads under fast motion).
 	for (const auto& shadowReadHandle : shadowReadHandles)
 	{
-		forwardPass.Read(shadowReadHandle,
-			virasa::renderer::graph::ResourceUsage::SampledFragment);
+		forwardPass.Read(
+			shadowReadHandle, virasa::renderer::graph::ResourceUsage::SampledFragment);
 	}
 
-	forwardPass
-		.Record(
-			[opaquePipeline,
-				opaqueDoubleSidedPipeline,
-				blendPipeline,
-				blendDoubleSidedPipeline,
-				bindless,
-				meshReg,
-				matTable,
-				lightTable,
-				shadowTable,
-				dev,
-				capturedView,
-				capturedProj,
-				capturedHighlightSystem,
-				allDrawables = std::move(allDrawables)](const virasa::renderer::graph::GraphContext& gc)
+	forwardPass.Record(
+		[opaquePipeline,
+			opaqueDoubleSidedPipeline,
+			blendPipeline,
+			blendDoubleSidedPipeline,
+			bindless,
+			meshReg,
+			matTable,
+			lightTable,
+			shadowTable,
+			dev,
+			capturedView,
+			capturedProj,
+			capturedHighlightSystem,
+			allDrawables = std::move(allDrawables)](
+			const virasa::renderer::graph::GraphContext& gc)
+		{
+			VkCommandBuffer cmd = gc.GetCommandBuffer();
+			VkExtent2D extent = gc.GetRenderExtent();
+
+			VkViewport viewport{};
+			viewport.x = 0.0f;
+			viewport.y = 0.0f;
+			viewport.width = static_cast<float>(extent.width);
+			viewport.height = static_cast<float>(extent.height);
+			viewport.minDepth = 0.0f;
+			viewport.maxDepth = 1.0f;
+			vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+			VkRect2D scissor{};
+			scissor.offset = {0, 0};
+			scissor.extent = extent;
+			vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+			// Bind descriptor set once
+			VkDescriptorSet descSet = bindless->GetDescriptorSet();
+
+			virasa::Pipeline* lastBoundPipeline = nullptr;
+
+			for (const auto& d : allDrawables)
 			{
-				VkCommandBuffer cmd = gc.GetCommandBuffer();
-				VkExtent2D extent = gc.GetRenderExtent();
+				if (!meshReg->IsAllocated(d.meshId))
+					continue;
 
-				VkViewport viewport{};
-				viewport.x = 0.0f;
-				viewport.y = 0.0f;
-				viewport.width = static_cast<float>(extent.width);
-				viewport.height = static_cast<float>(extent.height);
-				viewport.minDepth = 0.0f;
-				viewport.maxDepth = 1.0f;
-				vkCmdSetViewport(cmd, 0, 1, &viewport);
+				const auto& mesh = meshReg->Get(d.meshId);
 
-				VkRect2D scissor{};
-				scissor.offset = {0, 0};
-				scissor.extent = extent;
-				vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-				// Bind descriptor set once
-				VkDescriptorSet descSet = bindless->GetDescriptorSet();
-
-				virasa::Pipeline* lastBoundPipeline = nullptr;
-
-				for (const auto& d : allDrawables)
+				// Select pipeline
+				virasa::Pipeline* selectedPipeline = nullptr;
+				if (d.alphaMode == virasa::AlphaMode::Blend)
 				{
-					if (!meshReg->IsAllocated(d.meshId))
-						continue;
-
-					const auto& mesh = meshReg->Get(d.meshId);
-
-					// Select pipeline
-					virasa::Pipeline* selectedPipeline = nullptr;
-					if (d.alphaMode == virasa::AlphaMode::Blend)
-					{
-						selectedPipeline =
-							d.doubleSided ? blendDoubleSidedPipeline : blendPipeline;
-					}
-					else
-					{
-						selectedPipeline =
-							d.doubleSided ? opaqueDoubleSidedPipeline : opaquePipeline;
-					}
-
-					if (selectedPipeline != lastBoundPipeline)
-					{
-						selectedPipeline->Bind(cmd);
-						vkCmdBindDescriptorSets(cmd,
-							VK_PIPELINE_BIND_POINT_GRAPHICS,
-							selectedPipeline->GetLayout(),
-							0,
-							1,
-							&descSet,
-							0,
-							nullptr);
-						lastBoundPipeline = selectedPipeline;
-					}
-
-					PushConstants pc{};
-					pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
-					pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
-					pc.materialBufferAddress = matTable->GetBufferAddress();
-					pc.lightBufferAddress = lightTable->GetBufferAddress();
-					pc.shadowBufferAddress = shadowTable->GetBufferAddress();
-					pc.materialId = d.materialId;
-					pc.lightCount = lightTable->GetLightCount();
-					pc.model = d.model;
-					pc.mvp = capturedProj * capturedView * d.model;
-					pc.highlight = virasa::math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
-					if (capturedHighlightSystem != nullptr &&
-						capturedHighlightSystem->Has(d.entity))
-					{
-						const auto* highlight =
-							static_cast<const virasa::ecs::HighlightComponent*>(
-								capturedHighlightSystem->GetRaw(d.entity));
-						if (highlight != nullptr)
-						{
-							pc.highlight = virasa::math::Vec4(
-								highlight->color.x,
-								highlight->color.y,
-								highlight->color.z,
-								highlight->intensity);
-						}
-					}
-
-					vkCmdPushConstants(cmd,
-						selectedPipeline->GetLayout(),
-						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-						0,
-						sizeof(PushConstants),
-						&pc);
-
-					vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+					selectedPipeline =
+						d.doubleSided ? blendDoubleSidedPipeline : blendPipeline;
 				}
-			});
+				else
+				{
+					selectedPipeline =
+						d.doubleSided ? opaqueDoubleSidedPipeline : opaquePipeline;
+				}
+
+				if (selectedPipeline != lastBoundPipeline)
+				{
+					selectedPipeline->Bind(cmd);
+					vkCmdBindDescriptorSets(cmd,
+						VK_PIPELINE_BIND_POINT_GRAPHICS,
+						selectedPipeline->GetLayout(),
+						0,
+						1,
+						&descSet,
+						0,
+						nullptr);
+					lastBoundPipeline = selectedPipeline;
+				}
+
+				PushConstants pc{};
+				pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
+				pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
+				pc.materialBufferAddress = matTable->GetBufferAddress();
+				pc.lightBufferAddress = lightTable->GetBufferAddress();
+				pc.shadowBufferAddress = shadowTable->GetBufferAddress();
+				pc.materialId = d.materialId;
+				pc.lightCount = lightTable->GetLightCount();
+				pc.model = d.model;
+				pc.mvp = capturedProj * capturedView * d.model;
+				pc.highlight = virasa::math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+				if (capturedHighlightSystem != nullptr &&
+					capturedHighlightSystem->Has(d.entity))
+				{
+					const auto* highlight =
+						static_cast<const virasa::ecs::HighlightComponent*>(
+							capturedHighlightSystem->GetRaw(d.entity));
+					if (highlight != nullptr)
+					{
+						pc.highlight = virasa::math::Vec4(highlight->color.x,
+							highlight->color.y,
+							highlight->color.z,
+							highlight->intensity);
+					}
+				}
+
+				vkCmdPushConstants(cmd,
+					selectedPipeline->GetLayout(),
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+					0,
+					sizeof(PushConstants),
+					&pc);
+
+				vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+			}
+		});
 
 	// --- Outline-highlight subsystem ---
 	// Collect highlighted drawables (highlight.w > 0)
@@ -1632,8 +1771,8 @@ uint32_t SceneRenderer::RenderWorld(
 			{
 				if (!meshSys2->Has(entity))
 					continue;
-				const auto* meshCompPtr =
-					static_cast<const virasa::ecs::MeshComponent*>(meshSys2->GetRaw(entity));
+				const auto* meshCompPtr = static_cast<const virasa::ecs::MeshComponent*>(
+					meshSys2->GetRaw(entity));
 				if (meshCompPtr == nullptr)
 					continue;
 				if (!_meshRegistry.IsAllocated(meshCompPtr->meshId))
@@ -1649,7 +1788,8 @@ uint32_t SceneRenderer::RenderWorld(
 					continue;
 
 				const auto* visualCompPtr =
-					static_cast<const virasa::ecs::VisualComponent*>(visualSys2->GetRaw(entity));
+					static_cast<const virasa::ecs::VisualComponent*>(
+						visualSys2->GetRaw(entity));
 				if (visualCompPtr == nullptr)
 					continue;
 
@@ -1678,7 +1818,7 @@ uint32_t SceneRenderer::RenderWorld(
 		maskDesc.height = _frameSceneHeight;
 		maskDesc.format = VK_FORMAT_R8G8B8A8_UNORM;
 		maskDesc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
-			VK_IMAGE_USAGE_SAMPLED_BIT;
+				     VK_IMAGE_USAGE_SAMPLED_BIT;
 		maskDesc.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 		virasa::renderer::graph::ImageHandle maskHandle = _graph.DeclareImage(maskDesc);
 
@@ -1738,7 +1878,11 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdBindDescriptorSets(cmd,
 							VK_PIPELINE_BIND_POINT_GRAPHICS,
 							maskPipeline->GetLayout(),
-							0, 1, &descSet, 0, nullptr);
+							0,
+							1,
+							&descSet,
+							0,
+							nullptr);
 
 						for (const auto& d : highlightedDrawables)
 						{
@@ -1749,13 +1893,12 @@ uint32_t SceneRenderer::RenderWorld(
 							virasa::math::Vec4 highlight(0.0f);
 							if (hlSys2 != nullptr && hlSys2->Has(d.entity))
 							{
-								const auto* hlPtr =
-									static_cast<const virasa::ecs::HighlightComponent*>(
-										hlSys2->GetRaw(d.entity));
+								const auto* hlPtr = static_cast<
+									const virasa::ecs::HighlightComponent*>(
+									hlSys2->GetRaw(d.entity));
 								if (hlPtr != nullptr)
 								{
-									highlight = virasa::math::Vec4(
-										hlPtr->color.x,
+									highlight = virasa::math::Vec4(hlPtr->color.x,
 										hlPtr->color.y,
 										hlPtr->color.z,
 										hlPtr->intensity);
@@ -1765,7 +1908,8 @@ uint32_t SceneRenderer::RenderWorld(
 							PushConstants pc{};
 							pc.mvp = capturedProj2 * capturedView2 * d.model;
 							pc.model = d.model;
-							pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev2);
+							pc.vertexBufferAddress =
+								mesh.GetVertexBufferAddress(*dev2);
 							pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev2);
 							pc.materialBufferAddress = 0;
 							pc.lightBufferAddress = 0;
@@ -1776,8 +1920,11 @@ uint32_t SceneRenderer::RenderWorld(
 
 							vkCmdPushConstants(cmd,
 								maskPipeline->GetLayout(),
-								VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-								0, sizeof(PushConstants), &pc);
+								VK_SHADER_STAGE_VERTEX_BIT |
+									VK_SHADER_STAGE_FRAGMENT_BIT,
+								0,
+								sizeof(PushConstants),
+								&pc);
 
 							vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
 						}
@@ -1843,8 +1990,10 @@ uint32_t SceneRenderer::RenderWorld(
 			const uint32_t capturedDstSlot = jfaAStorageSlot;
 
 			_graph.AddPass("outline_jfa_seed")
-				.Read(maskHandle, virasa::renderer::graph::ResourceUsage::StorageReadCompute)
-				.Write(jfaAHandle, virasa::renderer::graph::ResourceUsage::StorageWriteCompute)
+				.Read(maskHandle,
+					virasa::renderer::graph::ResourceUsage::StorageReadCompute)
+				.Write(jfaAHandle,
+					virasa::renderer::graph::ResourceUsage::StorageWriteCompute)
 				.Record(
 					[jfaSeedPipeline, bindless2, w, h, capturedMaskSlot, capturedDstSlot](
 						const virasa::renderer::graph::GraphContext& gc)
@@ -1855,7 +2004,11 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdBindDescriptorSets(cmd,
 							VK_PIPELINE_BIND_POINT_COMPUTE,
 							jfaSeedPipeline->GetLayout(),
-							0, 1, &descSet, 0, nullptr);
+							0,
+							1,
+							&descSet,
+							0,
+							nullptr);
 
 						OutlineComputePushConstants opc{};
 						opc.extentX = w;
@@ -1870,7 +2023,9 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdPushConstants(cmd,
 							jfaSeedPipeline->GetLayout(),
 							VK_SHADER_STAGE_COMPUTE_BIT,
-							0, sizeof(OutlineComputePushConstants), &opc);
+							0,
+							sizeof(OutlineComputePushConstants),
+							&opc);
 
 						const uint32_t gx = (w + 7u) / 8u;
 						const uint32_t gy = (h + 7u) / 8u;
@@ -1882,8 +2037,8 @@ uint32_t SceneRenderer::RenderWorld(
 		const uint32_t maxDim = std::max(_frameSceneWidth, _frameSceneHeight);
 		const uint32_t stepCount =
 			(maxDim > 1u)
-			? static_cast<uint32_t>(std::ceil(std::log2(static_cast<float>(maxDim))))
-			: 1u;
+				? static_cast<uint32_t>(std::ceil(std::log2(static_cast<float>(maxDim))))
+				: 1u;
 
 		virasa::renderer::graph::ImageHandle jfaSrc = jfaAHandle;
 		virasa::renderer::graph::ImageHandle jfaDst = jfaBHandle;
@@ -1892,8 +2047,7 @@ uint32_t SceneRenderer::RenderWorld(
 
 		for (uint32_t step = 0u; step < stepCount; ++step)
 		{
-			const int32_t jumpDist =
-				static_cast<int32_t>(1u << (stepCount - 1u - step));
+			const int32_t jumpDist = static_cast<int32_t>(1u << (stepCount - 1u - step));
 
 			// Ensure dst storage slot is registered
 			VkImageView dstView = _imageRegistry.Get(jfaDst).GetView();
@@ -1923,8 +2077,13 @@ uint32_t SceneRenderer::RenderWorld(
 				.Read(jfaSrc, virasa::renderer::graph::ResourceUsage::StorageReadCompute)
 				.Write(jfaDst, virasa::renderer::graph::ResourceUsage::StorageWriteCompute)
 				.Record(
-					[jfaStepPipeline, bindless2, w, h, capturedSrc, capturedDst, capturedStep](
-						const virasa::renderer::graph::GraphContext& gc)
+					[jfaStepPipeline,
+						bindless2,
+						w,
+						h,
+						capturedSrc,
+						capturedDst,
+						capturedStep](const virasa::renderer::graph::GraphContext& gc)
 					{
 						VkCommandBuffer cmd = gc.GetCommandBuffer();
 						VkDescriptorSet descSet = bindless2->GetDescriptorSet();
@@ -1932,7 +2091,11 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdBindDescriptorSets(cmd,
 							VK_PIPELINE_BIND_POINT_COMPUTE,
 							jfaStepPipeline->GetLayout(),
-							0, 1, &descSet, 0, nullptr);
+							0,
+							1,
+							&descSet,
+							0,
+							nullptr);
 
 						OutlineComputePushConstants opc{};
 						opc.extentX = w;
@@ -1947,7 +2110,9 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdPushConstants(cmd,
 							jfaStepPipeline->GetLayout(),
 							VK_SHADER_STAGE_COMPUTE_BIT,
-							0, sizeof(OutlineComputePushConstants), &opc);
+							0,
+							sizeof(OutlineComputePushConstants),
+							&opc);
 
 						const uint32_t gx = (w + 7u) / 8u;
 						const uint32_t gy = (h + 7u) / 8u;
@@ -2009,10 +2174,16 @@ uint32_t SceneRenderer::RenderWorld(
 				.ColorAttachment(_frameSceneColorHandle,
 					virasa::renderer::graph::LoadOp::Load,
 					virasa::renderer::graph::ClearColor{})
-				.Read(jfaFinalHandle, virasa::renderer::graph::ResourceUsage::SampledFragment)
+				.Read(jfaFinalHandle,
+					virasa::renderer::graph::ResourceUsage::SampledFragment)
 				.Read(maskHandle, virasa::renderer::graph::ResourceUsage::SampledFragment)
 				.Record(
-					[compositePipeline, bindless2, w, h, capturedJfaSlot, capturedMaskSlot2](
+					[compositePipeline,
+						bindless2,
+						w,
+						h,
+						capturedJfaSlot,
+						capturedMaskSlot2](
 						const virasa::renderer::graph::GraphContext& gc)
 					{
 						VkCommandBuffer cmd = gc.GetCommandBuffer();
@@ -2037,7 +2208,11 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdBindDescriptorSets(cmd,
 							VK_PIPELINE_BIND_POINT_GRAPHICS,
 							compositePipeline->GetLayout(),
-							0, 1, &descSet, 0, nullptr);
+							0,
+							1,
+							&descSet,
+							0,
+							nullptr);
 
 						OutlineCompositePushConstants ocp{};
 						ocp.extentX = w;
@@ -2052,12 +2227,207 @@ uint32_t SceneRenderer::RenderWorld(
 						vkCmdPushConstants(cmd,
 							compositePipeline->GetLayout(),
 							VK_SHADER_STAGE_FRAGMENT_BIT,
-							0, sizeof(OutlineCompositePushConstants), &ocp);
+							0,
+							sizeof(OutlineCompositePushConstants),
+							&ocp);
 
 						vkCmdDraw(cmd, 3, 1, 0, 0);
 					});
 		}
 	} // end if (!highlightedDrawables.empty())
+
+	// --- Deferred-picking subsystem ---
+	if (_pickRequested)
+	{
+		const uint32_t frameIndex = _context->GetCurrentFrameIndex();
+
+		virasa::renderer::graph::GraphImageDesc idDesc{};
+		idDesc.width = _frameSceneWidth;
+		idDesc.height = _frameSceneHeight;
+		idDesc.format = VK_FORMAT_R32G32_UINT;
+		idDesc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		idDesc.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		virasa::renderer::graph::ImageHandle idTargetHandle = _graph.DeclareImage(idDesc);
+
+		virasa::renderer::graph::GraphImageDesc pickDepthDesc{};
+		pickDepthDesc.width = _frameSceneWidth;
+		pickDepthDesc.height = _frameSceneHeight;
+		pickDepthDesc.format = _context->GetDepthFormat();
+		pickDepthDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		pickDepthDesc.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		virasa::renderer::graph::ImageHandle pickDepthHandle =
+			_graph.DeclareImage(pickDepthDesc);
+
+		{
+			virasa::Pipeline* pickClearPipeline = &_pickClearPipeline;
+			_graph.AddPass("pick_clear")
+				.ColorAttachment(idTargetHandle,
+					virasa::renderer::graph::LoadOp::DontCare,
+					virasa::renderer::graph::ClearColor{})
+				.Record(
+					[pickClearPipeline](const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkExtent2D ext = gc.GetRenderExtent();
+
+						VkViewport vp{};
+						vp.x = 0.0f;
+						vp.y = 0.0f;
+						vp.width = static_cast<float>(ext.width);
+						vp.height = static_cast<float>(ext.height);
+						vp.minDepth = 0.0f;
+						vp.maxDepth = 1.0f;
+						vkCmdSetViewport(cmd, 0, 1, &vp);
+
+						VkRect2D sc{};
+						sc.offset = {0, 0};
+						sc.extent = ext;
+						vkCmdSetScissor(cmd, 0, 1, &sc);
+
+						pickClearPipeline->Bind(cmd);
+						vkCmdDraw(cmd, 3, 1, 0, 0);
+					});
+		}
+
+		{
+			virasa::Pipeline* pickIdPipeline = &_pickIdPipeline;
+			virasa::renderer::MeshRegistry* meshReg2 = &_meshRegistry;
+			const virasa::Device* dev2 = _device;
+			virasa::math::Mat4 capturedView2 = viewMatrix;
+			virasa::math::Mat4 capturedProj2 = projMatrix;
+
+			std::vector<Drawable> pickDrawables;
+			pickDrawables.reserve(opaqueDrawables.size() + blendDrawables.size());
+			for (const auto& d : opaqueDrawables)
+			{
+				pickDrawables.push_back(d);
+			}
+			for (const auto& d : blendDrawables)
+			{
+				pickDrawables.push_back(d);
+			}
+
+			_graph.AddPass("pick_id")
+				.ColorAttachment(idTargetHandle,
+					virasa::renderer::graph::LoadOp::Load,
+					virasa::renderer::graph::ClearColor{})
+				.DepthAttachment(
+					pickDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
+				.Record(
+					[pickIdPipeline,
+						meshReg2,
+						dev2,
+						capturedView2,
+						capturedProj2,
+						pickDrawables = std::move(pickDrawables)](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkExtent2D ext = gc.GetRenderExtent();
+
+						VkViewport vp{};
+						vp.x = 0.0f;
+						vp.y = 0.0f;
+						vp.width = static_cast<float>(ext.width);
+						vp.height = static_cast<float>(ext.height);
+						vp.minDepth = 0.0f;
+						vp.maxDepth = 1.0f;
+						vkCmdSetViewport(cmd, 0, 1, &vp);
+
+						VkRect2D sc{};
+						sc.offset = {0, 0};
+						sc.extent = ext;
+						vkCmdSetScissor(cmd, 0, 1, &sc);
+
+						pickIdPipeline->Bind(cmd);
+
+						for (const auto& d : pickDrawables)
+						{
+							if (!meshReg2->IsAllocated(d.meshId))
+							{
+								continue;
+							}
+							const auto& mesh = meshReg2->Get(d.meshId);
+
+							PickPushConstants ppc{};
+							ppc.mvp = capturedProj2 * capturedView2 * d.model;
+							ppc.vertexBufferAddress =
+								mesh.GetVertexBufferAddress(*dev2);
+							ppc.indexBufferAddress =
+								mesh.GetIndexBufferAddress(*dev2);
+							ppc.entityIndex = d.entity.index;
+							ppc.entityGeneration = d.entity.generation;
+
+							vkCmdPushConstants(cmd,
+								pickIdPipeline->GetLayout(),
+								VK_SHADER_STAGE_VERTEX_BIT |
+									VK_SHADER_STAGE_FRAGMENT_BIT,
+								0,
+								sizeof(PickPushConstants),
+								&ppc);
+
+							vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+						}
+					});
+		}
+
+		{
+			const uint32_t copyX =
+				(_frameSceneWidth == 0u) ? 0u : std::min(_pickX, _frameSceneWidth - 1u);
+			const uint32_t copyY =
+				(_frameSceneHeight == 0u) ? 0u : std::min(_pickY, _frameSceneHeight - 1u);
+			virasa::Buffer* readback = &_pickReadbackBuffers[frameIndex];
+
+			_graph.AddPass("pick_copy")
+				.Read(idTargetHandle, virasa::renderer::graph::ResourceUsage::TransferSrc)
+				.Record(
+					[idTargetHandle, copyX, copyY, readback](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+
+						VkBufferImageCopy region{};
+						region.bufferOffset = 0;
+						region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+						region.imageSubresource.mipLevel = 0;
+						region.imageSubresource.baseArrayLayer = 0;
+						region.imageSubresource.layerCount = 1;
+						region.imageOffset = {static_cast<int32_t>(copyX),
+							static_cast<int32_t>(copyY),
+							0};
+						region.imageExtent = {1, 1, 1};
+
+						vkCmdCopyImageToBuffer(cmd,
+							gc.GetImage(idTargetHandle),
+							VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+							readback->GetHandle(),
+							1,
+							&region);
+
+						VkBufferMemoryBarrier2 barrier{};
+						barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+						barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+						barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+						barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+						barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+						barrier.buffer = readback->GetHandle();
+						barrier.offset = 0;
+						barrier.size = VK_WHOLE_SIZE;
+
+						VkDependencyInfo dep{};
+						dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+						dep.bufferMemoryBarrierCount = 1;
+						dep.pBufferMemoryBarriers = &barrier;
+						vkCmdPipelineBarrier2(cmd, &dep);
+					});
+		}
+
+		if (frameIndex < _pickPending.size())
+		{
+			_pickPending[frameIndex] = 1u;
+		}
+		_pickRequested = false;
+	}
 
 	// --- Register scene color in bindless (with caching) ---
 	VkImageView sceneView = _imageRegistry.Get(_frameSceneColorHandle).GetView();
@@ -2134,6 +2504,23 @@ virasa::SwapchainStatus SceneRenderer::SubmitFrame(const virasa::ui::DrawList& d
 void SceneRenderer::WaitIdle()
 {
 	_context->GetDevice().WaitIdle();
+}
+
+void SceneRenderer::RequestPick(uint32_t x, uint32_t y)
+{
+	_pickRequested = true;
+	_pickX = x;
+	_pickY = y;
+}
+
+virasa::PickResult SceneRenderer::GetPickResult()
+{
+	virasa::PickResult result = _pickResult;
+	if (result.valid)
+	{
+		_pickResult.valid = false;
+	}
+	return result;
 }
 
 } // namespace virasa::renderer::scene

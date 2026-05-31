@@ -76,14 +76,27 @@ public:
 	[[nodiscard]] virasa::ecs::Entity GetCursorEntity(const virasa::ecs::World& world) const;
 
 	/**
+	 * @brief Drives the hierarchy cursor to a specific entity.
+	 *
+	 * Expands the target entity's ancestors so the entity becomes visible,
+	 * then moves the cursor to that visible row if it can be found.
+	 * Passing Entity::Invalid() is a no-op.
+	 *
+	 * @param world The ECS world to query.
+	 * @param entity The entity to reveal and focus.
+	 */
+	void SetCursorToEntity(const virasa::ecs::World& world, virasa::ecs::Entity entity);
+
+	/**
 	 * @brief Handles a non-printable key event.
 	 *
-	 * In this contract version every key is consumed without modifying
-	 * _cursorRow or _expanded. Clears _pendingG and returns Consumed.
+	 * Enter requests focus transfer to the entity editor when the current
+	 * cursor row names a valid visible entity. All other keys are consumed.
+	 * In all cases _pendingG is cleared.
 	 *
 	 * @param key The key code of the event.
-	 * @param world The ECS world (accepted for forward-compatibility).
-	 * @return HierarchyViewKeyResult::Consumed.
+	 * @param world The ECS world used for cursor-entity lookup.
+	 * @return The input-handling result for the caller.
 	 */
 	HierarchyViewKeyResult HandleKey(virasa::KeyCode key, const virasa::ecs::World& world);
 

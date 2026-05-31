@@ -301,23 +301,43 @@ TEST(HierarchyView, test_hierarchy_text_input_h_collapses_or_walks_to_parent)
 
 	editor::HierarchyView view;
 
+	// 'h' on a root (no parent) is a no-op
 	EXPECT_EQ(view.HandleTextInput("h", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 	EXPECT_EQ(view.GetCursorRow(), 0u);
 
+	// expand root, then 'h' collapses it (cursorRow stays at root)
 	EXPECT_EQ(view.HandleTextInput("l", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 	EXPECT_EQ(view.HandleTextInput("h", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
+	EXPECT_EQ(view.GetCursorRow(), 0u);
+	// root is now collapsed — 'j' should not move past root (only 1 visible row)
 	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 
+	// expand root, move to child, then 'h' walks to parent (root)
 	EXPECT_EQ(view.HandleTextInput("l", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), child);
 	EXPECT_EQ(view.HandleTextInput("h", world), editor::HierarchyViewKeyResult::Consumed);
 	EXPECT_EQ(view.GetCursorEntity(world), root);
 	EXPECT_EQ(view.GetCursorRow(), 0u);
+
+	// expand root and child, move to grandchild, then 'h' collapses child
+	EXPECT_EQ(view.HandleTextInput("l", world), editor::HierarchyViewKeyResult::Consumed); // expand root
+	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed); // move to child
+	EXPECT_EQ(view.GetCursorEntity(world), child);
+	EXPECT_EQ(view.HandleTextInput("l", world), editor::HierarchyViewKeyResult::Consumed); // expand child
+	EXPECT_EQ(view.HandleTextInput("j", world), editor::HierarchyViewKeyResult::Consumed); // move to grandchild
+	EXPECT_EQ(view.GetCursorEntity(world), grandchild);
+	// grandchild is a leaf — 'h' walks to parent (child)
+	EXPECT_EQ(view.HandleTextInput("h", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.GetCursorEntity(world), child);
+	// child is expanded and has children — 'h' collapses child
+	EXPECT_EQ(view.HandleTextInput("h", world), editor::HierarchyViewKeyResult::Consumed);
+	EXPECT_EQ(view.GetCursorEntity(world), child);
+	EXPECT_EQ(view.GetCursorRow(), 1u);
 }
 
 TEST(HierarchyView, test_hierarchy_text_input_l_expands_or_walks_to_first_child)

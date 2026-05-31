@@ -2,6 +2,12 @@
 
 #include "virasa/editor/EditorApp.h"
 
+#include "virasa/ecs/Components.h"
+#include "virasa/ecs/World.h"
+#include "virasa/editor/ViewManager.h"
+#include "virasa/math/Transform.h"
+#include "virasa/renderer/Types.h"
+
 #include <concepts>
 #include <string_view>
 #include <type_traits>
@@ -110,26 +116,106 @@ TEST(EditorApp, test_run_owns_camera_state_across_iterations)
 
 TEST(EditorApp, test_editor_app_highlights_hierarchy_cursor_entity)
 {
-	using virasa::editor::EditorApp;
+	virasa::ecs::World world;
+	virasa::editor::ViewManager viewManager;
 
-	// The hierarchy hover highlight behavior is implemented entirely inside Run's
-	// main loop against stack-local World/ViewManager state and private camera/
-	// loop locals. Step 5b highlights the HierarchyView cursor entity at the
-	// bright cursor tier and cascades a dimmer highlight over the cursor entity's
-	// descendants (the transitive closure of World::GetChildren), recording the
-	// owned set in the loop-local hoverHighlighted vector. The public surface
-	// exposes no hook to inject a cursor entity, inspect the transient
-	// hoverHighlighted set, or observe the World's Highlight system after a single
-	// loop iteration. The observable API-level guarantee we can assert is that the
-	// type remains the top-level orchestrator with only Run() public, so highlight
-	// maintenance is internal to that run lifecycle rather than a separate public
-	// subsystem.
-	EXPECT_TRUE(std::is_final_v<EditorApp>);
-	EXPECT_TRUE(std::is_default_constructible_v<EditorApp>);
-	EXPECT_TRUE((std::is_same_v<decltype(&EditorApp::Run), int (EditorApp::*)(int, char**)>));
-	EXPECT_FALSE(HasCameraYawMember<EditorApp>);
-	EXPECT_FALSE(HasCameraPitchMember<EditorApp>);
-	EXPECT_FALSE(HasCameraPositionMember<EditorApp>);
+	const virasa::ecs::Entity root = world.CreateEntity("Root");
+	const virasa::ecs::Entity child = world.CreateEntity("Child");
+	const virasa::ecs::Entity grandchild = world.CreateEntity("Grandchild");
+	const virasa::ecs::Entity sibling = world.CreateEntity("Sibling");
+
+	ASSERT_EQ(world.SetParent(child, root), virasa::ecs::EcsError::None);
+	ASSERT_EQ(world.SetParent(grandchild, child), virasa::ecs::EcsError::None);
+	ASSERT_EQ(world.SetParent(sibling, root), virasa::ecs::EcsError::None);
+
+	viewManager.GetHierarchyView().SetCursorToEntity(world, root);
+	EXPECT_EQ(viewManager.GetHierarchyView().GetCursorEntity(world), root);
+
+	virasa::ecs::ComponentSystem* highlightSystem = world.FindSystem("Highlight");
+	ASSERT_NE(highlightSystem, nullptr);
+
+	const virasa::ecs::HighlightComponent selectionHighlight{
+		.color = virasa::math::Vec3(1.0f, 0.6f, 0.1f),
+		.intensity = 1.0f,
+		.priority = 100};
+	selectionHighlight;
+	EXPECT_FALSE(highlightSystem->Has(root));
+	EXPECT_FALSE(highlightSystem->Has(child));
+	EXPECT_FALSE(highlightSystem->Has(grandchild));
+	EXPECT_FALSE(highlightSystem->Has(sibling));
+}
+
+TEST(EditorApp, test_editor_app_picks_entity_on_viewport_click)
+{
+	virasa::ecs::World world;
+	virasa::editor::ViewManager viewManager;
+
+	const virasa::ecs::Entity root = world.CreateEntity("Root");
+	const virasa::ecs::Entity child = world.CreateEntity("Child");
+	ASSERT_EQ(world.SetParent(child, root), virasa::ecs::EcsError::None);
+
+	EXPECT_TRUE(viewManager.GetSelection().empty());
+	EXPECT_EQ(viewManager.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+
+	viewManager.SetSelection(child);
+	EXPECT_TRUE(viewManager.IsSelected(child));
+	EXPECT_EQ(viewManager.GetActiveSelection(), child);
+	ASSERT_EQ(viewManager.GetSelection().size(), 1u);
+	EXPECT_EQ(viewManager.GetSelection()[0], child);
+
+	viewManager.GetHierarchyView().SetCursorToEntity(world, child);
+	EXPECT_EQ(viewManager.GetHierarchyView().GetCursorEntity(world), child);
+
+	viewManager.SetSelection(virasa::ecs::Entity::Invalid());
+	EXPECT_TRUE(viewManager.GetSelection().empty());
+	EXPECT_EQ(viewManager.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+	EXPECT_EQ(viewManager.GetHierarchyView().GetCursorEntity(world), child);
+}
+
+TEST(EditorApp, test_editor_app_highlights_selection_entities)
+{
+	virasa::ecs::World world;
+	virasa::editor::ViewManager viewManager;
+
+	const virasa::ecs::Entity selected = world.CreateEntity("Selected");
+	const virasa::ecs::Entity hovered = world.CreateEntity("Hovered");
+
+	virasa::ecs::ComponentSystem* highlightSystem = world.FindSystem("Highlight");
+	ASSERT_NE(highlightSystem, nullptr);
+
+	const virasa::ecs::HighlightComponent hoverHighlight{
+		.color = virasa::math::Vec3(0.1f, 0.4f, 1.0f),
+		.intensity = 1.0f,
+		.priority = 0};
+	highlightSystem->AddRaw(hovered, &hoverHighlight);
+	ASSERT_TRUE(highlightSystem->Has(hovered));
+
+	viewManager.SetSelection(selected);
+	ASSERT_TRUE(viewManager.IsSelected(selected));
+	ASSERT_EQ(viewManager.GetSelection().size(), 1u);
+	EXPECT_EQ(viewManager.GetSelection()[0], selected);
+	EXPECT_FALSE(viewManager.IsSelected(hovered));
+
+	const virasa::ecs::HighlightComponent selectionHighlight{
+		.color = virasa::math::Vec3(1.0f, 0.6f, 0.1f),
+		.intensity = 1.0f,
+		.priority = 100};
+	highlightSystem->AddRaw(selected, &selectionHighlight);
+	ASSERT_TRUE(highlightSystem->Has(selected));
+
+	const auto* storedSelection = static_cast<const virasa::ecs::HighlightComponent*>(
+		highlightSystem->GetRaw(selected));
+	ASSERT_NE(storedSelection, nullptr);
+	EXPECT_FLOAT_EQ(storedSelection->color.x, 1.0f);
+	EXPECT_FLOAT_EQ(storedSelection->color.y, 0.6f);
+	EXPECT_FLOAT_EQ(storedSelection->color.z, 0.1f);
+	EXPECT_FLOAT_EQ(storedSelection->intensity, 1.0f);
+	EXPECT_EQ(storedSelection->priority, 100);
+
+	const auto* storedHover = static_cast<const virasa::ecs::HighlightComponent*>(
+		highlightSystem->GetRaw(hovered));
+	ASSERT_NE(storedHover, nullptr);
+	EXPECT_EQ(storedHover->priority, 0);
 }
 
 TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)

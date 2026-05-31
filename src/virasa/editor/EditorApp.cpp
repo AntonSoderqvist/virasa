@@ -3,6 +3,7 @@
 #include <quill/LogMacros.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <future>
@@ -200,16 +201,9 @@ int EditorApp::Run(int argc, char** argv)
 	// -------------------------------------------------------------------------
 	// Stage 9: Main loop
 	// -------------------------------------------------------------------------
-	const float kCommandBarPaddingY =
-		viewManager.GetCommandBarView().GetPanel().GetConfig().paddingY;
-
-	// Pending async GLB parses (function-local, drained on shutdown)
 	std::vector<std::future<virasa::editor::io::GltfCpuAsset>> _pendingLoads;
-
-	// Hover-highlight tracking (function-local, persists across iterations):
-	// the set of entities the hover logic currently owns a HighlightComponent
-	// on -- the cursor entity and its descendants.
 	std::vector<virasa::ecs::Entity> hoverHighlighted;
+	std::vector<virasa::ecs::Entity> selectionHighlighted;
 
 	bool running = true;
 	while (running)
@@ -218,6 +212,9 @@ int EditorApp::Run(int argc, char** argv)
 		// Step 1: Events
 		// ------------------------------------------------------------------
 		auto events = platform.PollEvents();
+		bool clickPending = false;
+		int32_t clickX = 0;
+		int32_t clickY = 0;
 
 		for (const auto& event : events)
 		{
@@ -229,7 +226,7 @@ int EditorApp::Run(int argc, char** argv)
 				shouldExit = true;
 			}
 			else if (event.type == virasa::EventType::KeyDown &&
-				   event.keyboard.key == virasa::KeyCode::Escape)
+				 event.keyboard.key == virasa::KeyCode::Escape)
 			{
 				if (viewManager.GetRightPanelMode() ==
 						virasa::editor::RightPanelMode::Closed &&
@@ -240,9 +237,10 @@ int EditorApp::Run(int argc, char** argv)
 				}
 			}
 
+			virasa::editor::EventResult result = virasa::editor::EventResult::Consumed;
 			if (!shouldExit)
 			{
-				virasa::editor::EventResult result = viewManager.HandleEvent(event, world);
+				result = viewManager.HandleEvent(event, world);
 				if (result == virasa::editor::EventResult::QuitRequested)
 				{
 					LOG_INFO(logger, "QuitRequested from ViewManager.");
@@ -251,7 +249,6 @@ int EditorApp::Run(int argc, char** argv)
 				else if (result == virasa::editor::EventResult::LoadModelRequested)
 				{
 					std::string path(viewManager.GetPendingLoadPath());
-					// Expand a leading '~' to $HOME (std::ifstream does not).
 					if (!path.empty() && path.front() == '~' &&
 						(path.size() == 1u || path[1] == '/'))
 					{
@@ -262,8 +259,18 @@ int EditorApp::Run(int argc, char** argv)
 					}
 					_pendingLoads.push_back(std::async(std::launch::async,
 						[p = std::move(path)]() mutable
-						{ return virasa::editor::io::ParseGlb(p); }));
+						{
+							return virasa::editor::io::ParseGlb(p);
+						}));
 				}
+			}
+
+			if (event.type == virasa::EventType::MouseButtonDown &&
+				event.mouseButton.button == virasa::MouseButton::Left)
+			{
+				clickPending = true;
+				clickX = event.mouseButton.x;
+				clickY = event.mouseButton.y;
 			}
 
 			if (shouldExit)
@@ -393,11 +400,13 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		VkExtent2D extent = context.GetSwapchainExtent();
 
+		const float commandBarPaddingY =
+			viewManager.GetCommandBarView().GetPanel().GetConfig().paddingY;
 		const float ascender = fontAtlas.GetAscender();
 		const float descender = fontAtlas.GetDescender();
-		const uint32_t barHeightPixels =
-			static_cast<uint32_t>(std::min(static_cast<float>(extent.height - 1u),
-				ascender - descender + 2.0f * kCommandBarPaddingY));
+		const uint32_t barHeightPixels = static_cast<uint32_t>(std::min(
+			static_cast<float>(extent.height - 1u),
+			ascender - descender + 2.0f * commandBarPaddingY));
 
 		uint32_t sceneWidth;
 		if (viewManager.GetRightPanelMode() != virasa::editor::RightPanelMode::Closed)
@@ -425,6 +434,108 @@ int EditorApp::Run(int argc, char** argv)
 		}
 
 		// ------------------------------------------------------------------
+		// Step 5c: Request viewport pick
+		// ------------------------------------------------------------------
+		if (clickPending && clickX >= 0 && clickY >= 0 &&
+			static_cast<uint32_t>(clickX) < sceneWidth &&
+			static_cast<uint32_t>(clickY) < sceneHeight)
+		{
+			sceneRenderer.RequestPick(static_cast<uint32_t>(clickX),
+				static_cast<uint32_t>(clickY));
+		}
+
+		// ------------------------------------------------------------------
+		// Step 5d: Consume pick result
+		// ------------------------------------------------------------------
+		{
+			virasa::PickResult result = sceneRenderer.GetPickResult();
+			if (result.valid)
+			{
+				viewManager.SetSelection(result.entity);
+				viewManager.GetHierarchyView().SetCursorToEntity(world, result.entity);
+			}
+		}
+
+		// ------------------------------------------------------------------
+		// Step 5e: Selection highlight
+		// ------------------------------------------------------------------
+		{
+			const virasa::math::Vec3 kSelectionHighlightColor{1.0f, 0.6f, 0.1f};
+			const float kSelectionHighlightIntensity = 1.0f;
+			const int32_t kSelectionHighlightPriority = 100;
+			const int32_t kHoverHighlightPriority = 0;
+
+			virasa::ecs::ComponentSystem* highlightSys = world.FindSystem("Highlight");
+			if (highlightSys)
+			{
+				auto selection = viewManager.GetSelection();
+
+				auto inDesired = [&](virasa::ecs::Entity e) {
+					for (const virasa::ecs::Entity selected : selection)
+					{
+						if (selected == e)
+						{
+							return true;
+						}
+					}
+					return false;
+				};
+
+				for (virasa::ecs::Entity e : selectionHighlighted)
+				{
+					if (inDesired(e))
+					{
+						continue;
+					}
+					if (world.IsValid(e) && highlightSys->Has(e))
+					{
+						const auto* existing =
+							static_cast<const virasa::ecs::HighlightComponent*>(
+								highlightSys->GetRaw(e));
+						if (existing && existing->priority > kHoverHighlightPriority &&
+							existing->priority <= kSelectionHighlightPriority)
+						{
+							highlightSys->Remove(e);
+						}
+					}
+				}
+
+				std::vector<virasa::ecs::Entity> nextSelection;
+				for (const virasa::ecs::Entity e : selection)
+				{
+					if (!world.IsValid(e))
+					{
+						continue;
+					}
+
+					virasa::ecs::HighlightComponent newHighlight;
+					newHighlight.color = kSelectionHighlightColor;
+					newHighlight.intensity = kSelectionHighlightIntensity;
+					newHighlight.priority = kSelectionHighlightPriority;
+
+					if (!highlightSys->Has(e))
+					{
+						highlightSys->AddRaw(e, &newHighlight);
+						nextSelection.push_back(e);
+					}
+					else
+					{
+						const auto* existing =
+							static_cast<const virasa::ecs::HighlightComponent*>(
+								highlightSys->GetRaw(e));
+						if (existing && existing->priority <= kSelectionHighlightPriority)
+						{
+							highlightSys->SetRaw(e, &newHighlight);
+							nextSelection.push_back(e);
+						}
+					}
+				}
+
+				selectionHighlighted = std::move(nextSelection);
+			}
+		}
+
+		// ------------------------------------------------------------------
 		// Step 5b: Hierarchy hover highlight
 		// ------------------------------------------------------------------
 		{
@@ -440,9 +551,6 @@ int EditorApp::Run(int argc, char** argv)
 				virasa::ecs::Entity cursorEntity =
 					viewManager.GetHierarchyView().GetCursorEntity(world);
 
-				// Build the desired highlight set: the cursor entity at the
-				// bright cursor tier plus every descendant (over the World
-				// hierarchy, not the visible rows) at the dim descendant tier.
 				struct HoverMark
 				{
 					virasa::ecs::Entity entity;
@@ -484,8 +592,6 @@ int EditorApp::Run(int argc, char** argv)
 					return false;
 				};
 
-				// (1) Withdraw highlights we no longer want, guarding against
-				// clobbering a higher-priority highlight owned by another source.
 				for (virasa::ecs::Entity e : hoverHighlighted)
 				{
 					if (inDesired(e))
@@ -504,7 +610,6 @@ int EditorApp::Run(int argc, char** argv)
 					}
 				}
 
-				// (2) Apply the desired highlights; (3) record the ones we own.
 				std::vector<virasa::ecs::Entity> nextHover;
 				for (const auto& m : desired)
 				{
@@ -532,7 +637,6 @@ int EditorApp::Run(int argc, char** argv)
 							highlightSys->SetRaw(m.entity, &newHighlight);
 							nextHover.push_back(m.entity);
 						}
-						// else: a higher-priority source holds it; leave untouched.
 					}
 				}
 

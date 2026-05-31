@@ -23,6 +23,9 @@ set(SHADERS
     outline_composite.frag
     jfa_seed.comp
     jfa_step.comp
+    pick_id.vert
+    pick_id.frag
+    pick_clear.frag
 )
 
 set(SPV_FILES)

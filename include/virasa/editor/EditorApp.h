@@ -31,7 +31,7 @@ public:
 	 * @param argv Reserved for future command-line argument parsing (unused).
 	 * @return 0 on clean shutdown, -1 on any subsystem initialization failure.
 	 */
-	int Run(int argc, char** argv);
+	[[nodiscard]] int Run(int argc, char** argv);
 
 private:
 	float _cameraYaw   = 0.0f;

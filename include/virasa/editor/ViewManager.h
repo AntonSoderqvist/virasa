@@ -2,8 +2,11 @@
 #define VIRASA_EDITOR_VIEWMANAGER_H
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
+#include "virasa/ecs/Types.h"
 #include "virasa/editor/CommandBarView.h"
 #include "virasa/editor/EditorView.h"
 #include "virasa/editor/EntityEditorView.h"
@@ -48,13 +51,14 @@ enum class EventResult : uint8_t
 };
 
 /**
- * @brief Owns and coordinates the three editor views, input focus, and right-panel mode.
+ * @brief Owns and coordinates the editor views, input focus, panel mode, and selection.
  *
  * ViewManager is the top-level coordinator for the editor UI. It owns a CommandBarView,
- * an EditorView, and a HierarchyView, tracks which view has input focus, and determines
- * which view (if any) is rendered in the right panel. It dispatches input events to the
- * focused view and translates view-level results into application-level EventResult values.
- * ViewManager performs no Vulkan API calls and owns no Vulkan resources.
+ * an EditorView, a HierarchyView, and an EntityEditorView, tracks which view has input
+ * focus, determines which view is rendered in the right panel, stores the most recent
+ * pending model-load path, and owns the committed entity selection. It dispatches input
+ * events to the focused view and translates view-level results into application-level
+ * EventResult values. ViewManager performs no Vulkan API calls and owns no Vulkan resources.
  */
 class ViewManager final
 {
@@ -133,6 +137,36 @@ public:
 	[[nodiscard]] std::string_view GetPendingLoadPath() const noexcept;
 
 	/**
+	 * @brief Makes the supplied entity the sole committed selection.
+	 * @param entity The entity to select, or virasa::ecs::Entity::Invalid() to clear.
+	 */
+	void SetSelection(virasa::ecs::Entity entity);
+
+	/**
+	 * @brief Clears the committed selection.
+	 */
+	void ClearSelection();
+
+	/**
+	 * @brief Returns whether the supplied entity is currently selected.
+	 * @param entity The entity to test.
+	 * @return True if and only if the committed selection contains entity.
+	 */
+	[[nodiscard]] bool IsSelected(virasa::ecs::Entity entity) const noexcept;
+
+	/**
+	 * @brief Returns the active selected entity.
+	 * @return The first selected entity, or virasa::ecs::Entity::Invalid() when none is selected.
+	 */
+	[[nodiscard]] virasa::ecs::Entity GetActiveSelection() const noexcept;
+
+	/**
+	 * @brief Returns a span over the committed selection.
+	 * @return A span over _selection's contents.
+	 */
+	[[nodiscard]] std::span<const virasa::ecs::Entity> GetSelection() const noexcept;
+
+	/**
 	 * @brief Dispatches an input event to the focused view and processes the result.
 	 * @param event The input event to handle.
 	 * @param world The current ECS world (passed through to views that need it).
@@ -166,6 +200,7 @@ private:
 	Focus _focus = Focus::CommandBar;
 	RightPanelMode _rightPanelMode = RightPanelMode::Closed;
 	std::string _pendingLoadPath = {};
+	std::vector<virasa::ecs::Entity> _selection = {};
 };
 
 } // namespace virasa::editor

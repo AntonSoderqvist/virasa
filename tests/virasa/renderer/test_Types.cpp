@@ -561,6 +561,101 @@ TEST(Types, test_vertex_struct_layout)
 	EXPECT_FLOAT_EQ(vertex.uv.y, 0.75f);
 }
 
+TEST(Types, test_pick_result_holds_resolved_entity)
+{
+	static_assert(std::is_default_constructible_v<PickResult>,
+		"PickResult must be default-constructible");
+	static_assert(std::is_copy_constructible_v<PickResult>,
+		"PickResult must be copy-constructible");
+	static_assert(std::is_move_constructible_v<PickResult>,
+		"PickResult must be move-constructible");
+	static_assert(std::is_trivially_destructible_v<PickResult>,
+		"PickResult must be trivially destructible");
+	static_assert(std::is_same_v<decltype(PickResult::entity), virasa::ecs::Entity>,
+		"PickResult::entity must be virasa::ecs::Entity");
+	static_assert(std::is_same_v<decltype(PickResult::valid), bool>,
+		"PickResult::valid must be bool");
+	static_assert(offsetof(PickResult, entity) < offsetof(PickResult, valid),
+		"entity must be declared before valid");
+
+	// Default construction: valid is false, entity equals Invalid().
+	PickResult result;
+	EXPECT_FALSE(result.valid);
+	EXPECT_TRUE(result.entity == virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(result.entity.IsValid());
+
+	// valid=true, entity=Invalid() is the "clicked on empty space" outcome.
+	PickResult emptySpace;
+	emptySpace.valid = true;
+	emptySpace.entity = virasa::ecs::Entity::Invalid();
+	EXPECT_TRUE(emptySpace.valid);
+	EXPECT_TRUE(emptySpace.entity == virasa::ecs::Entity::Invalid());
+
+	// valid=true, entity is a live entity.
+	virasa::ecs::Entity liveEntity;
+	liveEntity.index = 42u;
+	liveEntity.generation = 7u;
+	PickResult hit;
+	hit.valid = true;
+	hit.entity = liveEntity;
+	EXPECT_TRUE(hit.valid);
+	EXPECT_EQ(hit.entity.index, 42u);
+	EXPECT_EQ(hit.entity.generation, 7u);
+
+	// valid=false means no result yet; entity has no meaning.
+	PickResult noResult;
+	noResult.valid = false;
+	noResult.entity = liveEntity;
+	EXPECT_FALSE(noResult.valid);
+
+	// Copyable.
+	PickResult copy = hit;
+	EXPECT_EQ(copy.valid, hit.valid);
+	EXPECT_EQ(copy.entity.index, hit.entity.index);
+	EXPECT_EQ(copy.entity.generation, hit.entity.generation);
+
+	// Movable.
+	PickResult moved = std::move(copy);
+	EXPECT_TRUE(moved.valid);
+	EXPECT_EQ(moved.entity.index, 42u);
+	EXPECT_EQ(moved.entity.generation, 7u);
+}
+
+TEST(Types, test_entity_id_target_encoding_round_trips_through_uint2)
+{
+	// DecodePickId(index, generation) must return an Entity with those exact fields.
+	virasa::ecs::Entity e = virasa::DecodePickId(10u, 3u);
+	EXPECT_EQ(e.index, 10u);
+	EXPECT_EQ(e.generation, 3u);
+
+	// Round-trip: encode a live entity as (index, generation), decode, compare.
+	virasa::ecs::Entity original;
+	original.index = 123u;
+	original.generation = 456u;
+	uint32_t encodedIndex = original.index;
+	uint32_t encodedGeneration = original.generation;
+	virasa::ecs::Entity decoded = virasa::DecodePickId(encodedIndex, encodedGeneration);
+	EXPECT_EQ(decoded.index, original.index);
+	EXPECT_EQ(decoded.generation, original.generation);
+	EXPECT_TRUE(decoded == original);
+
+	// The canonical background/clear value (0xFFFFFFFFu, 0u) decodes to Invalid().
+	virasa::ecs::Entity background = virasa::DecodePickId(0xFFFFFFFFu, 0u);
+	EXPECT_EQ(background.index, 0xFFFFFFFFu);
+	EXPECT_EQ(background.generation, 0u);
+	EXPECT_TRUE(background == virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(background.IsValid());
+
+	// DecodePickId with zero index and zero generation.
+	virasa::ecs::Entity zero = virasa::DecodePickId(0u, 0u);
+	EXPECT_EQ(zero.index, 0u);
+	EXPECT_EQ(zero.generation, 0u);
+
+	// noexcept guarantee.
+	static_assert(noexcept(virasa::DecodePickId(0u, 0u)),
+		"DecodePickId must be noexcept");
+}
+
 TEST(Types, test_mesh_data_holds_cpu_geometry)
 {
 	static_assert(std::is_default_constructible_v<MeshData>,
