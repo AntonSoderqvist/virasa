@@ -20,6 +20,24 @@ The aspirations are strong, but the flesh is weak. Very happy to entertain sugge
 
 Will be dialing in the ECS, improving draw efficiency, adding shadow mapping, improving asset loading, hot reloading shaders/assets, and improving/expanding the UI capabilities.
 
+## Build
+
+On Windows, configure and build from any Command Prompt with Visual Studio 2022 x64:
+
+```powershell
+cmake -S . -B build
+cmake --build build
+```
+
+If you prefer an explicit preset instead of the default generator, use:
+
+```powershell
+cmake --preset windows-vs2022-x64
+cmake --build --preset windows-vs2022-x64
+```
+
+If `build/` was already generated with a different CMake generator, remove that directory once so CMake can regenerate the cache cleanly.
+
 ## License
 
 [Apache 2.0](LICENSE)

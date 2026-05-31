@@ -11,6 +11,7 @@ target_include_directories(virasa_ecs_lib
 
 target_link_libraries(virasa_ecs_lib
     PUBLIC
+        Vulkan::Vulkan
         virasa_math_lib
     PRIVATE
         virasa_core_lib

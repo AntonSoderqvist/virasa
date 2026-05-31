@@ -34,6 +34,7 @@ target_link_libraries(virasa_renderer_lib
         virasa_math_lib
     PRIVATE
         virasa_core_lib
-        virasa_window_lib
         virasa_vendor_mikktspace
+    PUBLIC
+        virasa_window_lib
 )
