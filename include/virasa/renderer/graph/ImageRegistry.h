@@ -8,7 +8,7 @@
 #include "virasa/renderer/graph/Types.h"
 #include "virasa/renderer/resources/Image.h"
 
-namespace virasa
+namespace virasa::renderer::core
 {
 class Device;
 }
@@ -59,12 +59,13 @@ class ImageRegistry final
 	 * @param device A fully initialized Device that will be used for subsequent Allocate calls.
 	 * @return RenderError::None on success.
 	 */
-	[[nodiscard]] virasa::RenderError Initialize(const virasa::Device& device);
+	[[nodiscard]] virasa::RenderError Initialize(const Device& device);
 
 	/**
 	 * @brief Allocates a slot whose contained Image matches desc.
 	 *
-	 * Reuses a free slot with a matching desc (LIFO) if available; otherwise creates a new slot.
+	 * Reuses a free slot with a matching desc and frameOwner (LIFO) if available;
+	 * otherwise creates a new slot tagged with the current frame index.
 	 *
 	 * @param desc Description of the image to allocate.
 	 * @return A valid ImageHandle on success, or an invalid sentinel handle on failure.
@@ -111,6 +112,23 @@ class ImageRegistry final
 	void SetUsage(ImageHandle handle, ResourceUsage usage);
 
 	/**
+	 * @brief Sets the current frame index used to partition slots across frames in flight.
+	 *
+	 * Subsequent Allocate calls will draw from and tag slots with this frame index.
+	 * May be called in any state (including before Initialize).
+	 *
+	 * @param frame_index The frame-in-flight index to set as current.
+	 */
+	void SetFrameIndex(uint32_t frame_index);
+
+	/**
+	 * @brief Returns the current frame index most recently set by SetFrameIndex, or 0 if never
+	 * set.
+	 * @return The current frame index.
+	 */
+	[[nodiscard]] uint32_t GetFrameIndex() const noexcept;
+
+	/**
 	 * @brief Returns true if the given handle refers to a currently-allocated slot.
 	 *
 	 * @param handle Any ImageHandle value, including the invalid sentinel.
@@ -142,6 +160,7 @@ class ImageRegistry final
 		Image image;
 		GraphImageDesc desc;
 		ResourceUsage usage = ResourceUsage::Undefined;
+		uint32_t frameOwner = 0;
 		bool allocated = false;
 	};
 
@@ -149,6 +168,7 @@ class ImageRegistry final
 
 	const Device* _device = nullptr;
 	bool _initialized = false;
+	uint32_t _frameIndex = 0;
 	std::vector<Slot> _slots;
 	std::vector<uint32_t> _freeList;
 };

@@ -71,6 +71,12 @@ int EditorApp::Run(int argc, char** argv)
 		virasa::RendererConfig rendererConfig;
 		rendererConfig.requiredInstanceExtensions = exts;
 		rendererConfig.requiredInstanceExtensionCount = extCount;
+		// Two frames in flight. The transient render targets (scene color/depth,
+		// shadow maps) and the per-frame light/shadow buffers are now
+		// per-frame-in-flight (ImageRegistry frame partitions + LightTable/
+		// ShadowTable buffer rings), so frame N and N+1 never share a resource
+		// and the earlier cross-frame black-flash hazard is gone.
+		rendererConfig.maxFramesInFlight = 2;
 
 		virasa::RenderError err = context.Initialize(platform, rendererConfig);
 		if (err != virasa::RenderError::None)

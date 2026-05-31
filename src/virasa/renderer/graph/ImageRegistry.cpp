@@ -5,6 +5,7 @@
 #include "quill/LogMacros.h"
 #include "virasa/core/Logger.h"
 #include "virasa/renderer/core/Device.h"
+#include "virasa/renderer/resources/Image.h"
 
 namespace virasa::renderer::graph
 {
@@ -30,6 +31,7 @@ void ImageRegistry::Teardown()
 	_freeList.clear();
 	_device = nullptr;
 	_initialized = false;
+	_frameIndex = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,11 +44,12 @@ ImageRegistry::~ImageRegistry()
 }
 
 ImageRegistry::ImageRegistry(ImageRegistry&& other) noexcept
-    : _device(other._device), _initialized(other._initialized), _slots(std::move(other._slots)),
-	_freeList(std::move(other._freeList))
+    : _device(other._device), _initialized(other._initialized), _frameIndex(other._frameIndex),
+	_slots(std::move(other._slots)), _freeList(std::move(other._freeList))
 {
 	other._device = nullptr;
 	other._initialized = false;
+	other._frameIndex = 0;
 	// other._slots and other._freeList are already empty after the move.
 }
 
@@ -58,11 +61,13 @@ ImageRegistry& ImageRegistry::operator=(ImageRegistry&& other) noexcept
 
 		_device = other._device;
 		_initialized = other._initialized;
+		_frameIndex = other._frameIndex;
 		_slots = std::move(other._slots);
 		_freeList = std::move(other._freeList);
 
 		other._device = nullptr;
 		other._initialized = false;
+		other._frameIndex = 0;
 	}
 	return *this;
 }
@@ -91,14 +96,15 @@ RenderError ImageRegistry::Initialize(const Device& device)
 ImageHandle ImageRegistry::Allocate(const GraphImageDesc& desc)
 {
 	// Reject descriptors that would produce an invalid Vulkan image.
-	if (desc.width == 0 || desc.height == 0 || desc.format == VK_FORMAT_UNDEFINED || desc.usage == 0)
+	if (desc.width == 0 || desc.height == 0 || desc.format == VK_FORMAT_UNDEFINED ||
+		desc.usage == 0)
 		return ImageHandle{};
 
-	// Reuse rule: scan free-slot list LIFO.
+	// Reuse rule: scan free-slot list LIFO, matching both desc and frameOwner.
 	for (int i = static_cast<int>(_freeList.size()) - 1; i >= 0; --i)
 	{
 		uint32_t idx = _freeList[static_cast<size_t>(i)];
-		if (DescEqual(_slots[idx].desc, desc))
+		if (DescEqual(_slots[idx].desc, desc) && _slots[idx].frameOwner == _frameIndex)
 		{
 			// Remove from free list.
 			_freeList.erase(_freeList.begin() + i);
@@ -132,6 +138,7 @@ ImageHandle ImageRegistry::Allocate(const GraphImageDesc& desc)
 	slot.image = std::move(image);
 	slot.desc = desc;
 	slot.usage = ResourceUsage::Undefined;
+	slot.frameOwner = _frameIndex;
 	slot.allocated = true;
 	_slots.push_back(std::move(slot));
 
@@ -199,6 +206,16 @@ uint32_t ImageRegistry::GetAllocatedCount() const noexcept
 bool ImageRegistry::IsInitialized() const noexcept
 {
 	return _initialized;
+}
+
+void ImageRegistry::SetFrameIndex(uint32_t frame_index)
+{
+	_frameIndex = frame_index;
+}
+
+uint32_t ImageRegistry::GetFrameIndex() const noexcept
+{
+	return _frameIndex;
 }
 
 } // namespace virasa::renderer::graph

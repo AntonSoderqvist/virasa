@@ -130,7 +130,7 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 	EXPECT_EQ(dst.GetDescriptorSet(), srcSet);
 	EXPECT_EQ(dst.GetLayout(), srcLayout);
 	EXPECT_EQ(dst.GetMaxTextures(), 4u);
-	EXPECT_EQ(dst.GetMaxShadowMaps(), 16u);
+	EXPECT_EQ(dst.GetMaxShadowMaps(), 32u);
 	EXPECT_TRUE(dst.IsInitialized());
 
 	// src is in default-constructed-like state
@@ -149,7 +149,7 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 
 	EXPECT_EQ(dst2.GetDescriptorSet(), srcSet);
 	EXPECT_EQ(dst2.GetLayout(), srcLayout);
-	EXPECT_EQ(dst2.GetMaxShadowMaps(), 16u);
+	EXPECT_EQ(dst2.GetMaxShadowMaps(), 32u);
 	EXPECT_TRUE(dst2.IsInitialized());
 
 	// dst is now in default-constructed-like state
@@ -185,7 +185,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures);
-	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
 
 	// Re-initialization: should tear down prior resources and succeed again.
 	VkDescriptorSet firstSet = bta.GetDescriptorSet();
@@ -197,7 +197,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures * 2u);
-	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
 	// After re-init the handles are new (old pool was destroyed; set handle may differ)
 	// We can only assert they are non-null; handle values are implementation-defined.
 	(void)firstSet;
@@ -466,28 +466,28 @@ TEST(BindlessTextureArray, test_register_and_unregister)
 		GTEST_SKIP() << "Could not create comparison VkSampler";
 	}
 
-	// RegisterShadowMap returns a valid slot in [0, 16).
+	// RegisterShadowMap returns a valid slot in [0, 32).
 	uint32_t smSlot0 = bta.RegisterShadowMap(depthView, cmpSampler);
 	EXPECT_NE(smSlot0, UINT32_MAX);
-	EXPECT_LT(smSlot0, 16u);
+	EXPECT_LT(smSlot0, 32u);
 
 	uint32_t smSlot1 = bta.RegisterShadowMap(depthView, cmpSampler);
 	EXPECT_NE(smSlot1, UINT32_MAX);
-	EXPECT_LT(smSlot1, 16u);
+	EXPECT_LT(smSlot1, 32u);
 	EXPECT_NE(smSlot1, smSlot0); // distinct slots
 
 	// Texture and shadow-map slot spaces are independent: same numeric value is fine.
 	// (slot0 and smSlot0 may coincide numerically; that is expected and correct.)
 
-	// Exhaust the remaining 14 shadow-map slots.
-	for (uint32_t i = 2; i < 16u; ++i)
+	// Exhaust the remaining 30 shadow-map slots.
+	for (uint32_t i = 2; i < 32u; ++i)
 	{
 		uint32_t s = bta.RegisterShadowMap(depthView, cmpSampler);
 		EXPECT_NE(s, UINT32_MAX);
-		EXPECT_LT(s, 16u);
+		EXPECT_LT(s, 32u);
 	}
 
-	// All 16 shadow-map slots exhausted; next call must return UINT32_MAX.
+	// All 32 shadow-map slots exhausted; next call must return UINT32_MAX.
 	uint32_t smOverflow = bta.RegisterShadowMap(depthView, cmpSampler);
 	EXPECT_EQ(smOverflow, UINT32_MAX);
 
@@ -544,8 +544,8 @@ TEST(BindlessTextureArray, test_observers)
 	EXPECT_NE(bta.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMax);
-	// kMaxShadowMaps is the fixed constant 16.
-	EXPECT_EQ(bta.GetMaxShadowMaps(), 16u);
+	// kMaxShadowMaps is the fixed constant 32.
+	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
 	EXPECT_TRUE(bta.IsInitialized());
 	EXPECT_EQ(bta.IsInitialized(), bta.GetDescriptorSet() != VK_NULL_HANDLE);
 	// GetLayout returns a single layout containing both binding 0 and binding 1.

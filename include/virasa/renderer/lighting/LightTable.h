@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <span>
+#include <vector>
 
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
@@ -102,7 +103,7 @@ class LightTable final
 	LightTable& operator=(LightTable&& other) noexcept;
 
 	/**
-	 * @brief Destroys the LightTable, releasing the owned Buffer.
+	 * @brief Destroys the LightTable, releasing the owned Buffer ring.
 	 *
 	 * Destroying a default-constructed or moved-from LightTable is well-defined
 	 * and performs no Vulkan calls.
@@ -110,21 +111,32 @@ class LightTable final
 	~LightTable() = default;
 
 	/**
-	 * @brief Creates the GPU light buffer sized for @p max_lights records.
+	 * @brief Creates a ring of GPU light buffers, one per frame in flight.
 	 *
 	 * If this LightTable already owns resources, they are torn down first.
-	 * The buffer is host-visible and host-coherent so UploadFrame can write
+	 * Each buffer is host-visible and host-coherent so UploadFrame can write
 	 * directly into mapped memory without explicit flush or staging.
 	 *
-	 * @param device     An initialized Device that must outlive this LightTable.
-	 * @param max_lights Maximum number of LightGPU records; must be > 0.
+	 * @param device           An initialized Device that must outlive this LightTable.
+	 * @param max_lights       Maximum number of LightGPU records per buffer; must be > 0.
+	 * @param frames_in_flight Number of ring entries; must be > 0.
 	 * @return RenderError::None on success, or a propagated error code.
 	 */
-	[[nodiscard]] RenderError Initialize(const Device& device, uint32_t max_lights);
+	[[nodiscard]] RenderError Initialize(
+		const Device& device,
+		uint32_t max_lights,
+		uint32_t frames_in_flight);
 
 	/**
-	 * @brief Writes the supplied lights into the mapped buffer and returns the
-	 *        number of records written.
+	 * @brief Selects the current ring entry for subsequent UploadFrame / observer calls.
+	 *
+	 * @param frame_index Must be in [0, frames_in_flight).
+	 */
+	void SetFrameIndex(uint32_t frame_index);
+
+	/**
+	 * @brief Writes the supplied lights into the current ring entry's mapped buffer
+	 *        and returns the number of records written.
 	 *
 	 * Must only be called on an initialized LightTable. If the span exceeds
 	 * capacity, excess lights are dropped and a warning is logged.
@@ -135,7 +147,7 @@ class LightTable final
 	uint32_t UploadFrame(std::span<const LightGPU> lights);
 
 	/**
-	 * @brief Returns the VkDeviceAddress of the owned light buffer.
+	 * @brief Returns the VkDeviceAddress of the current ring entry's light buffer.
 	 *
 	 * Suitable for passing into a push constant and dereferencing in the
 	 * fragment shader as a buffer_reference (scalar layout). Returns 0 if
@@ -154,16 +166,15 @@ class LightTable final
 	[[nodiscard]] uint32_t GetCapacity() const noexcept;
 
 	/**
-	 * @brief Returns the number of records written by the most recent
-	 *        UploadFrame call, or 0 if no upload has occurred or the table is
-	 *        not initialized.
+	 * @brief Returns the number of records written by the most recent UploadFrame
+	 *        call targeting the current ring entry, or 0 if none or not initialized.
 	 *
-	 * @return Count of valid light records in the buffer.
+	 * @return Count of valid light records in the current ring entry's buffer.
 	 */
 	[[nodiscard]] uint32_t GetLightCount() const noexcept;
 
 	/**
-	 * @brief Returns true if this LightTable currently owns a Buffer as the
+	 * @brief Returns true if this LightTable currently owns its Buffer ring as the
 	 *        result of a successful Initialize call.
 	 *
 	 * Equivalent to (GetBufferAddress() != 0).
@@ -173,16 +184,20 @@ class LightTable final
 	[[nodiscard]] bool IsInitialized() const noexcept;
 
 	private:
-	/// The GPU-resident light record buffer.
-	Buffer _buffer;
-	/// Persistently-mapped host pointer into _buffer's backing memory.
-	void* _mapped = nullptr;
+	/// Per-frame-in-flight GPU-resident light record buffers.
+	std::vector<Buffer> _buffers;
+	/// Persistently-mapped host pointers, one per ring entry.
+	std::vector<void*> _mappedPtrs;
+	/// Cached VkDeviceAddress per ring entry.
+	std::vector<VkDeviceAddress> _bufferAddresses;
+	/// Cached light count per ring entry (written by UploadFrame).
+	std::vector<uint32_t> _lightCounts;
 	/// Cached max_lights from the last successful Initialize call.
 	uint32_t _capacity = 0;
-	/// Cached VkDeviceAddress of _buffer.
-	VkDeviceAddress _bufferAddress = 0;
-	/// Count of records written by the most recent UploadFrame call.
-	uint32_t _lightCount = 0;
+	/// Number of ring entries.
+	uint32_t _framesInFlight = 0;
+	/// Current ring entry index (set via SetFrameIndex).
+	uint32_t _currentFrame = 0;
 };
 
 } // namespace virasa

@@ -42,6 +42,13 @@ bool MakeDevice(Instance& instance, Device& device)
 	return true;
 }
 
+// Build a real Device with frames_in_flight support.
+// Returns true on success and populates *instance and *device.
+bool MakeDeviceForRing(Instance& instance, Device& device)
+{
+	return MakeDevice(instance, device);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -124,6 +131,7 @@ TEST(LightTable, test_light_table_is_raii_movable_non_copyable)
 	EXPECT_TRUE(std::is_default_constructible_v<LightTable>);
 
 	// Move constructor transfers ownership; source becomes default state.
+	// Use frames_in_flight=2 to exercise the ring.
 	Instance instance;
 	Device device;
 	if (!MakeDevice(instance, device))
@@ -132,7 +140,7 @@ TEST(LightTable, test_light_table_is_raii_movable_non_copyable)
 	}
 
 	LightTable tableA;
-	ASSERT_EQ(tableA.Initialize(device, 4u), RenderError::None);
+	ASSERT_EQ(tableA.Initialize(device, 4u, 2u), RenderError::None);
 	EXPECT_TRUE(tableA.IsInitialized());
 	EXPECT_NE(tableA.GetBufferAddress(), 0u);
 
@@ -153,6 +161,19 @@ TEST(LightTable, test_light_table_is_raii_movable_non_copyable)
 	EXPECT_EQ(tableB.GetCapacity(), 0u);
 	EXPECT_EQ(tableB.GetLightCount(), 0u);
 	EXPECT_EQ(tableB.GetBufferAddress(), 0u);
+
+	// Move assignment into an already-initialized table (must tear down first).
+	LightTable tableC;
+	ASSERT_EQ(tableC.Initialize(device, 4u, 1u), RenderError::None);
+	LightTable tableD;
+	ASSERT_EQ(tableD.Initialize(device, 8u, 2u), RenderError::None);
+	VkDeviceAddress addrD = tableD.GetBufferAddress();
+	tableC = std::move(tableD);
+	EXPECT_TRUE(tableC.IsInitialized());
+	EXPECT_EQ(tableC.GetBufferAddress(), addrD);
+	EXPECT_FALSE(tableD.IsInitialized());
+	EXPECT_EQ(tableD.GetCapacity(), 0u);
+	EXPECT_EQ(tableD.GetBufferAddress(), 0u);
 
 	device.WaitIdle();
 }
@@ -178,23 +199,41 @@ TEST(LightTable, test_light_table_initialize_creates_host_visible_buffer)
 	}
 
 	constexpr uint32_t kMaxLights = 16u;
+	constexpr uint32_t kFramesInFlight = 2u;
 	LightTable table;
 
-	RenderError err = table.Initialize(device, kMaxLights);
+	// Initialize with frames_in_flight=2 (ring of 2 buffers).
+	RenderError err = table.Initialize(device, kMaxLights, kFramesInFlight);
 	ASSERT_EQ(err, RenderError::None);
 
 	EXPECT_TRUE(table.IsInitialized());
 	EXPECT_EQ(table.GetCapacity(), kMaxLights);
 	EXPECT_EQ(table.GetLightCount(), 0u);
+	// Current-frame index is 0 after Initialize; buffer 0's address must be non-zero.
 	EXPECT_NE(table.GetBufferAddress(), static_cast<VkDeviceAddress>(0));
 
+	// SetFrameIndex to 1 and verify a (possibly different) non-zero address.
+	table.SetFrameIndex(1u);
+	EXPECT_NE(table.GetBufferAddress(), static_cast<VkDeviceAddress>(0));
+
+	// Reset to frame 0.
+	table.SetFrameIndex(0u);
+
 	// Re-initialization must not leak: call Initialize a second time.
-	RenderError err2 = table.Initialize(device, kMaxLights * 2u);
+	RenderError err2 = table.Initialize(device, kMaxLights * 2u, 1u);
 	ASSERT_EQ(err2, RenderError::None);
 	EXPECT_TRUE(table.IsInitialized());
 	EXPECT_EQ(table.GetCapacity(), kMaxLights * 2u);
 	EXPECT_EQ(table.GetLightCount(), 0u);
 	EXPECT_NE(table.GetBufferAddress(), static_cast<VkDeviceAddress>(0));
+
+	// frames_in_flight=1 reduces to single-buffer behavior (version-1 compat).
+	LightTable singleTable;
+	RenderError err3 = singleTable.Initialize(device, kMaxLights, 1u);
+	ASSERT_EQ(err3, RenderError::None);
+	EXPECT_TRUE(singleTable.IsInitialized());
+	EXPECT_EQ(singleTable.GetCapacity(), kMaxLights);
+	EXPECT_NE(singleTable.GetBufferAddress(), static_cast<VkDeviceAddress>(0));
 
 	device.WaitIdle();
 }
@@ -210,10 +249,12 @@ TEST(LightTable, test_light_table_upload_frame_writes_compact_array)
 	}
 
 	constexpr uint32_t kCapacity = 4u;
+	constexpr uint32_t kFrames = 2u;
 	LightTable table;
-	ASSERT_EQ(table.Initialize(device, kCapacity), RenderError::None);
+	ASSERT_EQ(table.Initialize(device, kCapacity, kFrames), RenderError::None);
 
-	// --- Upload exactly capacity lights ---
+	// --- Frame 0: upload exactly capacity lights ---
+	table.SetFrameIndex(0u);
 	LightGPU lights[kCapacity];
 	for (uint32_t i = 0; i < kCapacity; ++i)
 	{
@@ -224,7 +265,8 @@ TEST(LightTable, test_light_table_upload_frame_writes_compact_array)
 	EXPECT_EQ(written, kCapacity);
 	EXPECT_EQ(table.GetLightCount(), kCapacity);
 
-	// --- Upload fewer than capacity ---
+	// --- Frame 1: upload fewer than capacity ---
+	table.SetFrameIndex(1u);
 	constexpr uint32_t kFew = 2u;
 	LightGPU fewLights[kFew];
 	for (uint32_t i = 0; i < kFew; ++i)
@@ -233,7 +275,12 @@ TEST(LightTable, test_light_table_upload_frame_writes_compact_array)
 	EXPECT_EQ(writtenFew, kFew);
 	EXPECT_EQ(table.GetLightCount(), kFew);
 
-	// --- Upload more than capacity (overflow clamped, warning logged) ---
+	// Frame 0's count must be unaffected by frame 1's upload.
+	table.SetFrameIndex(0u);
+	EXPECT_EQ(table.GetLightCount(), kCapacity);
+
+	// --- Frame 0: upload more than capacity (overflow clamped, warning logged) ---
+	table.SetFrameIndex(0u);
 	constexpr uint32_t kMany = kCapacity + 3u;
 	LightGPU manyLights[kMany];
 	for (uint32_t i = 0; i < kMany; ++i)
@@ -242,10 +289,14 @@ TEST(LightTable, test_light_table_upload_frame_writes_compact_array)
 	EXPECT_EQ(writtenMany, kCapacity); // clamped to capacity
 	EXPECT_EQ(table.GetLightCount(), kCapacity);
 
-	// --- Upload zero lights ---
+	// --- Frame 0: upload zero lights ---
 	uint32_t writtenZero = table.UploadFrame(std::span<const LightGPU>{});
 	EXPECT_EQ(writtenZero, 0u);
 	EXPECT_EQ(table.GetLightCount(), 0u);
+
+	// Frame 1's count (kFew) must still be intact.
+	table.SetFrameIndex(1u);
+	EXPECT_EQ(table.GetLightCount(), kFew);
 
 	device.WaitIdle();
 }
@@ -262,6 +313,9 @@ TEST(LightTable, test_light_table_observers)
 		EXPECT_FALSE(table.IsInitialized());
 		// IsInitialized iff GetBufferAddress != 0.
 		EXPECT_EQ(table.IsInitialized(), table.GetBufferAddress() != 0u);
+		// SetFrameIndex is safe on default-constructed table.
+		table.SetFrameIndex(0u);
+		EXPECT_EQ(table.GetLightCount(), 0u);
 	}
 
 	Instance instance;
@@ -272,27 +326,50 @@ TEST(LightTable, test_light_table_observers)
 	}
 
 	constexpr uint32_t kCap = 8u;
+	constexpr uint32_t kFrames = 2u;
 	LightTable table;
-	ASSERT_EQ(table.Initialize(device, kCap), RenderError::None);
+	ASSERT_EQ(table.Initialize(device, kCap, kFrames), RenderError::None);
 
-	// After Initialize: capacity, address, count, initialized.
+	// After Initialize: current-frame index is 0.
 	EXPECT_EQ(table.GetCapacity(), kCap);
 	EXPECT_EQ(table.GetLightCount(), 0u);
 	EXPECT_TRUE(table.IsInitialized());
-	EXPECT_NE(table.GetBufferAddress(), static_cast<VkDeviceAddress>(0));
+	VkDeviceAddress addr0 = table.GetBufferAddress();
+	EXPECT_NE(addr0, static_cast<VkDeviceAddress>(0));
 	// IsInitialized iff GetBufferAddress != 0.
 	EXPECT_EQ(table.IsInitialized(), table.GetBufferAddress() != 0u);
 
-	// After UploadFrame: GetLightCount reflects written count.
+	// SetFrameIndex(1) switches to ring entry 1.
+	table.SetFrameIndex(1u);
+	VkDeviceAddress addr1 = table.GetBufferAddress();
+	EXPECT_NE(addr1, static_cast<VkDeviceAddress>(0));
+	// GetLightCount for frame 1 starts at 0 (no upload yet).
+	EXPECT_EQ(table.GetLightCount(), 0u);
+
+	// Upload to frame 1.
 	LightGPU lights[3]{};
 	table.UploadFrame(std::span<const LightGPU>(lights, 3));
 	EXPECT_EQ(table.GetLightCount(), 3u);
 	EXPECT_EQ(table.GetCapacity(), kCap); // capacity unchanged
 
-	// Address is stable across UploadFrame calls.
-	VkDeviceAddress addrBefore = table.GetBufferAddress();
+	// Address is stable across UploadFrame calls on the same ring entry.
+	EXPECT_EQ(table.GetBufferAddress(), addr1);
 	table.UploadFrame(std::span<const LightGPU>(lights, 1));
-	EXPECT_EQ(table.GetBufferAddress(), addrBefore);
+	EXPECT_EQ(table.GetBufferAddress(), addr1);
+	EXPECT_EQ(table.GetLightCount(), 1u);
+
+	// Switch back to frame 0: GetBufferAddress returns addr0, GetLightCount returns 0.
+	table.SetFrameIndex(0u);
+	EXPECT_EQ(table.GetBufferAddress(), addr0);
+	EXPECT_EQ(table.GetLightCount(), 0u);
+
+	// Upload to frame 0.
+	table.UploadFrame(std::span<const LightGPU>(lights, 3));
+	EXPECT_EQ(table.GetLightCount(), 3u);
+
+	// Frame 1's count is still 1.
+	table.SetFrameIndex(1u);
+	EXPECT_EQ(table.GetLightCount(), 1u);
 
 	// After move: source observers return default values.
 	LightTable moved = std::move(table);

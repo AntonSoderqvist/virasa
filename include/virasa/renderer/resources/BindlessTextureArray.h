@@ -127,7 +127,7 @@ class BindlessTextureArray final
 };
 
 /// @brief Fixed compile-time capacity of the shadow-map slot space (binding 1).
-inline constexpr uint32_t kMaxShadowMaps = 16;
+inline constexpr uint32_t kMaxShadowMaps = 32;
 
 } // namespace virasa
 

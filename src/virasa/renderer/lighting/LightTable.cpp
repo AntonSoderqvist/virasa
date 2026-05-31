@@ -14,13 +14,17 @@ namespace virasa
 // Move constructor
 // ---------------------------------------------------------------------------
 LightTable::LightTable(LightTable&& other) noexcept
-    : _buffer(std::move(other._buffer)), _mapped(other._mapped), _capacity(other._capacity),
-	_bufferAddress(other._bufferAddress), _lightCount(other._lightCount)
+	: _buffers(std::move(other._buffers)),
+	  _mappedPtrs(std::move(other._mappedPtrs)),
+	  _bufferAddresses(std::move(other._bufferAddresses)),
+	  _lightCounts(std::move(other._lightCounts)),
+	  _capacity(other._capacity),
+	  _framesInFlight(other._framesInFlight),
+	  _currentFrame(other._currentFrame)
 {
-	other._mapped = nullptr;
 	other._capacity = 0;
-	other._bufferAddress = 0;
-	other._lightCount = 0;
+	other._framesInFlight = 0;
+	other._currentFrame = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,17 +34,17 @@ LightTable& LightTable::operator=(LightTable&& other) noexcept
 {
 	if (this != &other)
 	{
-		// Tear down existing resources (Buffer RAII handles Vulkan cleanup).
-		_buffer = std::move(other._buffer);
-		_mapped = other._mapped;
+		_buffers = std::move(other._buffers);
+		_mappedPtrs = std::move(other._mappedPtrs);
+		_bufferAddresses = std::move(other._bufferAddresses);
+		_lightCounts = std::move(other._lightCounts);
 		_capacity = other._capacity;
-		_bufferAddress = other._bufferAddress;
-		_lightCount = other._lightCount;
+		_framesInFlight = other._framesInFlight;
+		_currentFrame = other._currentFrame;
 
-		other._mapped = nullptr;
 		other._capacity = 0;
-		other._bufferAddress = 0;
-		other._lightCount = 0;
+		other._framesInFlight = 0;
+		other._currentFrame = 0;
 	}
 	return *this;
 }
@@ -48,50 +52,86 @@ LightTable& LightTable::operator=(LightTable&& other) noexcept
 // ---------------------------------------------------------------------------
 // Initialize
 // ---------------------------------------------------------------------------
-RenderError LightTable::Initialize(const Device& device, uint32_t max_lights)
+RenderError LightTable::Initialize(
+	const Device& device,
+	uint32_t max_lights,
+	uint32_t frames_in_flight)
 {
-	// Tear down any existing resources by replacing _buffer with a fresh one.
-	// Buffer's move-assignment will destroy the old buffer via its RAII dtor.
-	_buffer = Buffer{};
-	_mapped = nullptr;
+	// Tear down any existing resources.
+	_buffers.clear();
+	_mappedPtrs.clear();
+	_bufferAddresses.clear();
+	_lightCounts.clear();
 	_capacity = 0;
-	_bufferAddress = 0;
-	_lightCount = 0;
+	_framesInFlight = 0;
+	_currentFrame = 0;
 
-	// Step 1: create the light buffer.
-	BufferConfig config;
-	config.size = static_cast<VkDeviceSize>(max_lights) * sizeof(LightGPU);
-	config.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-	config.memoryProperties =
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	const VkDeviceSize bufferSize = static_cast<VkDeviceSize>(max_lights) * sizeof(LightGPU);
 
-	RenderError err = _buffer.Initialize(device, config);
-	if (err != RenderError::None)
+	_buffers.resize(frames_in_flight);
+	_mappedPtrs.resize(frames_in_flight, nullptr);
+	_bufferAddresses.resize(frames_in_flight, 0);
+	_lightCounts.resize(frames_in_flight, 0);
+
+	for (uint32_t i = 0; i < frames_in_flight; ++i)
 	{
-		return err;
-	}
+		// Step 1: create light buffer i.
+		BufferConfig config;
+		config.size = bufferSize;
+		config.usage =
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		config.memoryProperties =
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-	// Step 2: map the buffer persistently.
-	void* mapped = _buffer.Map();
-	if (mapped == nullptr)
-	{
-		quill::Logger* logger = Logger::GetLogger("renderer");
-		LOG_ERROR(logger, "LightTable::Initialize — failed to map light buffer");
-		_buffer = Buffer{};
-		return RenderError::MemoryMapFailed;
+		RenderError err = _buffers[i].Initialize(device, config);
+		if (err != RenderError::None)
+		{
+			// Tear down already-created entries.
+			_buffers.clear();
+			_mappedPtrs.clear();
+			_bufferAddresses.clear();
+			_lightCounts.clear();
+			return err;
+		}
+
+		// Step 2: map light buffer i persistently.
+		void* mapped = _buffers[i].Map();
+		if (mapped == nullptr)
+		{
+			quill::Logger* logger = virasa::Logger::GetLogger("renderer");
+			LOG_ERROR(logger,
+				"LightTable::Initialize — failed to map light buffer for ring entry {}",
+				i);
+			_buffers.clear();
+			_mappedPtrs.clear();
+			_bufferAddresses.clear();
+			_lightCounts.clear();
+			return RenderError::MemoryMapFailed;
+		}
+		_mappedPtrs[i] = mapped;
 	}
-	_mapped = mapped;
 
 	// Step 3: cache observers.
 	_capacity = max_lights;
-	// GetDeviceAddress requires a non-const Device reference in the Buffer API,
-	// but the contract takes a const Device&. We cast away const here because
-	// GetDeviceAddress is semantically a pure observer (vkGetBufferDeviceAddress
-	// cannot fail and does not mutate the device).
-	_bufferAddress = _buffer.GetDeviceAddress(const_cast<Device&>(device));
-	_lightCount = 0;
+	_framesInFlight = frames_in_flight;
+	_currentFrame = 0;
+
+	for (uint32_t i = 0; i < frames_in_flight; ++i)
+	{
+		_bufferAddresses[i] =
+			_buffers[i].GetDeviceAddress(const_cast<Device&>(device));
+		_lightCounts[i] = 0;
+	}
 
 	return RenderError::None;
+}
+
+// ---------------------------------------------------------------------------
+// SetFrameIndex
+// ---------------------------------------------------------------------------
+void LightTable::SetFrameIndex(uint32_t frame_index)
+{
+	_currentFrame = frame_index;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +144,7 @@ uint32_t LightTable::UploadFrame(std::span<const LightGPU> lights)
 
 	if (n > _capacity)
 	{
-		quill::Logger* logger = Logger::GetLogger("renderer");
+		quill::Logger* logger = virasa::Logger::GetLogger("renderer");
 		LOG_WARNING(logger,
 			"LightTable::UploadFrame — {} light(s) dropped (capacity {})",
 			n - _capacity,
@@ -113,10 +153,13 @@ uint32_t LightTable::UploadFrame(std::span<const LightGPU> lights)
 
 	if (w > 0)
 	{
-		std::memcpy(_mapped, lights.data(), static_cast<size_t>(w) * sizeof(LightGPU));
+		std::memcpy(
+			_mappedPtrs[_currentFrame],
+			lights.data(),
+			static_cast<size_t>(w) * sizeof(LightGPU));
 	}
 
-	_lightCount = w;
+	_lightCounts[_currentFrame] = w;
 	return w;
 }
 
@@ -125,7 +168,11 @@ uint32_t LightTable::UploadFrame(std::span<const LightGPU> lights)
 // ---------------------------------------------------------------------------
 VkDeviceAddress LightTable::GetBufferAddress() const noexcept
 {
-	return _bufferAddress;
+	if (_bufferAddresses.empty())
+	{
+		return 0;
+	}
+	return _bufferAddresses[_currentFrame];
 }
 
 uint32_t LightTable::GetCapacity() const noexcept
@@ -135,12 +182,16 @@ uint32_t LightTable::GetCapacity() const noexcept
 
 uint32_t LightTable::GetLightCount() const noexcept
 {
-	return _lightCount;
+	if (_lightCounts.empty())
+	{
+		return 0;
+	}
+	return _lightCounts[_currentFrame];
 }
 
 bool LightTable::IsInitialized() const noexcept
 {
-	return _bufferAddress != 0;
+	return !_bufferAddresses.empty() && _bufferAddresses[_currentFrame] != 0;
 }
 
 } // namespace virasa

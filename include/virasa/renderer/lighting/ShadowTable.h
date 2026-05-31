@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <span>
+#include <vector>
 
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
@@ -22,7 +23,7 @@ namespace virasa
  */
 struct ShadowGPU
 {
-	public:
+public:
 	/// Light-space view-projection matrix (column-major, 64 bytes).
 	virasa::math::Mat4 lightViewProj = virasa::math::Mat4(1.0f);
 	/// Bindless texture-array slot of the shadow depth map.
@@ -54,7 +55,7 @@ static_assert(offsetof(ShadowGPU, _pad0) == 76, "_pad0 must be at offset 76");
  */
 class ShadowTable final
 {
-	public:
+public:
 	/**
 	 * @brief Default-constructs a ShadowTable that owns no Vulkan resources.
 	 */
@@ -69,50 +70,70 @@ class ShadowTable final
 	ShadowTable& operator=(ShadowTable&& other) noexcept;
 
 	/**
-	 * @brief Allocates the GPU shadow buffer and maps it persistently.
+	 * @brief Allocates the GPU shadow buffer ring and maps each entry persistently.
 	 * @param device An initialized Device to allocate from.
-	 * @param max_shadows Maximum number of shadow records the buffer can hold.
+	 * @param max_shadows Maximum number of shadow records each buffer can hold.
+	 * @param frames_in_flight Number of ring entries (one per in-flight frame).
 	 * @return RenderError::None on success, or a specific error code.
 	 */
-	[[nodiscard]] RenderError Initialize(const Device& device, uint32_t max_shadows);
+	[[nodiscard]] RenderError Initialize(
+		const Device& device,
+		uint32_t max_shadows,
+		uint32_t frames_in_flight);
 
 	/**
-	 * @brief Writes shadow records into the mapped buffer for this frame.
+	 * @brief Selects the current ring entry for subsequent UploadFrame / observer calls.
+	 * @param frame_index Index in [0, frames_in_flight).
+	 */
+	void SetFrameIndex(uint32_t frame_index);
+
+	/**
+	 * @brief Writes shadow records into the current-frame ring entry's mapped buffer.
 	 * @param shadows Span of ShadowGPU records to upload (clamped to capacity).
 	 * @return The number of records actually written.
 	 */
 	uint32_t UploadFrame(std::span<const ShadowGPU> shadows);
 
 	/**
-	 * @brief Returns the VkDeviceAddress of the shadow buffer.
+	 * @brief Returns the VkDeviceAddress of the current-frame ring entry's shadow buffer.
 	 * @return Device address, or 0 if not initialized.
 	 */
 	[[nodiscard]] VkDeviceAddress GetBufferAddress() const noexcept;
 
 	/**
-	 * @brief Returns the maximum number of shadow records the buffer can hold.
+	 * @brief Returns the maximum number of shadow records each buffer can hold.
 	 * @return Capacity, or 0 if not initialized.
 	 */
 	[[nodiscard]] uint32_t GetCapacity() const noexcept;
 
 	/**
-	 * @brief Returns the number of records written by the most recent UploadFrame.
-	 * @return Shadow count, or 0 if UploadFrame has not been called.
+	 * @brief Returns the number of records written by the most recent UploadFrame
+	 *        targeting the current-frame ring entry.
+	 * @return Shadow count, or 0 if no UploadFrame has targeted this entry yet.
 	 */
 	[[nodiscard]] uint32_t GetShadowCount() const noexcept;
 
 	/**
-	 * @brief Returns true if this ShadowTable owns an initialized Buffer.
+	 * @brief Returns true if this ShadowTable owns an initialized Buffer ring.
 	 * @return True if initialized.
 	 */
 	[[nodiscard]] bool IsInitialized() const noexcept;
 
-	private:
-	Buffer _buffer;
-	VkDeviceAddress _bufferAddress = 0;
+private:
+	/// Per-frame ring entries.
+	std::vector<Buffer> _buffers;
+	/// Persistently-mapped pointers, one per ring entry.
+	std::vector<void*> _mappedPtrs;
+	/// Cached device addresses, one per ring entry.
+	std::vector<VkDeviceAddress> _bufferAddresses;
+	/// Cached shadow counts, one per ring entry.
+	std::vector<uint32_t> _shadowCounts;
+	/// Maximum shadow records per buffer.
 	uint32_t _capacity = 0;
-	uint32_t _shadowCount = 0;
-	void* _mapped = nullptr;
+	/// Number of ring entries.
+	uint32_t _framesInFlight = 0;
+	/// Currently selected ring entry.
+	uint32_t _currentFrame = 0;
 };
 
 } // namespace virasa

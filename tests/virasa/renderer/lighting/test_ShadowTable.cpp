@@ -121,8 +121,10 @@ TEST(ShadowTable, test_shadow_table_is_raii_movable_non_copyable)
 		GTEST_SKIP() << "Vulkan device unavailable; skipping move-with-resources test";
 	}
 
+	constexpr uint32_t kFif = 2u;
+
 	ShadowTable a;
-	ASSERT_EQ(a.Initialize(ctx.device, 4u), RenderError::None);
+	ASSERT_EQ(a.Initialize(ctx.device, 4u, kFif), RenderError::None);
 	EXPECT_TRUE(a.IsInitialized());
 	EXPECT_EQ(a.GetCapacity(), 4u);
 	VkDeviceAddress addrA = a.GetBufferAddress();
@@ -141,11 +143,11 @@ TEST(ShadowTable, test_shadow_table_is_raii_movable_non_copyable)
 
 	// Move assignment: assign into an already-initialized table.
 	ShadowTable c;
-	ASSERT_EQ(c.Initialize(ctx.device, 8u), RenderError::None);
+	ASSERT_EQ(c.Initialize(ctx.device, 8u, kFif), RenderError::None);
 	EXPECT_TRUE(c.IsInitialized());
 
 	ShadowTable d;
-	ASSERT_EQ(d.Initialize(ctx.device, 2u), RenderError::None);
+	ASSERT_EQ(d.Initialize(ctx.device, 2u, kFif), RenderError::None);
 	VkDeviceAddress addrD = d.GetBufferAddress();
 
 	c = std::move(d);
@@ -188,7 +190,8 @@ TEST(ShadowTable, test_shadow_table_initialize_creates_host_visible_buffer)
 	EXPECT_EQ(t.GetBufferAddress(), 0u);
 
 	constexpr uint32_t kMaxShadows = 16u;
-	RenderError err = t.Initialize(ctx.device, kMaxShadows);
+	constexpr uint32_t kFramesInFlight = 2u;
+	RenderError err = t.Initialize(ctx.device, kMaxShadows, kFramesInFlight);
 	ASSERT_EQ(err, RenderError::None);
 
 	EXPECT_TRUE(t.IsInitialized());
@@ -196,14 +199,27 @@ TEST(ShadowTable, test_shadow_table_initialize_creates_host_visible_buffer)
 	EXPECT_EQ(t.GetShadowCount(), 0u);
 	EXPECT_NE(t.GetBufferAddress(), 0u);
 
+	// Current-frame index is 0 immediately after Initialize.
+	// GetBufferAddress returns ring entry 0's address — just verify it's non-zero.
+	VkDeviceAddress addrAfterInit = t.GetBufferAddress();
+	EXPECT_NE(addrAfterInit, 0u);
+
 	// Re-initialization must not leak: call Initialize again and verify it succeeds.
 	constexpr uint32_t kNewMax = 8u;
-	err = t.Initialize(ctx.device, kNewMax);
+	err = t.Initialize(ctx.device, kNewMax, kFramesInFlight);
 	ASSERT_EQ(err, RenderError::None);
 	EXPECT_TRUE(t.IsInitialized());
 	EXPECT_EQ(t.GetCapacity(), kNewMax);
 	EXPECT_EQ(t.GetShadowCount(), 0u);
 	EXPECT_NE(t.GetBufferAddress(), 0u);
+
+	// Single frames_in_flight=1 should behave like version-1 (one buffer).
+	ShadowTable t1;
+	err = t1.Initialize(ctx.device, kMaxShadows, 1u);
+	ASSERT_EQ(err, RenderError::None);
+	EXPECT_TRUE(t1.IsInitialized());
+	EXPECT_EQ(t1.GetCapacity(), kMaxShadows);
+	EXPECT_NE(t1.GetBufferAddress(), 0u);
 }
 
 // shadow_table_upload_frame_writes_compact_array
@@ -216,8 +232,9 @@ TEST(ShadowTable, test_shadow_table_upload_frame_writes_compact_array)
 	}
 
 	constexpr uint32_t kCapacity = 4u;
+	constexpr uint32_t kFif = 2u;
 	ShadowTable t;
-	ASSERT_EQ(t.Initialize(ctx.device, kCapacity), RenderError::None);
+	ASSERT_EQ(t.Initialize(ctx.device, kCapacity, kFif), RenderError::None);
 
 	// Upload zero records: count becomes 0, returns 0.
 	{
@@ -261,6 +278,26 @@ TEST(ShadowTable, test_shadow_table_upload_frame_writes_compact_array)
 		EXPECT_EQ(written, kCapacity);
 		EXPECT_EQ(t.GetShadowCount(), kCapacity);
 	}
+
+	// Verify per-ring-entry independence: SetFrameIndex switches the active entry.
+	// After switching to frame 1, shadow count for that entry starts at 0.
+	t.SetFrameIndex(1u);
+	EXPECT_EQ(t.GetShadowCount(), 0u);
+
+	// Upload to frame 1.
+	{
+		constexpr uint32_t kN = 3u;
+		std::array<ShadowGPU, kN> shadows{};
+		for (uint32_t i = 0; i < kN; ++i)
+			shadows[i].shadowMapSlot = 100u + i;
+		uint32_t written = t.UploadFrame(std::span<const ShadowGPU>(shadows));
+		EXPECT_EQ(written, kN);
+		EXPECT_EQ(t.GetShadowCount(), kN);
+	}
+
+	// Switch back to frame 0: its count is still what was last written there (kCapacity).
+	t.SetFrameIndex(0u);
+	EXPECT_EQ(t.GetShadowCount(), kCapacity);
 }
 
 // shadow_table_observers
@@ -284,8 +321,9 @@ TEST(ShadowTable, test_shadow_table_observers)
 	}
 
 	constexpr uint32_t kCap = 8u;
+	constexpr uint32_t kFif = 2u;
 	ShadowTable t;
-	ASSERT_EQ(t.Initialize(ctx.device, kCap), RenderError::None);
+	ASSERT_EQ(t.Initialize(ctx.device, kCap, kFif), RenderError::None);
 
 	// After init: IsInitialized ↔ GetBufferAddress != 0.
 	EXPECT_TRUE(t.IsInitialized());
@@ -300,11 +338,33 @@ TEST(ShadowTable, test_shadow_table_observers)
 	t.UploadFrame(std::span<const ShadowGPU>(shadows));
 	EXPECT_EQ(t.GetShadowCount(), kCount);
 
-	// Address is stable across UploadFrame calls.
+	// Address is stable across UploadFrame calls on the same ring entry.
 	VkDeviceAddress addr = t.GetBufferAddress();
 	EXPECT_NE(addr, 0u);
 	t.UploadFrame(std::span<const ShadowGPU>(shadows));
 	EXPECT_EQ(t.GetBufferAddress(), addr);
+
+	// SetFrameIndex changes which ring entry GetBufferAddress / GetShadowCount report.
+	t.SetFrameIndex(1u);
+	// Frame 1 has never been written: shadow count is 0.
+	EXPECT_EQ(t.GetShadowCount(), 0u);
+	// Frame 1's address is non-zero (it was created during Initialize).
+	VkDeviceAddress addrFrame1 = t.GetBufferAddress();
+	EXPECT_NE(addrFrame1, 0u);
+	// The two ring entries have distinct addresses.
+	EXPECT_NE(addrFrame1, addr);
+
+	// Switch back to frame 0: address and count revert to frame 0's values.
+	t.SetFrameIndex(0u);
+	EXPECT_EQ(t.GetBufferAddress(), addr);
+	EXPECT_EQ(t.GetShadowCount(), kCount);
+
+	// SetFrameIndex on a default-constructed table is safe (updates index only).
+	{
+		ShadowTable empty;
+		empty.SetFrameIndex(0u); // must not crash
+		EXPECT_FALSE(empty.IsInitialized());
+	}
 
 	// After move: source has all-zero observers.
 	ShadowTable moved(std::move(t));
@@ -314,7 +374,7 @@ TEST(ShadowTable, test_shadow_table_observers)
 	EXPECT_EQ(t.GetShadowCount(), 0u);
 	EXPECT_EQ(t.IsInitialized(), t.GetBufferAddress() != 0u);
 
-	// Destination has the transferred observers.
+	// Destination has the transferred observers (frame 0 was active at time of move).
 	EXPECT_TRUE(moved.IsInitialized());
 	EXPECT_EQ(moved.GetBufferAddress(), addr);
 	EXPECT_EQ(moved.GetCapacity(), kCap);

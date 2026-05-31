@@ -271,13 +271,14 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			_initialized = false;
 			return err;
 		}
-		err = _lightTable.Initialize(device, 256);
+		const uint32_t framesInFlight = context.GetMaxFramesInFlight();
+		err = _lightTable.Initialize(device, 256, framesInFlight);
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
 			return err;
 		}
-		err = _shadowTable.Initialize(device, kMaxShadowMaps);
+		err = _shadowTable.Initialize(device, kMaxShadowMaps, framesInFlight);
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
@@ -729,6 +730,12 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 		return status;
 	}
 
+	// Propagate current frame index to per-frame resources before Begin/DeclareImage
+	const uint32_t frameIndex = _context->GetCurrentFrameIndex();
+	_imageRegistry.SetFrameIndex(frameIndex);
+	_lightTable.SetFrameIndex(frameIndex);
+	_shadowTable.SetFrameIndex(frameIndex);
+
 	_graph.Begin();
 
 	// Import swapchain image
@@ -970,6 +977,10 @@ uint32_t SceneRenderer::RenderWorld(
 	// --- Shadow rendering ---
 	// Select shadow-casting lights and render depth maps
 	std::vector<virasa::ShadowGPU> shadowRecords;
+	// Shadow-map images the forward pass samples; declared as reads on the
+	// forward pass below so the graph transitions each from depth-attachment
+	// to shader-read-only and barriers the depth write before the sample.
+	std::vector<virasa::renderer::graph::ImageHandle> shadowReadHandles;
 
 	{
 		auto* logger = virasa::Logger::GetLogger("renderer");
@@ -1143,6 +1154,10 @@ uint32_t SceneRenderer::RenderWorld(
 							shadowRec.slopeBias = kShadowSlopeBias;
 							shadowRec._pad0 = 0u;
 							shadowRecords.push_back(shadowRec);
+
+							// Forward pass samples this map; record it so the
+							// graph transitions + barriers it before the read.
+							shadowReadHandles.push_back(shadowMapHandle);
 						}
 
 						++shadowBudgetUsed;
@@ -1292,6 +1307,10 @@ uint32_t SceneRenderer::RenderWorld(
 							shadowRec.slopeBias = kShadowSlopeBias;
 							shadowRec._pad0 = 0u;
 							shadowRecords.push_back(shadowRec);
+
+							// Forward pass samples this map; record it so the
+							// graph transitions + barriers it before the read.
+							shadowReadHandles.push_back(shadowMapHandle);
 						}
 
 						++shadowBudgetUsed;
@@ -1324,11 +1343,24 @@ uint32_t SceneRenderer::RenderWorld(
 	const virasa::Device* dev = _device;
 
 	// --- Add forward pass ---
-	_graph.AddPass("forward")
+	auto& forwardPass = _graph.AddPass("forward");
+	forwardPass
 		.ColorAttachment(_frameSceneColorHandle,
 			virasa::renderer::graph::LoadOp::Clear,
 			virasa::renderer::graph::ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
-		.DepthAttachment(_frameSceneDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
+		.DepthAttachment(_frameSceneDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f);
+
+	// Declare every shadow map this pass samples as a read, so the graph
+	// transitions it from depth-attachment to shader-read-only and inserts the
+	// shadow-write -> forward-read barrier (required by the render_world
+	// contract; its omission caused stale/black shadow reads under fast motion).
+	for (const auto& shadowReadHandle : shadowReadHandles)
+	{
+		forwardPass.Read(shadowReadHandle,
+			virasa::renderer::graph::ResourceUsage::SampledFragment);
+	}
+
+	forwardPass
 		.Record(
 			[opaquePipeline,
 				opaqueDoubleSidedPipeline,

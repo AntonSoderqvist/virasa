@@ -1,5 +1,7 @@
+#include <atomic>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <thread>
 #include <utility>
 
 #include "virasa/renderer/Types.h"
@@ -96,8 +98,7 @@ GraphImageDesc MakeDepthDesc(uint32_t w = 64, uint32_t h = 64)
 // ---------------------------------------------------------------------------
 TEST(ImageRegistry, test_image_registry_is_raii_movable_non_copyable)
 {
-// Not copyable
-STATIC_ASSERT_FALSE_HELPER:
+	// Not copyable
 	static_assert(!std::is_copy_constructible_v<ImageRegistry>,
 		"ImageRegistry must not be copy-constructible");
 	static_assert(
@@ -114,6 +115,7 @@ STATIC_ASSERT_FALSE_HELPER:
 	EXPECT_FALSE(reg.IsInitialized());
 	EXPECT_EQ(reg.GetSlotCount(), 0u);
 	EXPECT_EQ(reg.GetAllocatedCount(), 0u);
+	EXPECT_EQ(reg.GetFrameIndex(), 0u);
 
 	VulkanEnv env;
 	if (!env.ready)
@@ -130,15 +132,21 @@ STATIC_ASSERT_FALSE_HELPER:
 	EXPECT_EQ(src.GetSlotCount(), 1u);
 	EXPECT_EQ(src.GetAllocatedCount(), 1u);
 
+	// Set a non-zero frame index to verify it transfers on move.
+	src.SetFrameIndex(7u);
+	EXPECT_EQ(src.GetFrameIndex(), 7u);
+
 	// Move-construct
 	ImageRegistry dst(std::move(src));
 	EXPECT_FALSE(src.IsInitialized());
 	EXPECT_EQ(src.GetSlotCount(), 0u);
 	EXPECT_EQ(src.GetAllocatedCount(), 0u);
+	EXPECT_EQ(src.GetFrameIndex(), 0u); // reset to 0 in moved-from
 	EXPECT_TRUE(dst.IsInitialized());
 	EXPECT_EQ(dst.GetSlotCount(), 1u);
 	EXPECT_EQ(dst.GetAllocatedCount(), 1u);
 	EXPECT_TRUE(dst.IsAllocated(h));
+	EXPECT_EQ(dst.GetFrameIndex(), 7u); // transferred
 
 	// Move-assign into another registry
 	ImageRegistry dst2;
@@ -146,10 +154,12 @@ STATIC_ASSERT_FALSE_HELPER:
 	EXPECT_FALSE(dst.IsInitialized());
 	EXPECT_EQ(dst.GetSlotCount(), 0u);
 	EXPECT_EQ(dst.GetAllocatedCount(), 0u);
+	EXPECT_EQ(dst.GetFrameIndex(), 0u); // reset to 0 in moved-from
 	EXPECT_TRUE(dst2.IsInitialized());
 	EXPECT_EQ(dst2.GetSlotCount(), 1u);
 	EXPECT_EQ(dst2.GetAllocatedCount(), 1u);
 	EXPECT_TRUE(dst2.IsAllocated(h));
+	EXPECT_EQ(dst2.GetFrameIndex(), 7u); // transferred
 
 	// Move-assign into a registry that already owns slots (teardown of prior slots)
 	ImageRegistry dst3;
@@ -178,6 +188,7 @@ TEST(ImageRegistry, test_image_registry_default_constructed_state)
 	EXPECT_FALSE(reg.IsInitialized());
 	EXPECT_EQ(reg.GetSlotCount(), 0u);
 	EXPECT_EQ(reg.GetAllocatedCount(), 0u);
+	EXPECT_EQ(reg.GetFrameIndex(), 0u);
 
 	// IsAllocated must return false for any handle, including the invalid sentinel.
 	ImageHandle sentinel; // id == 0xFFFFFFFFu
@@ -190,6 +201,12 @@ TEST(ImageRegistry, test_image_registry_default_constructed_state)
 	ImageHandle arbitrary{};
 	arbitrary.id = 42u;
 	EXPECT_FALSE(reg.IsAllocated(arbitrary));
+
+	// SetFrameIndex and GetFrameIndex may be called in any state.
+	reg.SetFrameIndex(5u);
+	EXPECT_EQ(reg.GetFrameIndex(), 5u);
+	reg.SetFrameIndex(0u);
+	EXPECT_EQ(reg.GetFrameIndex(), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +264,8 @@ TEST(ImageRegistry, test_image_registry_allocate_reuses_or_creates_slot)
 
 	GraphImageDesc desc = MakeColorDesc();
 
-	// --- Creation rule ---
+	// --- Creation rule (frame index 0) ---
+	EXPECT_EQ(reg.GetFrameIndex(), 0u);
 	ImageHandle h0 = reg.Allocate(desc);
 	ASSERT_TRUE(h0.IsValid());
 	EXPECT_EQ(reg.GetSlotCount(), 1u);
@@ -283,14 +301,14 @@ TEST(ImageRegistry, test_image_registry_allocate_reuses_or_creates_slot)
 	EXPECT_EQ(reg.GetSlotCount(), 2u);
 	EXPECT_EQ(reg.GetAllocatedCount(), 2u);
 
-	// --- Reuse rule ---
+	// --- Reuse rule (same frame index) ---
 	// Set a non-Undefined usage on h0 before freeing it, to verify it is preserved.
 	reg.SetUsage(h0, ResourceUsage::ColorAttachment);
 	reg.Free(h0);
 	EXPECT_EQ(reg.GetSlotCount(), 2u); // slot count unchanged after Free
 	EXPECT_EQ(reg.GetAllocatedCount(), 1u);
 
-	// Allocate with the same desc as h0 → reuse rule must fire.
+	// Allocate with the same desc as h0 (same frame index 0) → reuse rule must fire.
 	ImageHandle h0r = reg.Allocate(desc);
 	ASSERT_TRUE(h0r.IsValid());
 	EXPECT_EQ(h0r.id, h0.id);	     // same slot index reclaimed
@@ -303,6 +321,27 @@ TEST(ImageRegistry, test_image_registry_allocate_reuses_or_creates_slot)
 
 	// ResourceUsage must be preserved from before Free (ColorAttachment).
 	EXPECT_EQ(reg.GetUsage(h0r), ResourceUsage::ColorAttachment);
+
+	// --- Frame-index partitioning: a slot freed under frame 0 must NOT be reused under frame 1 ---
+	reg.Free(h0r);
+	reg.SetFrameIndex(1u);
+	EXPECT_EQ(reg.GetFrameIndex(), 1u);
+	// Allocating the same desc under frame 1 must create a NEW slot (creation rule),
+	// because the freed slot's frameOwner is 0, not 1.
+	ImageHandle hFrame1 = reg.Allocate(desc);
+	ASSERT_TRUE(hFrame1.IsValid());
+	EXPECT_NE(hFrame1.id, h0.id); // different slot
+	EXPECT_EQ(reg.GetSlotCount(), 3u); // new slot created
+	EXPECT_EQ(reg.GetAllocatedCount(), 2u); // h1 and hFrame1 (the h0r slot is free)
+	// The new slot's Image must be a fresh one (different VkImage from the frame-0 slot).
+	EXPECT_NE(reg.Get(hFrame1).GetHandle(), expectedHandle);
+
+	// Switch back to frame 0 and verify the frame-0 freed slot IS reused.
+	reg.SetFrameIndex(0u);
+	ImageHandle h0r2 = reg.Allocate(desc);
+	ASSERT_TRUE(h0r2.IsValid());
+	EXPECT_EQ(h0r2.id, h0.id); // reuse of the frame-0 slot
+	EXPECT_EQ(reg.Get(h0r2).GetHandle(), expectedHandle); // same VkImage
 
 	// --- Failure sentinel ---
 	// Construct an invalid desc to force Image::Initialize to fail.
@@ -350,7 +389,7 @@ TEST(ImageRegistry, test_image_registry_free_returns_slot_to_freelist)
 	EXPECT_EQ(reg.GetSlotCount(), slotCountBefore); // unchanged
 	EXPECT_EQ(reg.GetAllocatedCount(), allocCountBefore - 1u);
 
-	// Reclaim via Allocate with same desc.
+	// Reclaim via Allocate with same desc (same frame index 0).
 	ImageHandle h2 = reg.Allocate(desc);
 	ASSERT_TRUE(h2.IsValid());
 	EXPECT_EQ(h2.id, h.id); // reuse rule fired
@@ -370,14 +409,24 @@ TEST(ImageRegistry, test_image_registry_free_returns_slot_to_freelist)
 	EXPECT_EQ(cd.usage, desc.usage);
 	EXPECT_EQ(cd.aspect, desc.aspect);
 
+	// frameOwner is preserved by Free: switching to a different frame index must NOT
+	// reclaim the freed slot (the freed slot's frameOwner is 0, not 1).
+	reg.Free(h2);
+	reg.SetFrameIndex(1u);
+	ImageHandle hOther = reg.Allocate(desc);
+	ASSERT_TRUE(hOther.IsValid());
+	EXPECT_NE(hOther.id, h.id); // creation rule, not reuse
+	EXPECT_EQ(reg.GetSlotCount(), 2u); // new slot appended
+
 	// Free performs no Vulkan calls: verify by checking the Image is still initialized
 	// after Free (before the reclaim).
+	reg.SetFrameIndex(0u);
 	ImageHandle h3 = reg.Allocate(MakeDepthDesc());
 	ASSERT_TRUE(h3.IsValid());
 	reg.Free(h3);
 	// After Free, GetSlotCount is unchanged and GetAllocatedCount decreased.
-	EXPECT_EQ(reg.GetAllocatedCount(), 1u); // only h2 remains allocated
-	EXPECT_EQ(reg.GetSlotCount(), 2u);
+	EXPECT_EQ(reg.GetAllocatedCount(), 1u); // only hOther remains allocated
+	EXPECT_EQ(reg.GetSlotCount(), 3u);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +445,10 @@ TEST(ImageRegistry, test_image_registry_get_returns_const_reference)
 	ImageHandle h = reg.Allocate(desc);
 	ASSERT_TRUE(h.IsValid());
 
+	// Snapshot the handle before any further allocations (which could grow the vector).
+	VkImage snapshotHandle = reg.Get(h).GetHandle();
+	VkImageView snapshotView = reg.Get(h).GetView();
+
 	const Image& ref = reg.Get(h);
 
 	// The reference must point to an initialized Image.
@@ -410,16 +463,23 @@ TEST(ImageRegistry, test_image_registry_get_returns_const_reference)
 	EXPECT_EQ(ext.width, desc.width);
 	EXPECT_EQ(ext.height, desc.height);
 
-	// Allocate a second slot (no growth beyond capacity assumed here; just verify
-	// the reference still holds after a second allocation that does NOT cause realloc
-	// beyond existing capacity — we cannot guarantee no realloc, so we just verify
-	// the API contract that Get is const and noexcept).
+	// noexcept check
 	static_assert(noexcept(reg.Get(h)), "Get must be noexcept");
 
-	// Get on the const registry must compile.
+	// Get on the const registry must compile and return the same Image.
 	const ImageRegistry& cReg = reg;
 	const Image& cRef = cReg.Get(h);
-	EXPECT_EQ(cRef.GetHandle(), ref.GetHandle());
+	EXPECT_EQ(cRef.GetHandle(), snapshotHandle);
+	EXPECT_EQ(cRef.GetView(), snapshotView);
+
+	// A Free followed by a reuse-rule Allocate (no growth) does not invalidate the
+	// underlying VkImage / VkImageView values, since the Image is not destroyed by Free.
+	reg.Free(h);
+	ImageHandle h2 = reg.Allocate(desc);
+	ASSERT_TRUE(h2.IsValid());
+	EXPECT_EQ(h2.id, h.id); // reuse
+	EXPECT_EQ(reg.Get(h2).GetHandle(), snapshotHandle);
+	EXPECT_EQ(reg.Get(h2).GetView(), snapshotView);
 }
 
 // ---------------------------------------------------------------------------
@@ -577,6 +637,90 @@ TEST(ImageRegistry, test_image_registry_observers)
 }
 
 // ---------------------------------------------------------------------------
+// image_registry_set_frame_index_partitions_slots
+// ---------------------------------------------------------------------------
+TEST(ImageRegistry, test_image_registry_set_frame_index_partitions_slots)
+{
+	// SetFrameIndex / GetFrameIndex work in any state (including before Initialize).
+	// Exercise the pre-Initialize behavior on a throwaway registry whose lifetime
+	// does not outlive the VulkanEnv Device created below.
+	{
+		ImageRegistry pre;
+		EXPECT_EQ(pre.GetFrameIndex(), 0u);
+		static_assert(noexcept(pre.GetFrameIndex()), "GetFrameIndex must be noexcept");
+
+		pre.SetFrameIndex(3u);
+		EXPECT_EQ(pre.GetFrameIndex(), 3u);
+
+		pre.SetFrameIndex(0u);
+		EXPECT_EQ(pre.GetFrameIndex(), 0u);
+
+		// Large / non-contiguous values are accepted without restriction.
+		pre.SetFrameIndex(0xDEADBEEFu);
+		EXPECT_EQ(pre.GetFrameIndex(), 0xDEADBEEFu);
+	}
+
+	VulkanEnv env;
+	if (!env.ready)
+		GTEST_SKIP() << "Vulkan not available";
+
+	// reg is declared AFTER env so its Images are destroyed BEFORE the Device.
+	ImageRegistry reg;
+	ASSERT_EQ(reg.Initialize(env.device), RenderError::None);
+
+	GraphImageDesc desc = MakeColorDesc();
+
+	// --- Frame 0 ---
+	reg.SetFrameIndex(0u);
+	ImageHandle h0 = reg.Allocate(desc);
+	ASSERT_TRUE(h0.IsValid());
+	EXPECT_EQ(reg.GetSlotCount(), 1u);
+
+	// --- Frame 1: same desc, different frame index → creation rule (no matching freed slot) ---
+	reg.SetFrameIndex(1u);
+	ImageHandle h1 = reg.Allocate(desc);
+	ASSERT_TRUE(h1.IsValid());
+	EXPECT_NE(h1.id, h0.id);
+	EXPECT_EQ(reg.GetSlotCount(), 2u); // second slot created for frame 1
+
+	// Free both slots.
+	reg.SetFrameIndex(0u);
+	reg.Free(h0);
+	reg.SetFrameIndex(1u);
+	reg.Free(h1);
+	EXPECT_EQ(reg.GetAllocatedCount(), 0u);
+	EXPECT_EQ(reg.GetSlotCount(), 2u);
+
+	// Reallocating under frame 1 must reclaim the frame-1 slot (h1), not the frame-0 slot (h0).
+	ImageHandle h1r = reg.Allocate(desc);
+	ASSERT_TRUE(h1r.IsValid());
+	EXPECT_EQ(h1r.id, h1.id);
+	EXPECT_EQ(reg.GetSlotCount(), 2u); // no new slot
+
+	// Reallocating under frame 0 must reclaim the frame-0 slot (h0).
+	reg.SetFrameIndex(0u);
+	ImageHandle h0r = reg.Allocate(desc);
+	ASSERT_TRUE(h0r.IsValid());
+	EXPECT_EQ(h0r.id, h0.id);
+	EXPECT_EQ(reg.GetSlotCount(), 2u); // still no new slot
+
+	// Calling SetFrameIndex with a value never seen before causes the next Allocate
+	// to take the creation rule (no freed slot tagged with that value).
+	reg.SetFrameIndex(99u);
+	ImageHandle h99 = reg.Allocate(desc);
+	ASSERT_TRUE(h99.IsValid());
+	EXPECT_EQ(reg.GetSlotCount(), 3u); // new slot for frame 99
+
+	// SetFrameIndex does not touch any slot or Image — slot count and allocated count
+	// are unchanged by SetFrameIndex alone.
+	uint32_t slotsBefore = reg.GetSlotCount();
+	uint32_t allocBefore = reg.GetAllocatedCount();
+	reg.SetFrameIndex(42u);
+	EXPECT_EQ(reg.GetSlotCount(), slotsBefore);
+	EXPECT_EQ(reg.GetAllocatedCount(), allocBefore);
+}
+
+// ---------------------------------------------------------------------------
 // image_registry_is_not_thread_safe_per_instance
 // ---------------------------------------------------------------------------
 // This semantic documents the absence of internal synchronization.
@@ -618,6 +762,8 @@ TEST(ImageRegistry, test_image_registry_is_not_thread_safe_per_instance)
 			if (!reg.IsAllocated(h))
 				++errors;
 			if (reg.GetUsage(h) != ResourceUsage::Undefined)
+				++errors;
+			if (reg.GetFrameIndex() != 0u)
 				++errors;
 		}
 	};
