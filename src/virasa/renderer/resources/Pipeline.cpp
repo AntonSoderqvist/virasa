@@ -76,6 +76,11 @@ void Pipeline::Bind(VkCommandBuffer cmd) const
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline);
 }
 
+void Pipeline::BindCompute(VkCommandBuffer cmd) const
+{
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _pipeline);
+}
+
 bool Pipeline::IsInitialized() const noexcept
 {
 	return _pipeline != VK_NULL_HANDLE;
@@ -94,6 +99,12 @@ PipelineBuilder& PipelineBuilder::SetVertexShader(const ShaderModule& module)
 PipelineBuilder& PipelineBuilder::SetFragmentShader(const ShaderModule& module)
 {
 	_fragmentShader = module.GetHandle();
+	return *this;
+}
+
+PipelineBuilder& PipelineBuilder::SetComputeShader(const ShaderModule& module)
+{
+	_computeShader = module.GetHandle();
 	return *this;
 }
 
@@ -241,9 +252,6 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 {
 	auto* logger = Logger::GetLogger("renderer");
 
-	// --- Pre-emptive cleanup of out_pipeline (always reset, even on validation failure) ---
-	out_pipeline.Cleanup();
-
 	// --- Validation ---
 	if (_vertexShader == VK_NULL_HANDLE)
 	{
@@ -261,6 +269,9 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 			"format nor a depth attachment format (at least one is required)");
 		return RenderError::PipelineCreateFailed;
 	}
+
+	// --- Pre-emptive cleanup of out_pipeline ---
+	out_pipeline.Cleanup();
 
 	VkDevice vkDevice = device.GetHandle();
 
@@ -501,6 +512,84 @@ RenderError PipelineBuilder::Build(const Device& device, Pipeline& out_pipeline)
 	{
 		LOG_ERROR(logger,
 			"PipelineBuilder::Build: vkCreateGraphicsPipelines failed with VkResult {}",
+			static_cast<int>(result));
+		vkDestroyPipelineLayout(vkDevice, pipelineLayout, nullptr);
+		return RenderError::PipelineCreateFailed;
+	}
+
+	// --- Assign into out_pipeline ---
+	out_pipeline._device = vkDevice;
+	out_pipeline._pipeline = vkPipeline;
+	out_pipeline._layout = pipelineLayout;
+
+	return RenderError::None;
+}
+
+RenderError PipelineBuilder::BuildCompute(const Device& device, Pipeline& out_pipeline)
+{
+	auto* logger = Logger::GetLogger("renderer");
+
+	// --- Validation ---
+	if (_computeShader == VK_NULL_HANDLE)
+	{
+		LOG_ERROR(logger,
+			"PipelineBuilder::BuildCompute: compute shader is VK_NULL_HANDLE (required)");
+		return RenderError::PipelineCreateFailed;
+	}
+
+	// --- Pre-emptive cleanup of out_pipeline ---
+	out_pipeline.Cleanup();
+
+	VkDevice vkDevice = device.GetHandle();
+
+	// --- Create pipeline layout ---
+	VkPipelineLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layoutInfo.pNext = nullptr;
+	layoutInfo.flags = 0;
+	layoutInfo.setLayoutCount = static_cast<uint32_t>(_descriptorSetLayouts.size());
+	layoutInfo.pSetLayouts =
+		_descriptorSetLayouts.empty() ? nullptr : _descriptorSetLayouts.data();
+	layoutInfo.pushConstantRangeCount = static_cast<uint32_t>(_pushConstantRanges.size());
+	layoutInfo.pPushConstantRanges =
+		_pushConstantRanges.empty() ? nullptr : _pushConstantRanges.data();
+
+	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+	VkResult result = vkCreatePipelineLayout(vkDevice, &layoutInfo, nullptr, &pipelineLayout);
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR(logger,
+			"PipelineBuilder::BuildCompute: vkCreatePipelineLayout failed with VkResult {}",
+			static_cast<int>(result));
+		return RenderError::PipelineLayoutCreateFailed;
+	}
+
+	// --- Compute pipeline create info ---
+	VkPipelineShaderStageCreateInfo computeStage{};
+	computeStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeStage.pNext = nullptr;
+	computeStage.flags = 0;
+	computeStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeStage.module = _computeShader;
+	computeStage.pName = "main";
+	computeStage.pSpecializationInfo = nullptr;
+
+	VkComputePipelineCreateInfo computeInfo{};
+	computeInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computeInfo.pNext = nullptr;
+	computeInfo.flags = 0;
+	computeInfo.stage = computeStage;
+	computeInfo.layout = pipelineLayout;
+	computeInfo.basePipelineHandle = VK_NULL_HANDLE;
+	computeInfo.basePipelineIndex = 0;
+
+	VkPipeline vkPipeline = VK_NULL_HANDLE;
+	result = vkCreateComputePipelines(
+		vkDevice, VK_NULL_HANDLE, 1, &computeInfo, nullptr, &vkPipeline);
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR(logger,
+			"PipelineBuilder::BuildCompute: vkCreateComputePipelines failed with VkResult {}",
 			static_cast<int>(result));
 		vkDestroyPipelineLayout(vkDevice, pipelineLayout, nullptr);
 		return RenderError::PipelineCreateFailed;

@@ -63,10 +63,16 @@ public:
 	[[nodiscard]] VkPipelineLayout GetLayout() const noexcept;
 
 	/**
-	 * @brief Records a vkCmdBindPipeline call into the given command buffer.
+	 * @brief Records a vkCmdBindPipeline call (graphics bind point) into the given command buffer.
 	 * @param cmd The command buffer to record into.
 	 */
 	void Bind(VkCommandBuffer cmd) const;
+
+	/**
+	 * @brief Records a vkCmdBindPipeline call (compute bind point) into the given command buffer.
+	 * @param cmd The command buffer to record into.
+	 */
+	void BindCompute(VkCommandBuffer cmd) const;
 
 	/**
 	 * @brief Returns true if this Pipeline owns a valid VkPipeline handle.
@@ -274,11 +280,18 @@ public:
 	PipelineBuilder& AddDynamicState(VkDynamicState state);
 
 	/**
+	 * @brief Sets the compute shader stage from a ShaderModule.
+	 * @param module The ShaderModule whose handle is stored.
+	 * @return *this for chaining.
+	 */
+	PipelineBuilder& SetComputeShader(const ShaderModule& module);
+
+	/**
 	 * @brief Creates the VkPipelineLayout and VkGraphicsPipeline, writing them into out_pipeline.
 	 *
-	 * Validates that a vertex shader and color format have been set. Pre-emptively cleans up
-	 * any prior state in out_pipeline. On failure, out_pipeline is left in the default-constructed
-	 * state.
+	 * Validates that a vertex shader and at least one attachment format have been set.
+	 * Pre-emptively cleans up any prior state in out_pipeline. On failure, out_pipeline is
+	 * left in the default-constructed state.
 	 *
 	 * @param device The Device to create Vulkan objects against.
 	 * @param out_pipeline The Pipeline to write results into.
@@ -286,10 +299,23 @@ public:
 	 */
 	[[nodiscard]] RenderError Build(const Device& device, Pipeline& out_pipeline);
 
+	/**
+	 * @brief Creates the VkPipelineLayout and VkComputePipeline, writing them into out_pipeline.
+	 *
+	 * Validates that a compute shader has been set. Pre-emptively cleans up any prior state
+	 * in out_pipeline. On failure, out_pipeline is left in the default-constructed state.
+	 *
+	 * @param device The Device to create Vulkan objects against.
+	 * @param out_pipeline The Pipeline to write results into.
+	 * @return RenderError::None on success, or a specific error code on failure.
+	 */
+	[[nodiscard]] RenderError BuildCompute(const Device& device, Pipeline& out_pipeline);
+
 private:
 	// Shader stages
 	VkShaderModule				_vertexShader		= VK_NULL_HANDLE;
 	VkShaderModule				_fragmentShader		= VK_NULL_HANDLE;
+	VkShaderModule				_computeShader		= VK_NULL_HANDLE;
 
 	// Vertex input
 	uint32_t				_vertexStride		= 0;

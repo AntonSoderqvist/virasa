@@ -1,0 +1,37 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+// Jump-flood seed pass. For each pixel of the outline mask, writes the
+// pixel's own coordinate into the jump-flood image as a seed where the mask
+// is covered (alpha > 0), and a negative sentinel elsewhere.
+//
+// Binding 2 is the bindless storage-image array; it is aliased here with two
+// format qualifiers (the descriptor type is format-agnostic VK_DESCRIPTOR_-
+// TYPE_STORAGE_IMAGE). storageMask reads the R8G8B8A8_UNORM mask;
+// storageJfa reads/writes the R32G32_SFLOAT seed-coordinate image.
+layout(set = 0, binding = 2, rgba8) uniform readonly image2D storageMask[];
+layout(set = 0, binding = 2, rg32f) uniform image2D storageJfa[];
+
+layout(push_constant) uniform PC {
+    uint extentX;
+    uint extentY;
+    uint srcSlot;   // unused by the seed pass
+    uint dstSlot;   // jump-flood image to seed
+    uint maskSlot;  // outline mask to read
+    int  stepSize;  // unused by the seed pass
+    uint pad0;
+    uint pad1;
+} pc;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(pc.extentX) || p.y >= int(pc.extentY)) {
+        return;
+    }
+
+    vec4 m = imageLoad(storageMask[nonuniformEXT(pc.maskSlot)], p);
+    vec2 seed = (m.a > 0.0) ? vec2(p) : vec2(-1.0, -1.0);
+    imageStore(storageJfa[nonuniformEXT(pc.dstSlot)], p, vec4(seed, 0.0, 0.0));
+}

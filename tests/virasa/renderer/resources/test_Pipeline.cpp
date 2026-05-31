@@ -1,5 +1,7 @@
+#include <atomic>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <thread>
 #include <vector>
 
 #include "virasa/core/Logger.h"
@@ -644,13 +646,20 @@ TEST(PipelineBuilder, test_pipeline_build_clears_out_pipeline_at_start)
 	EXPECT_NE(pipeline.GetHandle(), VK_NULL_HANDLE);
 
 	// Now build with a builder that will fail validation into the same
-	// pipeline — the pipeline must be left in default-constructed state.
+	// pipeline. Per pipeline_build_requires_vertex_shader_and_color_format,
+	// a validation failure returns PipelineCreateFailed "without modifying
+	// out_pipeline" — the pre-emptive Cleanup pinned by
+	// pipeline_build_clears_out_pipeline_at_start happens only AFTER
+	// validation passes. So the previously-built pipeline must be left
+	// intact (still initialized with its prior handles), not cleared.
+	const VkPipeline priorHandle = pipeline.GetHandle();
+	const VkPipelineLayout priorLayout = pipeline.GetLayout();
 	PipelineBuilder badBuilder; // no vertex shader, no color format
 	RenderError errBad = badBuilder.Build(ctx.device, pipeline);
 	EXPECT_EQ(errBad, RenderError::PipelineCreateFailed);
-	EXPECT_FALSE(pipeline.IsInitialized());
-	EXPECT_EQ(pipeline.GetHandle(), VK_NULL_HANDLE);
-	EXPECT_EQ(pipeline.GetLayout(), VK_NULL_HANDLE);
+	EXPECT_TRUE(pipeline.IsInitialized());
+	EXPECT_EQ(pipeline.GetHandle(), priorHandle);
+	EXPECT_EQ(pipeline.GetLayout(), priorLayout);
 }
 
 // ---------------------------------------------------------------------------
@@ -1374,6 +1383,164 @@ TEST(Pipeline, test_is_initialized_reflects_owned_pipeline)
 	// Moved-to: initialized.
 	EXPECT_TRUE(moved.IsInitialized());
 	EXPECT_EQ(moved.IsInitialized(), moved.GetHandle() != VK_NULL_HANDLE);
+}
+
+// ---------------------------------------------------------------------------
+// pipeline_builder_set_compute_shader
+// ---------------------------------------------------------------------------
+TEST(PipelineBuilder, test_pipeline_builder_set_compute_shader)
+{
+	// SetComputeShader returns *this for chaining.
+	PipelineBuilder builder;
+	ShaderModule dummyModule; // default-constructed, handle = VK_NULL_HANDLE
+
+	PipelineBuilder& ref = builder.SetComputeShader(dummyModule);
+	EXPECT_EQ(&ref, &builder);
+
+	// A default-constructed PipelineBuilder has compute shader = VK_NULL_HANDLE.
+	// BuildCompute must fail validation without a real compute shader.
+	Device dummyDevice;
+	Pipeline out;
+	RenderError err = builder.BuildCompute(dummyDevice, out);
+	EXPECT_EQ(err, RenderError::PipelineCreateFailed);
+	EXPECT_FALSE(out.IsInitialized());
+	EXPECT_EQ(out.GetHandle(), VK_NULL_HANDLE);
+	EXPECT_EQ(out.GetLayout(), VK_NULL_HANDLE);
+}
+
+// ---------------------------------------------------------------------------
+// pipeline_buildcompute_creates_compute_pipeline
+// ---------------------------------------------------------------------------
+
+// Minimal compute SPIR-V: a no-op compute shader with a "main" entry point.
+// Compiled from:
+//   #version 450
+//   layout(local_size_x = 1) in;
+//   void main() {}
+// using: glslc -fshader-stage=comp -o comp.spv comp.glsl
+static const uint32_t kMinimalCompSpirv[] = {
+	0x07230203, 0x00010000, 0x000d000b, 0x00000006, 0x00000000,
+	0x00020011, 0x00000001, 0x0006000b, 0x00000001, 0x4c534c47,
+	0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000,
+	0x00000001, 0x0005000f, 0x00000005, 0x00000004, 0x6e69616d,
+	0x00000000, 0x00060010, 0x00000004, 0x00000011, 0x00000001,
+	0x00000001, 0x00000001, 0x00030003, 0x00000002, 0x000001c2,
+	0x00040005, 0x00000004, 0x6e69616d, 0x00000000, 0x00020013,
+	0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00050036,
+	0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8,
+	0x00000005, 0x000100fd, 0x00010038
+};
+
+TEST(PipelineBuilder, test_pipeline_buildcompute_creates_compute_pipeline)
+{
+	VulkanContext ctx;
+	if (!ctx.valid)
+	{
+		GTEST_SKIP() << "Vulkan not available";
+	}
+
+	// Validation failure: no compute shader set.
+	{
+		PipelineBuilder builder;
+		Pipeline out;
+		RenderError err = builder.BuildCompute(ctx.device, out);
+		EXPECT_EQ(err, RenderError::PipelineCreateFailed);
+		EXPECT_FALSE(out.IsInitialized());
+	}
+
+	// Write compute SPIR-V to a temp file.
+	std::string csPath = WriteTempSpirv(
+		kMinimalCompSpirv, sizeof(kMinimalCompSpirv) / sizeof(uint32_t), "comp");
+	ASSERT_FALSE(csPath.empty());
+
+	ShaderModule cs;
+	ASSERT_EQ(cs.Initialize(ctx.device, csPath.c_str()), RenderError::None);
+
+	// Successful compute pipeline build.
+	PipelineBuilder builder;
+	builder.SetComputeShader(cs)
+		.AddPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, 16);
+
+	Pipeline pipeline;
+	RenderError err = builder.BuildCompute(ctx.device, pipeline);
+	EXPECT_EQ(err, RenderError::None);
+	EXPECT_TRUE(pipeline.IsInitialized());
+	EXPECT_NE(pipeline.GetHandle(), VK_NULL_HANDLE);
+	EXPECT_NE(pipeline.GetLayout(), VK_NULL_HANDLE);
+
+	// BuildCompute does not consume the builder; a second call succeeds.
+	Pipeline pipeline2;
+	RenderError err2 = builder.BuildCompute(ctx.device, pipeline2);
+	EXPECT_EQ(err2, RenderError::None);
+	EXPECT_TRUE(pipeline2.IsInitialized());
+
+	// Pre-emptive cleanup: build into an already-initialized pipeline.
+	RenderError err3 = builder.BuildCompute(ctx.device, pipeline);
+	EXPECT_EQ(err3, RenderError::None);
+	EXPECT_TRUE(pipeline.IsInitialized());
+
+	// Graphics Build ignores the compute shader entirely (no crash).
+	// A builder with only a compute shader set has no vertex shader → Build fails validation.
+	Pipeline gfxOut;
+	RenderError gfxErr = builder.Build(ctx.device, gfxOut);
+	EXPECT_EQ(gfxErr, RenderError::PipelineCreateFailed);
+	EXPECT_FALSE(gfxOut.IsInitialized());
+}
+
+// ---------------------------------------------------------------------------
+// pipeline_bindcompute_calls_vk_cmd_bind_pipeline_compute
+// ---------------------------------------------------------------------------
+TEST(Pipeline, test_pipeline_bindcompute_calls_vk_cmd_bind_pipeline_compute)
+{
+	VulkanContext ctx;
+	if (!ctx.valid)
+	{
+		GTEST_SKIP() << "Vulkan not available";
+	}
+
+	std::string csPath = WriteTempSpirv(
+		kMinimalCompSpirv, sizeof(kMinimalCompSpirv) / sizeof(uint32_t), "bindcomp");
+	ASSERT_FALSE(csPath.empty());
+
+	ShaderModule cs;
+	ASSERT_EQ(cs.Initialize(ctx.device, csPath.c_str()), RenderError::None);
+
+	PipelineBuilder builder;
+	builder.SetComputeShader(cs);
+
+	Pipeline pipeline;
+	ASSERT_EQ(builder.BuildCompute(ctx.device, pipeline), RenderError::None);
+	ASSERT_TRUE(pipeline.IsInitialized());
+
+	// Allocate a command buffer and record BindCompute.
+	VkCommandPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	poolInfo.queueFamilyIndex = ctx.device.GetGraphicsQueueFamilyIndex();
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+
+	VkCommandPool pool = VK_NULL_HANDLE;
+	ASSERT_EQ(vkCreateCommandPool(ctx.device.GetHandle(), &poolInfo, nullptr, &pool), VK_SUCCESS);
+
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = pool;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = 1;
+
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	ASSERT_EQ(vkAllocateCommandBuffers(ctx.device.GetHandle(), &allocInfo, &cmd), VK_SUCCESS);
+
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	ASSERT_EQ(vkBeginCommandBuffer(cmd, &beginInfo), VK_SUCCESS);
+
+	// BindCompute must not crash and must record the compute pipeline bind.
+	pipeline.BindCompute(cmd);
+
+	ASSERT_EQ(vkEndCommandBuffer(cmd), VK_SUCCESS);
+
+	vkDestroyCommandPool(ctx.device.GetHandle(), pool, nullptr);
 }
 
 // ---------------------------------------------------------------------------

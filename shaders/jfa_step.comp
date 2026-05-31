@@ -1,0 +1,55 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+// Jump-flood step pass. For each pixel, examines its current nearest seed and
+// the nearest seeds of the eight neighbours offset by stepSize, and writes the
+// closest of them to the destination image. srcSlot and dstSlot are distinct
+// (the caller ping-pongs the two jump-flood images), so reading src while
+// writing dst within one dispatch is hazard-free. After the final step
+// (stepSize 1) every pixel holds the coordinate of its nearest silhouette
+// seed.
+layout(set = 0, binding = 2, rg32f) uniform image2D storageJfa[];
+
+layout(push_constant) uniform PC {
+    uint extentX;
+    uint extentY;
+    uint srcSlot;   // jump-flood image to read
+    uint dstSlot;   // jump-flood image to write
+    uint maskSlot;  // unused by the step pass
+    int  stepSize;  // jump distance for this step
+    uint pad0;
+    uint pad1;
+} pc;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+void main() {
+    ivec2 ext = ivec2(pc.extentX, pc.extentY);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= ext.x || p.y >= ext.y) {
+        return;
+    }
+
+    vec2 best = vec2(-1.0, -1.0);
+    float bestDist = 3.4e38;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            ivec2 q = p + ivec2(dx, dy) * pc.stepSize;
+            if (q.x < 0 || q.y < 0 || q.x >= ext.x || q.y >= ext.y) {
+                continue;
+            }
+            vec2 s = imageLoad(storageJfa[nonuniformEXT(pc.srcSlot)], q).rg;
+            if (s.x < 0.0) {
+                continue; // no seed has propagated to this neighbour yet
+            }
+            float d = distance(vec2(p), s);
+            if (d < bestDist) {
+                bestDist = d;
+                best = s;
+            }
+        }
+    }
+
+    imageStore(storageJfa[nonuniformEXT(pc.dstSlot)], p, vec4(best, 0.0, 0.0));
+}

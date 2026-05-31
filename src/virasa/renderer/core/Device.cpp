@@ -94,6 +94,8 @@ bool EvaluateHardRequirements(
 	// Hard requirement 6: descriptor indexing sub-features
 	if (descriptorIndexingFeatures.descriptorBindingPartiallyBound != VK_TRUE ||
 		descriptorIndexingFeatures.descriptorBindingSampledImageUpdateAfterBind != VK_TRUE ||
+		descriptorIndexingFeatures.descriptorBindingStorageImageUpdateAfterBind != VK_TRUE ||
+		descriptorIndexingFeatures.shaderStorageImageArrayNonUniformIndexing != VK_TRUE ||
 		descriptorIndexingFeatures.runtimeDescriptorArray != VK_TRUE)
 	{
 		return false;
@@ -383,8 +385,10 @@ RenderError Device::Initialize(const Instance& instance, VkSurfaceKHR surface)
 	vk12Features.descriptorIndexing = VK_TRUE;
 	vk12Features.descriptorBindingPartiallyBound = VK_TRUE;
 	vk12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+	vk12Features.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
 	vk12Features.runtimeDescriptorArray = VK_TRUE;
 	vk12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+	vk12Features.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
 	vk12Features.scalarBlockLayout = VK_TRUE;
 
 	VkPhysicalDeviceFeatures2 enabledFeatures2 = {};

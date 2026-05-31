@@ -173,6 +173,18 @@ public:
 	virasa::Pipeline _blendPipeline = {};
 	virasa::Pipeline _blendDoubleSidedPipeline = {};
 	virasa::Pipeline _shadowPipeline = {};
+	virasa::Pipeline _maskPipeline = {};
+	virasa::Pipeline _jfaSeedPipeline = {};
+	virasa::Pipeline _jfaStepPipeline = {};
+	virasa::Pipeline _outlineCompositePipeline = {};
+
+	virasa::ShaderModule _outlineMaskFragmentShader = {};
+	virasa::ShaderModule _fullscreenVertexShader = {};
+	virasa::ShaderModule _outlineCompositeFragmentShader = {};
+	virasa::ShaderModule _jfaSeedShader = {};
+	virasa::ShaderModule _jfaStepShader = {};
+
+	virasa::Sampler _outlineSampler = {};
 
 	virasa::renderer::graph::ImageRegistry _imageRegistry = {};
 	virasa::renderer::graph::BufferRegistry _bufferRegistry = {};
@@ -190,6 +202,8 @@ public:
 
 	std::unordered_map<VkImageView, uint32_t> _sceneSlotCache = {};
 	std::unordered_map<VkImageView, uint32_t> _shadowSlotCache = {};
+	std::unordered_map<VkImageView, uint32_t> _storageSlotCache = {};
+	std::unordered_map<VkImageView, uint32_t> _outlineSlotCache = {};
 	std::vector<std::pair<virasa::SamplerConfig, virasa::Sampler>> _samplerCache = {};
 	std::vector<virasa::Image> _textureImages = {};
 

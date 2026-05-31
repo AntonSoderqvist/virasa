@@ -209,9 +209,11 @@ void main() {
 
     lit += mat.factors.emissiveFactor;
 
-    // Highlight overlay: mix the shaded color toward the highlight color by
-    // clamp(intensity). w == 0 leaves the surface untouched (not highlighted).
-    lit = mix(lit, pc.highlight.rgb, clamp(pc.highlight.w, 0.0, 1.0));
+    // Highlight is rendered as a border by the outline-highlight subsystem
+    // (a separate mask + jump-flood + composite pass), not as a surface tint.
+    // The highlight push-constant is consumed by the outline mask pass; the
+    // forward shading here is identical whether or not the entity is
+    // highlighted.
 
     outColor = vec4(lit, outAlpha);
 }

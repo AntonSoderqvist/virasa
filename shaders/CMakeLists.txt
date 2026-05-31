@@ -18,6 +18,11 @@ set(SHADERS
     ui_text.frag
     ui_image_quad.vert
     ui_image_quad.frag
+    fullscreen.vert
+    outline_mask.frag
+    outline_composite.frag
+    jfa_seed.comp
+    jfa_step.comp
 )
 
 set(SPV_FILES)

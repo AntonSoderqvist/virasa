@@ -15,11 +15,12 @@ namespace virasa
  * @brief Manages a bindless descriptor array of combined image samplers.
  *
  * BindlessTextureArray owns a VkDescriptorPool, VkDescriptorSetLayout, and
- * VkDescriptorSet that back a bindless texture registry (binding 0) and a
- * bindless shadow-map registry (binding 1). Textures and shadow maps are
+ * VkDescriptorSet that back a bindless texture registry (binding 0), a
+ * bindless shadow-map registry (binding 1), and a bindless storage-image
+ * registry (binding 2). Textures, shadow maps, and storage images are
  * registered and unregistered by independent slot indices. The single
  * VkDescriptorSet is intended to be bound once per frame at set index 0 and
- * remain bound for all draw calls in that frame.
+ * remain bound for all draw calls and compute dispatches in that frame.
  *
  * BindlessTextureArray borrows (does not own) the VkDevice it is initialized
  * against; the Device must outlive any initialized BindlessTextureArray
@@ -84,14 +85,27 @@ class BindlessTextureArray final
 	void UnregisterShadowMap(uint32_t slot);
 
 	/**
+	 * @brief Claims a free storage-image slot and writes the image_view into binding 2.
+	 * @param image_view A storage-capable VkImageView (created with VK_IMAGE_USAGE_STORAGE_BIT).
+	 * @return The claimed storage-image slot index, or UINT32_MAX if no slots are available.
+	 */
+	[[nodiscard]] uint32_t RegisterStorageImage(VkImageView image_view);
+
+	/**
+	 * @brief Returns a previously registered storage-image slot to the free-slot list.
+	 * @param slot A slot index previously returned by RegisterStorageImage.
+	 */
+	void UnregisterStorageImage(uint32_t slot);
+
+	/**
 	 * @brief Returns the owned VkDescriptorSet, or VK_NULL_HANDLE if not initialized.
 	 * @return The VkDescriptorSet.
 	 */
 	[[nodiscard]] VkDescriptorSet GetDescriptorSet() const noexcept;
 
 	/**
-	 * @brief Returns the owned VkDescriptorSetLayout (containing both binding 0 and binding 1),
-	 *        or VK_NULL_HANDLE if not initialized.
+	 * @brief Returns the owned VkDescriptorSetLayout (containing binding 0, binding 1, and
+	 *        binding 2), or VK_NULL_HANDLE if not initialized.
 	 * @return The VkDescriptorSetLayout.
 	 */
 	[[nodiscard]] VkDescriptorSetLayout GetLayout() const noexcept;
@@ -109,6 +123,12 @@ class BindlessTextureArray final
 	[[nodiscard]] uint32_t GetMaxShadowMaps() const noexcept;
 
 	/**
+	 * @brief Returns kMaxStorageImages when initialized, or 0 if not initialized.
+	 * @return The maximum number of storage-image slots.
+	 */
+	[[nodiscard]] uint32_t GetMaxStorageImages() const noexcept;
+
+	/**
 	 * @brief Returns true if and only if this BindlessTextureArray owns a VkDescriptorSet.
 	 * @return True if initialized.
 	 */
@@ -124,10 +144,14 @@ class BindlessTextureArray final
 	uint32_t _maxTextures = 0;
 	std::vector<uint32_t> _freeSlots;
 	std::vector<uint32_t> _shadowFreeSlots;
+	std::vector<uint32_t> _storageFreeSlots;
 };
 
 /// @brief Fixed compile-time capacity of the shadow-map slot space (binding 1).
 inline constexpr uint32_t kMaxShadowMaps = 32;
+
+/// @brief Fixed compile-time capacity of the storage-image slot space (binding 2).
+inline constexpr uint32_t kMaxStorageImages = 32;
 
 } // namespace virasa
 

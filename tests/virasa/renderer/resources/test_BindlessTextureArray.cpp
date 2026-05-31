@@ -86,6 +86,7 @@ TEST(BindlessTextureArray, test_default_constructed_state)
 	EXPECT_EQ(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), 0u);
 	EXPECT_EQ(bta.GetMaxShadowMaps(), 0u);
+	EXPECT_EQ(bta.GetMaxStorageImages(), 0u);
 	EXPECT_FALSE(bta.IsInitialized());
 }
 
@@ -131,12 +132,14 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 	EXPECT_EQ(dst.GetLayout(), srcLayout);
 	EXPECT_EQ(dst.GetMaxTextures(), 4u);
 	EXPECT_EQ(dst.GetMaxShadowMaps(), 32u);
+	EXPECT_EQ(dst.GetMaxStorageImages(), 32u);
 	EXPECT_TRUE(dst.IsInitialized());
 
 	// src is in default-constructed-like state
 	EXPECT_EQ(src.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_EQ(src.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(src.GetMaxShadowMaps(), 0u);
+	EXPECT_EQ(src.GetMaxStorageImages(), 0u);
 	EXPECT_FALSE(src.IsInitialized());
 
 	// Move-assign: dst2 already has handles; move-assign from dst should tear down dst2's handles
@@ -150,12 +153,14 @@ TEST(BindlessTextureArray, test_is_raii_movable_non_copyable)
 	EXPECT_EQ(dst2.GetDescriptorSet(), srcSet);
 	EXPECT_EQ(dst2.GetLayout(), srcLayout);
 	EXPECT_EQ(dst2.GetMaxShadowMaps(), 32u);
+	EXPECT_EQ(dst2.GetMaxStorageImages(), 32u);
 	EXPECT_TRUE(dst2.IsInitialized());
 
 	// dst is now in default-constructed-like state
 	EXPECT_EQ(dst.GetDescriptorSet(), VK_NULL_HANDLE);
 	EXPECT_EQ(dst.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(dst.GetMaxShadowMaps(), 0u);
+	EXPECT_EQ(dst.GetMaxStorageImages(), 0u);
 	EXPECT_FALSE(dst.IsInitialized());
 
 	// Destroying a moved-from object is well-defined (no crash)
@@ -186,6 +191,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures);
 	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
+	EXPECT_EQ(bta.GetMaxStorageImages(), 32u);
 
 	// Re-initialization: should tear down prior resources and succeed again.
 	VkDescriptorSet firstSet = bta.GetDescriptorSet();
@@ -198,6 +204,7 @@ TEST(BindlessTextureArray, test_initialize_creates_pool_layout_and_set)
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 	EXPECT_EQ(bta.GetMaxTextures(), kMaxTextures * 2u);
 	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
+	EXPECT_EQ(bta.GetMaxStorageImages(), 32u);
 	// After re-init the handles are new (old pool was destroyed; set handle may differ)
 	// We can only assert they are non-null; handle values are implementation-defined.
 	(void)firstSet;
@@ -502,8 +509,154 @@ TEST(BindlessTextureArray, test_register_and_unregister)
 	uint32_t texOverflowAfterSmOp = bta.RegisterTexture(imageView, sampler);
 	EXPECT_EQ(texOverflowAfterSmOp, UINT32_MAX);
 
+	// --- RegisterStorageImage / UnregisterStorageImage (binding 2, kMaxStorageImages = 32) ---
+	// Create a storage-capable image + view for storage-image tests.
+	VkImageCreateInfo storageImgInfo{};
+	storageImgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	storageImgInfo.imageType = VK_IMAGE_TYPE_2D;
+	storageImgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+	storageImgInfo.extent = {1, 1, 1};
+	storageImgInfo.mipLevels = 1;
+	storageImgInfo.arrayLayers = 1;
+	storageImgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	storageImgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	storageImgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	storageImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	storageImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	VkImage storageImage = VK_NULL_HANDLE;
+	if (vkCreateImage(vkDev, &storageImgInfo, nullptr, &storageImage) != VK_SUCCESS)
+	{
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, cmpSampler, nullptr);
+		vkDestroyImageView(vkDev, depthView, nullptr);
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not create storage VkImage";
+	}
+
+	VkMemoryRequirements storageMemReqs{};
+	vkGetImageMemoryRequirements(vkDev, storageImage, &storageMemReqs);
+	uint32_t storageMemTypeIndex = UINT32_MAX;
+	for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+	{
+		if ((storageMemReqs.memoryTypeBits & (1u << i)) &&
+			(memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+		{
+			storageMemTypeIndex = i;
+			break;
+		}
+	}
+
+	if (storageMemTypeIndex == UINT32_MAX)
+	{
+		vkDestroyImage(vkDev, storageImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, cmpSampler, nullptr);
+		vkDestroyImageView(vkDev, depthView, nullptr);
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "No suitable memory type for storage image";
+	}
+
+	VkMemoryAllocateInfo storageAllocInfo{};
+	storageAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	storageAllocInfo.allocationSize = storageMemReqs.size;
+	storageAllocInfo.memoryTypeIndex = storageMemTypeIndex;
+
+	VkDeviceMemory storageMem = VK_NULL_HANDLE;
+	if (vkAllocateMemory(vkDev, &storageAllocInfo, nullptr, &storageMem) != VK_SUCCESS)
+	{
+		vkDestroyImage(vkDev, storageImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, cmpSampler, nullptr);
+		vkDestroyImageView(vkDev, depthView, nullptr);
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not allocate memory for storage image";
+	}
+	vkBindImageMemory(vkDev, storageImage, storageMem, 0);
+
+	VkImageViewCreateInfo storageViewInfo{};
+	storageViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	storageViewInfo.image = storageImage;
+	storageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	storageViewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+	storageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	storageViewInfo.subresourceRange.levelCount = 1;
+	storageViewInfo.subresourceRange.layerCount = 1;
+
+	VkImageView storageView = VK_NULL_HANDLE;
+	if (vkCreateImageView(vkDev, &storageViewInfo, nullptr, &storageView) != VK_SUCCESS)
+	{
+		vkFreeMemory(vkDev, storageMem, nullptr);
+		vkDestroyImage(vkDev, storageImage, nullptr);
+		ctx.device.WaitIdle();
+		vkDestroySampler(vkDev, cmpSampler, nullptr);
+		vkDestroyImageView(vkDev, depthView, nullptr);
+		vkFreeMemory(vkDev, depthMem, nullptr);
+		vkDestroyImage(vkDev, depthImage, nullptr);
+		vkDestroySampler(vkDev, sampler, nullptr);
+		vkDestroyImageView(vkDev, imageView, nullptr);
+		vkFreeMemory(vkDev, imageMem, nullptr);
+		vkDestroyImage(vkDev, image, nullptr);
+		GTEST_SKIP() << "Could not create storage VkImageView";
+	}
+
+	// RegisterStorageImage returns a valid slot in [0, 32).
+	uint32_t siSlot0 = bta.RegisterStorageImage(storageView);
+	EXPECT_NE(siSlot0, UINT32_MAX);
+	EXPECT_LT(siSlot0, 32u);
+
+	uint32_t siSlot1 = bta.RegisterStorageImage(storageView);
+	EXPECT_NE(siSlot1, UINT32_MAX);
+	EXPECT_LT(siSlot1, 32u);
+	EXPECT_NE(siSlot1, siSlot0); // distinct slots
+
+	// Exhaust the remaining 30 storage-image slots.
+	for (uint32_t i = 2; i < 32u; ++i)
+	{
+		uint32_t s = bta.RegisterStorageImage(storageView);
+		EXPECT_NE(s, UINT32_MAX);
+		EXPECT_LT(s, 32u);
+	}
+
+	// All 32 storage-image slots exhausted; next call must return UINT32_MAX.
+	uint32_t siOverflow = bta.RegisterStorageImage(storageView);
+	EXPECT_EQ(siOverflow, UINT32_MAX);
+
+	// UnregisterStorageImage and re-register.
+	bta.UnregisterStorageImage(siSlot1);
+	uint32_t siReused = bta.RegisterStorageImage(storageView);
+	EXPECT_EQ(siReused, siSlot1);
+
+	// Storage-image slot space is independent of texture and shadow-map slot spaces.
+	// Texture slots are still fully occupied; overflow must still be UINT32_MAX.
+	uint32_t texOverflowAfterSiOp = bta.RegisterTexture(imageView, sampler);
+	EXPECT_EQ(texOverflowAfterSiOp, UINT32_MAX);
+
+	// Shadow-map slots are still fully occupied (we re-filled smSlot1 above);
+	// overflow must still be UINT32_MAX.
+	uint32_t smOverflowAfterSiOp = bta.RegisterShadowMap(depthView, cmpSampler);
+	EXPECT_EQ(smOverflowAfterSiOp, UINT32_MAX);
+
 	// Clean up Vulkan objects (bta destructor handles descriptor pool/layout).
 	ctx.device.WaitIdle();
+	vkDestroyImageView(vkDev, storageView, nullptr);
+	vkFreeMemory(vkDev, storageMem, nullptr);
+	vkDestroyImage(vkDev, storageImage, nullptr);
 	vkDestroySampler(vkDev, cmpSampler, nullptr);
 	vkDestroyImageView(vkDev, depthView, nullptr);
 	vkFreeMemory(vkDev, depthMem, nullptr);
@@ -526,6 +679,7 @@ TEST(BindlessTextureArray, test_observers)
 		EXPECT_EQ(bta.GetLayout(), VK_NULL_HANDLE);
 		EXPECT_EQ(bta.GetMaxTextures(), 0u);
 		EXPECT_EQ(bta.GetMaxShadowMaps(), 0u);
+		EXPECT_EQ(bta.GetMaxStorageImages(), 0u);
 		EXPECT_FALSE(bta.IsInitialized());
 		EXPECT_EQ(bta.IsInitialized(), bta.GetDescriptorSet() != VK_NULL_HANDLE);
 	}
@@ -546,9 +700,11 @@ TEST(BindlessTextureArray, test_observers)
 	EXPECT_EQ(bta.GetMaxTextures(), kMax);
 	// kMaxShadowMaps is the fixed constant 32.
 	EXPECT_EQ(bta.GetMaxShadowMaps(), 32u);
+	// kMaxStorageImages is the fixed constant 32.
+	EXPECT_EQ(bta.GetMaxStorageImages(), 32u);
 	EXPECT_TRUE(bta.IsInitialized());
 	EXPECT_EQ(bta.IsInitialized(), bta.GetDescriptorSet() != VK_NULL_HANDLE);
-	// GetLayout returns a single layout containing both binding 0 and binding 1.
+	// GetLayout returns a single layout containing binding 0, binding 1, and binding 2.
 	EXPECT_NE(bta.GetLayout(), VK_NULL_HANDLE);
 
 	ctx.device.WaitIdle();

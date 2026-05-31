@@ -19,7 +19,8 @@ BindlessTextureArray::BindlessTextureArray(BindlessTextureArray&& other) noexcep
     : _device(other._device), _pool(other._pool), _layout(other._layout),
 	_descriptorSet(other._descriptorSet), _maxTextures(other._maxTextures),
 	_freeSlots(std::move(other._freeSlots)),
-	_shadowFreeSlots(std::move(other._shadowFreeSlots))
+	_shadowFreeSlots(std::move(other._shadowFreeSlots)),
+	_storageFreeSlots(std::move(other._storageFreeSlots))
 {
 	other._device = VK_NULL_HANDLE;
 	other._pool = VK_NULL_HANDLE;
@@ -41,6 +42,7 @@ BindlessTextureArray& BindlessTextureArray::operator=(BindlessTextureArray&& oth
 		_maxTextures = other._maxTextures;
 		_freeSlots = std::move(other._freeSlots);
 		_shadowFreeSlots = std::move(other._shadowFreeSlots);
+		_storageFreeSlots = std::move(other._storageFreeSlots);
 
 		other._device = VK_NULL_HANDLE;
 		other._pool = VK_NULL_HANDLE;
@@ -73,6 +75,7 @@ void BindlessTextureArray::Teardown()
 	_maxTextures = 0;
 	_freeSlots.clear();
 	_shadowFreeSlots.clear();
+	_storageFreeSlots.clear();
 }
 
 RenderError BindlessTextureArray::Initialize(const Device& device, uint32_t max_textures)
@@ -84,16 +87,18 @@ RenderError BindlessTextureArray::Initialize(const Device& device, uint32_t max_
 	VkDevice vkDevice = device.GetHandle();
 
 	// Step 1: Create descriptor pool.
-	VkDescriptorPoolSize poolSize{};
-	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	poolSize.descriptorCount = max_textures + kMaxShadowMaps;
+	VkDescriptorPoolSize poolSizes[2]{};
+	poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[0].descriptorCount = max_textures + kMaxShadowMaps;
+	poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	poolSizes[1].descriptorCount = kMaxStorageImages;
 
 	VkDescriptorPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 	poolInfo.maxSets = 1;
-	poolInfo.poolSizeCount = 1;
-	poolInfo.pPoolSizes = &poolSize;
+	poolInfo.poolSizeCount = 2;
+	poolInfo.pPoolSizes = poolSizes;
 
 	VkDescriptorPool pool = VK_NULL_HANDLE;
 	VkResult result = vkCreateDescriptorPool(vkDevice, &poolInfo, nullptr, &pool);
@@ -105,8 +110,8 @@ RenderError BindlessTextureArray::Initialize(const Device& device, uint32_t max_
 		return RenderError::DescriptorPoolCreateFailed;
 	}
 
-	// Step 2: Create descriptor set layout with two bindings.
-	VkDescriptorSetLayoutBinding bindings[2]{};
+	// Step 2: Create descriptor set layout with three bindings.
+	VkDescriptorSetLayoutBinding bindings[3]{};
 	// Binding 0: texture array
 	bindings[0].binding = 0;
 	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -119,22 +124,29 @@ RenderError BindlessTextureArray::Initialize(const Device& device, uint32_t max_
 	bindings[1].descriptorCount = kMaxShadowMaps;
 	bindings[1].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
 	bindings[1].pImmutableSamplers = nullptr;
+	// Binding 2: storage-image array
+	bindings[2].binding = 2;
+	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	bindings[2].descriptorCount = kMaxStorageImages;
+	bindings[2].stageFlags = VK_SHADER_STAGE_ALL;
+	bindings[2].pImmutableSamplers = nullptr;
 
-	VkDescriptorBindingFlags bindingFlagsArr[2] = {
+	VkDescriptorBindingFlags bindingFlagsArr[3] = {
+		VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
 		VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
 		VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
 	};
 
 	VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{};
 	bindingFlagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-	bindingFlagsInfo.bindingCount = 2;
+	bindingFlagsInfo.bindingCount = 3;
 	bindingFlagsInfo.pBindingFlags = bindingFlagsArr;
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.pNext = &bindingFlagsInfo;
 	layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-	layoutInfo.bindingCount = 2;
+	layoutInfo.bindingCount = 3;
 	layoutInfo.pBindings = bindings;
 
 	VkDescriptorSetLayout layout = VK_NULL_HANDLE;
@@ -182,6 +194,13 @@ RenderError BindlessTextureArray::Initialize(const Device& device, uint32_t max_
 	for (uint32_t i = kMaxShadowMaps; i > 0; --i)
 	{
 		_shadowFreeSlots.push_back(i - 1);
+	}
+
+	_storageFreeSlots.clear();
+	_storageFreeSlots.reserve(kMaxStorageImages);
+	for (uint32_t i = kMaxStorageImages; i > 0; --i)
+	{
+		_storageFreeSlots.push_back(i - 1);
 	}
 
 	_device = vkDevice;
@@ -271,6 +290,45 @@ void BindlessTextureArray::UnregisterShadowMap(uint32_t slot)
 	_shadowFreeSlots.push_back(slot);
 }
 
+uint32_t BindlessTextureArray::RegisterStorageImage(VkImageView image_view)
+{
+	if (_storageFreeSlots.empty())
+	{
+		auto* log = Logger::GetLogger("renderer");
+		LOG_ERROR(log,
+			"BindlessTextureArray::RegisterStorageImage: no free storage-image slots available "
+			"(kMaxStorageImages={})",
+			kMaxStorageImages);
+		return UINT32_MAX;
+	}
+
+	uint32_t slot = _storageFreeSlots.back();
+	_storageFreeSlots.pop_back();
+
+	VkDescriptorImageInfo imageInfo{};
+	imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imageInfo.imageView = image_view;
+	imageInfo.sampler = VK_NULL_HANDLE;
+
+	VkWriteDescriptorSet write{};
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = _descriptorSet;
+	write.dstBinding = 2;
+	write.dstArrayElement = slot;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	write.pImageInfo = &imageInfo;
+
+	vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
+
+	return slot;
+}
+
+void BindlessTextureArray::UnregisterStorageImage(uint32_t slot)
+{
+	_storageFreeSlots.push_back(slot);
+}
+
 VkDescriptorSet BindlessTextureArray::GetDescriptorSet() const noexcept
 {
 	return _descriptorSet;
@@ -291,6 +349,13 @@ uint32_t BindlessTextureArray::GetMaxShadowMaps() const noexcept
 	if (_descriptorSet == VK_NULL_HANDLE)
 		return 0;
 	return kMaxShadowMaps;
+}
+
+uint32_t BindlessTextureArray::GetMaxStorageImages() const noexcept
+{
+	if (_descriptorSet == VK_NULL_HANDLE)
+		return 0;
+	return kMaxStorageImages;
 }
 
 bool BindlessTextureArray::IsInitialized() const noexcept

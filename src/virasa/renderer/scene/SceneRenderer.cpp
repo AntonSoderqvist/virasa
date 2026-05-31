@@ -257,6 +257,39 @@ constexpr uint32_t kMaxShadowMaps = 8u;
 constexpr float kShadowDepthBias = 0.0015f;
 constexpr float kShadowSlopeBias = 0.0025f;
 
+// Outline-highlight constants
+constexpr float kOutlineWidthPixels = 3.0f;
+
+// Outline compute push constants (32 bytes)
+struct OutlineComputePushConstants
+{
+	uint32_t extentX;
+	uint32_t extentY;
+	uint32_t srcSlot;
+	uint32_t dstSlot;
+	uint32_t maskSlot;
+	int32_t stepSize;
+	uint32_t _pad0;
+	uint32_t _pad1;
+};
+static_assert(sizeof(OutlineComputePushConstants) == 32,
+	"OutlineComputePushConstants must be exactly 32 bytes");
+
+// Outline composite push constants (32 bytes)
+struct OutlineCompositePushConstants
+{
+	uint32_t extentX;
+	uint32_t extentY;
+	uint32_t jfaSlot;
+	uint32_t maskSlot;
+	float widthPixels;
+	float _pad0;
+	float _pad1;
+	float _pad2;
+};
+static_assert(sizeof(OutlineCompositePushConstants) == 32,
+	"OutlineCompositePushConstants must be exactly 32 bytes");
+
 // ---------------------------------------------------------------------------
 // Initialize
 // ---------------------------------------------------------------------------
@@ -345,7 +378,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		}
 	}
 
-	// Step 6: initialize default sampler and shadow sampler
+	// Step 6: initialize default sampler, shadow sampler, and outline sampler
 	{
 		virasa::SamplerConfig samplerCfg{};
 		samplerCfg.magFilter = VK_FILTER_LINEAR;
@@ -379,6 +412,22 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			_initialized = false;
 			return err;
 		}
+
+		virasa::SamplerConfig outlineCfg{};
+		outlineCfg.magFilter = VK_FILTER_NEAREST;
+		outlineCfg.minFilter = VK_FILTER_NEAREST;
+		outlineCfg.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		outlineCfg.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		outlineCfg.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		outlineCfg.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		outlineCfg.compareEnable = false;
+
+		err = _outlineSampler.Initialize(device, outlineCfg);
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
 	}
 
 	// Step 7: register white image into bindless at slot 0
@@ -404,7 +453,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		assert(id == 0u);
 	}
 
-	// Step 9: load forward and shadow shaders
+	// Step 9: load forward, shadow, and outline shaders
 	{
 		auto err = _forwardVertexShader.Initialize(device, "shaders/cube.vert.spv");
 		if (err != virasa::RenderError::None)
@@ -425,6 +474,37 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			return err;
 		}
 		err = _shadowFragmentShader.Initialize(device, "shaders/shadow_depth.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _outlineMaskFragmentShader.Initialize(device, "shaders/outline_mask.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _fullscreenVertexShader.Initialize(device, "shaders/fullscreen.vert.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _outlineCompositeFragmentShader.Initialize(
+			device, "shaders/outline_composite.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _jfaSeedShader.Initialize(device, "shaders/jfa_seed.comp.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
+		err = _jfaStepShader.Initialize(device, "shaders/jfa_step.comp.spv");
 		if (err != virasa::RenderError::None)
 		{
 			_initialized = false;
@@ -526,6 +606,80 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		{
 			_initialized = false;
 			return err;
+		}
+	}
+
+	// Step 10c: build outline-highlight pipelines
+	{
+		// _maskPipeline: graphics, color-only (no depth), depth-test-free, no cull, blend off
+		{
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_forwardVertexShader)
+				.SetFragmentShader(_outlineMaskFragmentShader)
+				.SetColorFormat(VK_FORMAT_R8G8B8A8_UNORM)
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetCullMode(VK_CULL_MODE_NONE)
+				.SetDepthTest(false)
+				.SetDepthWrite(false)
+				.SetBlendEnabled(false)
+				.AddPushConstantRange(
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 192)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
+			auto err = b.Build(device, _maskPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _jfaSeedPipeline: compute
+		{
+			virasa::PipelineBuilder b;
+			b.SetComputeShader(_jfaSeedShader)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout())
+				.AddPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, 32);
+			auto err = b.BuildCompute(device, _jfaSeedPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _jfaStepPipeline: compute
+		{
+			virasa::PipelineBuilder b;
+			b.SetComputeShader(_jfaStepShader)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout())
+				.AddPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, 32);
+			auto err = b.BuildCompute(device, _jfaStepPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _outlineCompositePipeline: graphics, color-only, blend enabled
+		{
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_fullscreenVertexShader)
+				.SetFragmentShader(_outlineCompositeFragmentShader)
+				.SetColorFormat(context.GetSwapchainFormat())
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetCullMode(VK_CULL_MODE_NONE)
+				.SetDepthTest(false)
+				.SetDepthWrite(false)
+				.SetBlendEnabled(true)
+				.AddPushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
+			auto err = b.Build(device, _outlineCompositePipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
 		}
 	}
 
@@ -1458,6 +1612,452 @@ uint32_t SceneRenderer::RenderWorld(
 					vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
 				}
 			});
+
+	// --- Outline-highlight subsystem ---
+	// Collect highlighted drawables (highlight.w > 0)
+	// We need to re-build the highlighted subset from allDrawables, but allDrawables was
+	// moved into the forward pass lambda. We must collect highlighted drawables BEFORE
+	// moving allDrawables into the lambda. We do this by rebuilding from the world.
+	// NOTE: allDrawables was moved above; we need a separate highlighted list.
+	// We rebuild the highlighted drawable list here from the same world query.
+	std::vector<Drawable> highlightedDrawables;
+	{
+		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
+		const virasa::ecs::ComponentSystem* visualSys2 = FindSystem(world, "Visual");
+		const virasa::ecs::ComponentSystem* meshSys2 = FindSystem(world, "Mesh");
+
+		if (highlightSystem != nullptr && visualSys2 != nullptr && meshSys2 != nullptr)
+		{
+			for (auto entity : visualSys2->Entities())
+			{
+				if (!meshSys2->Has(entity))
+					continue;
+				const auto* meshCompPtr =
+					static_cast<const virasa::ecs::MeshComponent*>(meshSys2->GetRaw(entity));
+				if (meshCompPtr == nullptr)
+					continue;
+				if (!_meshRegistry.IsAllocated(meshCompPtr->meshId))
+					continue;
+				if (!transforms.Has(entity))
+					continue;
+				if (!highlightSystem->Has(entity))
+					continue;
+
+				const auto* hlPtr = static_cast<const virasa::ecs::HighlightComponent*>(
+					highlightSystem->GetRaw(entity));
+				if (hlPtr == nullptr || hlPtr->intensity <= 0.0f)
+					continue;
+
+				const auto* visualCompPtr =
+					static_cast<const virasa::ecs::VisualComponent*>(visualSys2->GetRaw(entity));
+				if (visualCompPtr == nullptr)
+					continue;
+
+				Drawable d{};
+				d.entity = entity;
+				d.meshId = meshCompPtr->meshId;
+				d.materialId = visualCompPtr->materialId;
+				d.model = transforms.GetWorld(entity);
+				d.eyeDistance = 0.0f;
+				const virasa::VisualMaterialRasterState rs =
+					_materialTable.GetRasterState(visualCompPtr->materialId);
+				d.alphaMode = rs.alphaMode;
+				d.doubleSided = rs.doubleSided;
+				// Embed highlight vec4
+				// (stored separately via the HighlightComponent pointer above)
+				highlightedDrawables.push_back(d);
+			}
+		}
+	}
+
+	if (!highlightedDrawables.empty())
+	{
+		// Declare transient outline images
+		virasa::renderer::graph::GraphImageDesc maskDesc{};
+		maskDesc.width = _frameSceneWidth;
+		maskDesc.height = _frameSceneHeight;
+		maskDesc.format = VK_FORMAT_R8G8B8A8_UNORM;
+		maskDesc.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+			VK_IMAGE_USAGE_SAMPLED_BIT;
+		maskDesc.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		virasa::renderer::graph::ImageHandle maskHandle = _graph.DeclareImage(maskDesc);
+
+		virasa::renderer::graph::GraphImageDesc jfaDesc{};
+		jfaDesc.width = _frameSceneWidth;
+		jfaDesc.height = _frameSceneHeight;
+		jfaDesc.format = VK_FORMAT_R32G32_SFLOAT;
+		jfaDesc.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		jfaDesc.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		virasa::renderer::graph::ImageHandle jfaAHandle = _graph.DeclareImage(jfaDesc);
+		virasa::renderer::graph::ImageHandle jfaBHandle = _graph.DeclareImage(jfaDesc);
+
+		// --- Mask pass ---
+		{
+			virasa::Pipeline* maskPipeline = &_maskPipeline;
+			virasa::BindlessTextureArray* bindless2 = &_bindlessTextures;
+			virasa::renderer::MeshRegistry* meshReg2 = &_meshRegistry;
+			const virasa::Device* dev2 = _device;
+			const virasa::ecs::ComponentSystem* hlSys2 = highlightSystem;
+			virasa::math::Mat4 capturedView2 = viewMatrix;
+			virasa::math::Mat4 capturedProj2 = projMatrix;
+
+			_graph.AddPass("outline_mask")
+				.ColorAttachment(maskHandle,
+					virasa::renderer::graph::LoadOp::Clear,
+					virasa::renderer::graph::ClearColor{0.0f, 0.0f, 0.0f, 0.0f})
+				.Record(
+					[maskPipeline,
+						bindless2,
+						meshReg2,
+						dev2,
+						hlSys2,
+						capturedView2,
+						capturedProj2,
+						highlightedDrawables](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkExtent2D ext = gc.GetRenderExtent();
+
+						VkViewport vp{};
+						vp.x = 0.0f;
+						vp.y = 0.0f;
+						vp.width = static_cast<float>(ext.width);
+						vp.height = static_cast<float>(ext.height);
+						vp.minDepth = 0.0f;
+						vp.maxDepth = 1.0f;
+						vkCmdSetViewport(cmd, 0, 1, &vp);
+
+						VkRect2D sc{};
+						sc.offset = {0, 0};
+						sc.extent = ext;
+						vkCmdSetScissor(cmd, 0, 1, &sc);
+
+						VkDescriptorSet descSet = bindless2->GetDescriptorSet();
+						maskPipeline->Bind(cmd);
+						vkCmdBindDescriptorSets(cmd,
+							VK_PIPELINE_BIND_POINT_GRAPHICS,
+							maskPipeline->GetLayout(),
+							0, 1, &descSet, 0, nullptr);
+
+						for (const auto& d : highlightedDrawables)
+						{
+							if (!meshReg2->IsAllocated(d.meshId))
+								continue;
+							const auto& mesh = meshReg2->Get(d.meshId);
+
+							virasa::math::Vec4 highlight(0.0f);
+							if (hlSys2 != nullptr && hlSys2->Has(d.entity))
+							{
+								const auto* hlPtr =
+									static_cast<const virasa::ecs::HighlightComponent*>(
+										hlSys2->GetRaw(d.entity));
+								if (hlPtr != nullptr)
+								{
+									highlight = virasa::math::Vec4(
+										hlPtr->color.x,
+										hlPtr->color.y,
+										hlPtr->color.z,
+										hlPtr->intensity);
+								}
+							}
+
+							PushConstants pc{};
+							pc.mvp = capturedProj2 * capturedView2 * d.model;
+							pc.model = d.model;
+							pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev2);
+							pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev2);
+							pc.materialBufferAddress = 0;
+							pc.lightBufferAddress = 0;
+							pc.shadowBufferAddress = 0;
+							pc.materialId = d.materialId;
+							pc.lightCount = 0;
+							pc.highlight = highlight;
+
+							vkCmdPushConstants(cmd,
+								maskPipeline->GetLayout(),
+								VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+								0, sizeof(PushConstants), &pc);
+
+							vkCmdDraw(cmd, mesh.GetIndexCount(), 1, 0, 0);
+						}
+					});
+		}
+
+		// --- Register mask and jfaA storage slots ---
+		VkImageView maskView = _imageRegistry.Get(maskHandle).GetView();
+		uint32_t maskStorageSlot = kInvalidSlot;
+		{
+			auto it2 = _storageSlotCache.find(maskView);
+			if (it2 != _storageSlotCache.end())
+			{
+				maskStorageSlot = it2->second;
+			}
+			else
+			{
+				maskStorageSlot = _bindlessTextures.RegisterStorageImage(maskView);
+				if (maskStorageSlot != kInvalidSlot)
+					_storageSlotCache[maskView] = maskStorageSlot;
+			}
+		}
+
+		VkImageView jfaAView = _imageRegistry.Get(jfaAHandle).GetView();
+		uint32_t jfaAStorageSlot = kInvalidSlot;
+		{
+			auto it2 = _storageSlotCache.find(jfaAView);
+			if (it2 != _storageSlotCache.end())
+			{
+				jfaAStorageSlot = it2->second;
+			}
+			else
+			{
+				jfaAStorageSlot = _bindlessTextures.RegisterStorageImage(jfaAView);
+				if (jfaAStorageSlot != kInvalidSlot)
+					_storageSlotCache[jfaAView] = jfaAStorageSlot;
+			}
+		}
+
+		VkImageView jfaBView = _imageRegistry.Get(jfaBHandle).GetView();
+		uint32_t jfaBStorageSlot = kInvalidSlot;
+		{
+			auto it2 = _storageSlotCache.find(jfaBView);
+			if (it2 != _storageSlotCache.end())
+			{
+				jfaBStorageSlot = it2->second;
+			}
+			else
+			{
+				jfaBStorageSlot = _bindlessTextures.RegisterStorageImage(jfaBView);
+				if (jfaBStorageSlot != kInvalidSlot)
+					_storageSlotCache[jfaBView] = jfaBStorageSlot;
+			}
+		}
+
+		// --- JFA seed pass ---
+		{
+			virasa::Pipeline* jfaSeedPipeline = &_jfaSeedPipeline;
+			virasa::BindlessTextureArray* bindless2 = &_bindlessTextures;
+			const uint32_t w = _frameSceneWidth;
+			const uint32_t h = _frameSceneHeight;
+			const uint32_t capturedMaskSlot = maskStorageSlot;
+			const uint32_t capturedDstSlot = jfaAStorageSlot;
+
+			_graph.AddPass("outline_jfa_seed")
+				.Read(maskHandle, virasa::renderer::graph::ResourceUsage::StorageReadCompute)
+				.Write(jfaAHandle, virasa::renderer::graph::ResourceUsage::StorageWriteCompute)
+				.Record(
+					[jfaSeedPipeline, bindless2, w, h, capturedMaskSlot, capturedDstSlot](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkDescriptorSet descSet = bindless2->GetDescriptorSet();
+						jfaSeedPipeline->BindCompute(cmd);
+						vkCmdBindDescriptorSets(cmd,
+							VK_PIPELINE_BIND_POINT_COMPUTE,
+							jfaSeedPipeline->GetLayout(),
+							0, 1, &descSet, 0, nullptr);
+
+						OutlineComputePushConstants opc{};
+						opc.extentX = w;
+						opc.extentY = h;
+						opc.srcSlot = 0;
+						opc.dstSlot = capturedDstSlot;
+						opc.maskSlot = capturedMaskSlot;
+						opc.stepSize = 0;
+						opc._pad0 = 0;
+						opc._pad1 = 0;
+
+						vkCmdPushConstants(cmd,
+							jfaSeedPipeline->GetLayout(),
+							VK_SHADER_STAGE_COMPUTE_BIT,
+							0, sizeof(OutlineComputePushConstants), &opc);
+
+						const uint32_t gx = (w + 7u) / 8u;
+						const uint32_t gy = (h + 7u) / 8u;
+						vkCmdDispatch(cmd, gx, gy, 1);
+					});
+		}
+
+		// --- JFA step passes ---
+		const uint32_t maxDim = std::max(_frameSceneWidth, _frameSceneHeight);
+		const uint32_t stepCount =
+			(maxDim > 1u)
+			? static_cast<uint32_t>(std::ceil(std::log2(static_cast<float>(maxDim))))
+			: 1u;
+
+		virasa::renderer::graph::ImageHandle jfaSrc = jfaAHandle;
+		virasa::renderer::graph::ImageHandle jfaDst = jfaBHandle;
+		uint32_t srcStorageSlot = jfaAStorageSlot;
+		uint32_t dstStorageSlot = jfaBStorageSlot;
+
+		for (uint32_t step = 0u; step < stepCount; ++step)
+		{
+			const int32_t jumpDist =
+				static_cast<int32_t>(1u << (stepCount - 1u - step));
+
+			// Ensure dst storage slot is registered
+			VkImageView dstView = _imageRegistry.Get(jfaDst).GetView();
+			{
+				auto it2 = _storageSlotCache.find(dstView);
+				if (it2 != _storageSlotCache.end())
+				{
+					dstStorageSlot = it2->second;
+				}
+				else
+				{
+					dstStorageSlot = _bindlessTextures.RegisterStorageImage(dstView);
+					if (dstStorageSlot != kInvalidSlot)
+						_storageSlotCache[dstView] = dstStorageSlot;
+				}
+			}
+
+			virasa::Pipeline* jfaStepPipeline = &_jfaStepPipeline;
+			virasa::BindlessTextureArray* bindless2 = &_bindlessTextures;
+			const uint32_t w = _frameSceneWidth;
+			const uint32_t h = _frameSceneHeight;
+			const uint32_t capturedSrc = srcStorageSlot;
+			const uint32_t capturedDst = dstStorageSlot;
+			const int32_t capturedStep = jumpDist;
+
+			_graph.AddPass("outline_jfa_step")
+				.Read(jfaSrc, virasa::renderer::graph::ResourceUsage::StorageReadCompute)
+				.Write(jfaDst, virasa::renderer::graph::ResourceUsage::StorageWriteCompute)
+				.Record(
+					[jfaStepPipeline, bindless2, w, h, capturedSrc, capturedDst, capturedStep](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkDescriptorSet descSet = bindless2->GetDescriptorSet();
+						jfaStepPipeline->BindCompute(cmd);
+						vkCmdBindDescriptorSets(cmd,
+							VK_PIPELINE_BIND_POINT_COMPUTE,
+							jfaStepPipeline->GetLayout(),
+							0, 1, &descSet, 0, nullptr);
+
+						OutlineComputePushConstants opc{};
+						opc.extentX = w;
+						opc.extentY = h;
+						opc.srcSlot = capturedSrc;
+						opc.dstSlot = capturedDst;
+						opc.maskSlot = 0;
+						opc.stepSize = capturedStep;
+						opc._pad0 = 0;
+						opc._pad1 = 0;
+
+						vkCmdPushConstants(cmd,
+							jfaStepPipeline->GetLayout(),
+							VK_SHADER_STAGE_COMPUTE_BIT,
+							0, sizeof(OutlineComputePushConstants), &opc);
+
+						const uint32_t gx = (w + 7u) / 8u;
+						const uint32_t gy = (h + 7u) / 8u;
+						vkCmdDispatch(cmd, gx, gy, 1);
+					});
+
+			// Ping-pong
+			std::swap(jfaSrc, jfaDst);
+			std::swap(srcStorageSlot, dstStorageSlot);
+		}
+
+		// jfaSrc now holds the final JFA result handle
+		virasa::renderer::graph::ImageHandle jfaFinalHandle = jfaSrc;
+
+		// --- Register jfaFinal and mask into binding-0 texture slots (outlineSlotCache) ---
+		VkImageView jfaFinalView = _imageRegistry.Get(jfaFinalHandle).GetView();
+		uint32_t jfaFinalTextureSlot = kInvalidSlot;
+		{
+			auto it2 = _outlineSlotCache.find(jfaFinalView);
+			if (it2 != _outlineSlotCache.end())
+			{
+				jfaFinalTextureSlot = it2->second;
+			}
+			else
+			{
+				jfaFinalTextureSlot = _bindlessTextures.RegisterTexture(
+					jfaFinalView, _outlineSampler.GetHandle());
+				if (jfaFinalTextureSlot != kInvalidSlot)
+					_outlineSlotCache[jfaFinalView] = jfaFinalTextureSlot;
+			}
+		}
+
+		uint32_t maskTextureSlot = kInvalidSlot;
+		{
+			auto it2 = _outlineSlotCache.find(maskView);
+			if (it2 != _outlineSlotCache.end())
+			{
+				maskTextureSlot = it2->second;
+			}
+			else
+			{
+				maskTextureSlot = _bindlessTextures.RegisterTexture(
+					maskView, _outlineSampler.GetHandle());
+				if (maskTextureSlot != kInvalidSlot)
+					_outlineSlotCache[maskView] = maskTextureSlot;
+			}
+		}
+
+		// --- Composite pass ---
+		{
+			virasa::Pipeline* compositePipeline = &_outlineCompositePipeline;
+			virasa::BindlessTextureArray* bindless2 = &_bindlessTextures;
+			const uint32_t w = _frameSceneWidth;
+			const uint32_t h = _frameSceneHeight;
+			const uint32_t capturedJfaSlot = jfaFinalTextureSlot;
+			const uint32_t capturedMaskSlot2 = maskTextureSlot;
+
+			_graph.AddPass("outline_composite")
+				.ColorAttachment(_frameSceneColorHandle,
+					virasa::renderer::graph::LoadOp::Load,
+					virasa::renderer::graph::ClearColor{})
+				.Read(jfaFinalHandle, virasa::renderer::graph::ResourceUsage::SampledFragment)
+				.Read(maskHandle, virasa::renderer::graph::ResourceUsage::SampledFragment)
+				.Record(
+					[compositePipeline, bindless2, w, h, capturedJfaSlot, capturedMaskSlot2](
+						const virasa::renderer::graph::GraphContext& gc)
+					{
+						VkCommandBuffer cmd = gc.GetCommandBuffer();
+						VkExtent2D ext = gc.GetRenderExtent();
+
+						VkViewport vp{};
+						vp.x = 0.0f;
+						vp.y = 0.0f;
+						vp.width = static_cast<float>(ext.width);
+						vp.height = static_cast<float>(ext.height);
+						vp.minDepth = 0.0f;
+						vp.maxDepth = 1.0f;
+						vkCmdSetViewport(cmd, 0, 1, &vp);
+
+						VkRect2D sc{};
+						sc.offset = {0, 0};
+						sc.extent = ext;
+						vkCmdSetScissor(cmd, 0, 1, &sc);
+
+						VkDescriptorSet descSet = bindless2->GetDescriptorSet();
+						compositePipeline->Bind(cmd);
+						vkCmdBindDescriptorSets(cmd,
+							VK_PIPELINE_BIND_POINT_GRAPHICS,
+							compositePipeline->GetLayout(),
+							0, 1, &descSet, 0, nullptr);
+
+						OutlineCompositePushConstants ocp{};
+						ocp.extentX = w;
+						ocp.extentY = h;
+						ocp.jfaSlot = capturedJfaSlot;
+						ocp.maskSlot = capturedMaskSlot2;
+						ocp.widthPixels = kOutlineWidthPixels;
+						ocp._pad0 = 0.0f;
+						ocp._pad1 = 0.0f;
+						ocp._pad2 = 0.0f;
+
+						vkCmdPushConstants(cmd,
+							compositePipeline->GetLayout(),
+							VK_SHADER_STAGE_FRAGMENT_BIT,
+							0, sizeof(OutlineCompositePushConstants), &ocp);
+
+						vkCmdDraw(cmd, 3, 1, 0, 0);
+					});
+		}
+	} // end if (!highlightedDrawables.empty())
 
 	// --- Register scene color in bindless (with caching) ---
 	VkImageView sceneView = _imageRegistry.Get(_frameSceneColorHandle).GetView();
