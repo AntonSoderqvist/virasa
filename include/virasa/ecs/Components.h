@@ -129,6 +129,24 @@ public:
 	float farPlane = 1000.0f;
 };
 
+/**
+ * @brief Component that, when present on an entity, requests a visual color highlight.
+ *
+ * The mere presence of a HighlightComponent on an entity is the highlight signal.
+ * Color and intensity describe the highlight appearance; priority is used for
+ * app-level arbitration when multiple sources compete to highlight the same entity.
+ */
+struct HighlightComponent
+{
+public:
+	/// Linear-space RGB color of the highlight.
+	virasa::math::Vec3 color = virasa::math::Vec3(0.1f, 0.4f, 1.0f);
+	/// Scalar intensity multiplier applied to color by the consuming renderer.
+	float intensity = 1.0f;
+	/// Relative priority of the highlight; larger values denote higher priority.
+	int32_t priority = 0;
+};
+
 } // namespace virasa::ecs
 
 #endif // VIRASA_ECS_COMPONENTS_H

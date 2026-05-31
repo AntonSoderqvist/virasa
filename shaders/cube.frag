@@ -81,6 +81,7 @@ layout(push_constant) uniform PushConstants {
     uint64_t shadowBufferAddress;
     uint materialId;
     uint lightCount;
+    vec4 highlight;  // xyz = highlight color, w = intensity (0 = not highlighted)
 } pc;
 
 // Hardware-PCF visibility for the light whose ShadowGPU record is at `idx`.
@@ -207,5 +208,10 @@ void main() {
     }
 
     lit += mat.factors.emissiveFactor;
+
+    // Highlight overlay: mix the shaded color toward the highlight color by
+    // clamp(intensity). w == 0 leaves the surface untouched (not highlighted).
+    lit = mix(lit, pc.highlight.rgb, clamp(pc.highlight.w, 0.0, 1.0));
+
     outColor = vec4(lit, outAlpha);
 }

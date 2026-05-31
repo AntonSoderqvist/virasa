@@ -206,6 +206,11 @@ int EditorApp::Run(int argc, char** argv)
 	// Pending async GLB parses (function-local, drained on shutdown)
 	std::vector<std::future<virasa::editor::io::GltfCpuAsset>> _pendingLoads;
 
+	// Hover-highlight tracking (function-local, persists across iterations):
+	// the set of entities the hover logic currently owns a HighlightComponent
+	// on -- the cursor entity and its descendants.
+	std::vector<virasa::ecs::Entity> hoverHighlighted;
+
 	bool running = true;
 	while (running)
 	{
@@ -322,7 +327,7 @@ int EditorApp::Run(int argc, char** argv)
 		{
 			if (event.type == virasa::EventType::MouseWheel)
 			{
-				wheelScrollY -= event.mouseWheel.scrollY;
+				wheelScrollY += event.mouseWheel.scrollY;
 			}
 		}
 
@@ -417,6 +422,122 @@ int EditorApp::Run(int argc, char** argv)
 		{
 			LOG_ERROR(logger, "BeginFrame returned Error.");
 			return -1;
+		}
+
+		// ------------------------------------------------------------------
+		// Step 5b: Hierarchy hover highlight
+		// ------------------------------------------------------------------
+		{
+			const virasa::math::Vec3 kHoverHighlightColor{0.1f, 0.4f, 1.0f};
+			const float kHoverHighlightIntensity = 1.0f;
+			const int32_t kHoverHighlightPriority = 0;
+			const float kHoverDescendantIntensity = 0.4f;
+			const int32_t kHoverDescendantPriority = -1;
+
+			virasa::ecs::ComponentSystem* highlightSys = world.FindSystem("Highlight");
+			if (highlightSys)
+			{
+				virasa::ecs::Entity cursorEntity =
+					viewManager.GetHierarchyView().GetCursorEntity(world);
+
+				// Build the desired highlight set: the cursor entity at the
+				// bright cursor tier plus every descendant (over the World
+				// hierarchy, not the visible rows) at the dim descendant tier.
+				struct HoverMark
+				{
+					virasa::ecs::Entity entity;
+					float intensity;
+					int32_t priority;
+				};
+				std::vector<HoverMark> desired;
+				if (cursorEntity != virasa::ecs::Entity::Invalid() &&
+					world.IsValid(cursorEntity))
+				{
+					desired.push_back(
+						{cursorEntity, kHoverHighlightIntensity, kHoverHighlightPriority});
+
+					const auto& roots = world.GetChildren(cursorEntity);
+					std::vector<virasa::ecs::Entity> stack(roots.begin(), roots.end());
+					while (!stack.empty())
+					{
+						virasa::ecs::Entity e = stack.back();
+						stack.pop_back();
+						if (!world.IsValid(e))
+						{
+							continue;
+						}
+						desired.push_back(
+							{e, kHoverDescendantIntensity, kHoverDescendantPriority});
+						const auto& children = world.GetChildren(e);
+						stack.insert(stack.end(), children.begin(), children.end());
+					}
+				}
+
+				auto inDesired = [&](virasa::ecs::Entity e) {
+					for (const auto& m : desired)
+					{
+						if (m.entity == e)
+						{
+							return true;
+						}
+					}
+					return false;
+				};
+
+				// (1) Withdraw highlights we no longer want, guarding against
+				// clobbering a higher-priority highlight owned by another source.
+				for (virasa::ecs::Entity e : hoverHighlighted)
+				{
+					if (inDesired(e))
+					{
+						continue;
+					}
+					if (world.IsValid(e) && highlightSys->Has(e))
+					{
+						const auto* existing =
+							static_cast<const virasa::ecs::HighlightComponent*>(
+								highlightSys->GetRaw(e));
+						if (existing && existing->priority <= kHoverHighlightPriority)
+						{
+							highlightSys->Remove(e);
+						}
+					}
+				}
+
+				// (2) Apply the desired highlights; (3) record the ones we own.
+				std::vector<virasa::ecs::Entity> nextHover;
+				for (const auto& m : desired)
+				{
+					if (!world.IsValid(m.entity))
+					{
+						continue;
+					}
+					virasa::ecs::HighlightComponent newHighlight;
+					newHighlight.color = kHoverHighlightColor;
+					newHighlight.intensity = m.intensity;
+					newHighlight.priority = m.priority;
+
+					if (!highlightSys->Has(m.entity))
+					{
+						highlightSys->AddRaw(m.entity, &newHighlight);
+						nextHover.push_back(m.entity);
+					}
+					else
+					{
+						const auto* existing =
+							static_cast<const virasa::ecs::HighlightComponent*>(
+								highlightSys->GetRaw(m.entity));
+						if (existing && existing->priority <= kHoverHighlightPriority)
+						{
+							highlightSys->SetRaw(m.entity, &newHighlight);
+							nextHover.push_back(m.entity);
+						}
+						// else: a higher-priority source holds it; leave untouched.
+					}
+				}
+
+				hoverHighlighted = std::move(nextHover);
+			}
 		}
 
 		// ------------------------------------------------------------------

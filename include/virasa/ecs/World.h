@@ -235,6 +235,8 @@ private:
 	// --- Private helpers ---
 	void DestroyEntityInternal(virasa::ecs::Entity entity, bool isRoot);
 	[[nodiscard]] std::string ResolveUniqueName(std::string_view name) const;
+	[[nodiscard]] std::string ResolveUniqueNameExcluding(
+		std::string_view name, virasa::ecs::Entity exclude) const;
 	void AddNameComponent(virasa::ecs::Entity entity, std::string uniqueName);
 	void RemoveNameComponent(virasa::ecs::Entity entity);
 	void UpdateTransformsRecursive(

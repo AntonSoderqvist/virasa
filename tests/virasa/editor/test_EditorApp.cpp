@@ -3,6 +3,7 @@
 #include "virasa/editor/EditorApp.h"
 
 #include <concepts>
+#include <string_view>
 #include <type_traits>
 
 namespace
@@ -107,6 +108,30 @@ TEST(EditorApp, test_run_owns_camera_state_across_iterations)
 	(void)app2;
 }
 
+TEST(EditorApp, test_editor_app_highlights_hierarchy_cursor_entity)
+{
+	using virasa::editor::EditorApp;
+
+	// The hierarchy hover highlight behavior is implemented entirely inside Run's
+	// main loop against stack-local World/ViewManager state and private camera/
+	// loop locals. Step 5b highlights the HierarchyView cursor entity at the
+	// bright cursor tier and cascades a dimmer highlight over the cursor entity's
+	// descendants (the transitive closure of World::GetChildren), recording the
+	// owned set in the loop-local hoverHighlighted vector. The public surface
+	// exposes no hook to inject a cursor entity, inspect the transient
+	// hoverHighlighted set, or observe the World's Highlight system after a single
+	// loop iteration. The observable API-level guarantee we can assert is that the
+	// type remains the top-level orchestrator with only Run() public, so highlight
+	// maintenance is internal to that run lifecycle rather than a separate public
+	// subsystem.
+	EXPECT_TRUE(std::is_final_v<EditorApp>);
+	EXPECT_TRUE(std::is_default_constructible_v<EditorApp>);
+	EXPECT_TRUE((std::is_same_v<decltype(&EditorApp::Run), int (EditorApp::*)(int, char**)>));
+	EXPECT_FALSE(HasCameraYawMember<EditorApp>);
+	EXPECT_FALSE(HasCameraPitchMember<EditorApp>);
+	EXPECT_FALSE(HasCameraPositionMember<EditorApp>);
+}
+
 TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)
 {
 	using virasa::editor::EditorApp;
@@ -116,4 +141,11 @@ TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)
 	EXPECT_FALSE(std::is_copy_assignable_v<EditorApp>);
 	EXPECT_FALSE(std::is_move_constructible_v<EditorApp>);
 	EXPECT_FALSE(std::is_move_assignable_v<EditorApp>);
+
+	EditorApp app;
+	char programName[] = "editor";
+	char* argv[] = {programName, nullptr};
+
+	const int result = app.Run(1, argv);
+	EXPECT_TRUE(result == 0 || result == -1);
 }

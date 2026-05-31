@@ -20,7 +20,7 @@ layout(buffer_reference, scalar) readonly buffer IndexBuffer {
     uint indices[];
 };
 
-// 176-byte push constant block (vertex+fragment):
+// 192-byte push constant block (vertex+fragment):
 //   mat4     mvp                    @   0  (64 bytes)
 //   mat4     model                  @  64  (64 bytes)
 //   uint64_t vertexBufferAddress    @ 128  (8 bytes)
@@ -30,6 +30,7 @@ layout(buffer_reference, scalar) readonly buffer IndexBuffer {
 //   uint64_t shadowBufferAddress    @ 160  (8 bytes)
 //   uint32_t materialId             @ 168  (4 bytes)
 //   uint32_t lightCount             @ 172  (4 bytes)
+//   vec4     highlight              @ 176  (16 bytes) xyz=color, w=intensity (0=none)
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
@@ -40,6 +41,7 @@ layout(push_constant) uniform PushConstants {
     uint64_t shadowBufferAddress;
     uint materialId;
     uint lightCount;
+    vec4 highlight;
 } pc;
 
 layout(location = 0) out vec2 fragUV;

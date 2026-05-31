@@ -1,5 +1,6 @@
 #include "virasa/renderer/scene/SceneRenderer.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -7,13 +8,14 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "virasa/core/Logger.h"
+#include "virasa/ecs/ComponentSystem.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Projection.h"
 #include "virasa/math/Transform.h"
-#include <algorithm>
 #include "virasa/renderer/geometry/Primitives.h"
 #include "virasa/renderer/lighting/ShadowTable.h"
 #include "virasa/renderer/resources/Buffer.h"
@@ -192,29 +194,48 @@ RenderError UploadImageWithStaging(const Device& device, const Context& context,
 
 void LogRendererError(const char* message)
 {
+	(void)virasa::Logger::GetLogger("renderer");
 	(void)message;
-	auto* logger = virasa::Logger::GetLogger("renderer");
-	(void)logger;
+}
+
+virasa::VisualMaterial MakeDefaultMaterial() noexcept
+{
+	virasa::VisualMaterial material{};
+	material.factors.baseColorFactor = virasa::math::Vec4(0.9f, 0.3f, 0.2f, 1.0f);
+	return material;
+}
+
+const virasa::ecs::ComponentSystem* FindSystem(
+	const virasa::ecs::World& world, std::string_view name)
+{
+	const virasa::ecs::ComponentId id = world.GetSystemId(name);
+	if (id == 0xFFFFFFFFu)
+	{
+		return nullptr;
+	}
+
+	return &world.GetSystem(id);
 }
 
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Internal push-constant layout (176 bytes)
+// Internal push-constant layout (192 bytes)
 // ---------------------------------------------------------------------------
 struct PushConstants
 {
-	virasa::math::Mat4 mvp;            // 64
-	virasa::math::Mat4 model;          // 64
-	uint64_t vertexBufferAddress;      //  8
-	uint64_t indexBufferAddress;       //  8
-	uint64_t materialBufferAddress;    //  8
-	uint64_t lightBufferAddress;       //  8
-	uint64_t shadowBufferAddress;      //  8
-	uint32_t materialId;               //  4
-	uint32_t lightCount;               //  4
+	virasa::math::Mat4 mvp;
+	virasa::math::Mat4 model;
+	uint64_t vertexBufferAddress;
+	uint64_t indexBufferAddress;
+	uint64_t materialBufferAddress;
+	uint64_t lightBufferAddress;
+	uint64_t shadowBufferAddress;
+	uint32_t materialId;
+	uint32_t lightCount;
+	virasa::math::Vec4 highlight;
 };
-static_assert(sizeof(PushConstants) == 176, "PushConstants must be exactly 176 bytes");
+static_assert(sizeof(PushConstants) == 192, "PushConstants must be exactly 192 bytes");
 
 // ---------------------------------------------------------------------------
 // Shadow push-constant layout (80 bytes)
@@ -374,10 +395,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 
 	// Step 8: allocate default material at slot 0
 	{
-		virasa::VisualMaterial defaultMat{};
-		defaultMat.factors.baseColorFactor = virasa::math::Vec4(0.9f, 0.3f, 0.2f, 1.0f);
-
-		uint32_t id = _materialTable.Allocate(defaultMat);
+		uint32_t id = _materialTable.Allocate(MakeDefaultMaterial());
 		if (id == 0xFFFFFFFFu || id != 0u)
 		{
 			_initialized = false;
@@ -428,7 +446,7 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 				.SetDepthTest(true)
 				.SetDepthCompareOp(VK_COMPARE_OP_LESS)
 				.AddPushConstantRange(
-					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 176)
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 192)
 				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
 			return b;
 		};
@@ -571,10 +589,7 @@ uint32_t SceneRenderer::CreateDefaultCubeMesh()
 // ---------------------------------------------------------------------------
 uint32_t SceneRenderer::CreateDefaultMaterial()
 {
-	virasa::VisualMaterial mat{};
-	mat.factors.baseColorFactor = virasa::math::Vec4(0.9f, 0.3f, 0.2f, 1.0f);
-
-	uint32_t id = _materialTable.Allocate(mat);
+	uint32_t id = _materialTable.Allocate(MakeDefaultMaterial());
 	return id;
 }
 
@@ -680,17 +695,7 @@ virasa::RegisterError SceneRenderer::RegisterTexture(
 	if (samplerHandle == VK_NULL_HANDLE)
 	{
 		virasa::Sampler sampler;
-		virasa::SamplerConfig samplerConfig{};
-		samplerConfig.magFilter = upload.sampler.magFilter;
-		samplerConfig.minFilter = upload.sampler.minFilter;
-		samplerConfig.mipmapMode = upload.sampler.mipmapMode;
-		samplerConfig.addressModeU = upload.sampler.addressModeU;
-		samplerConfig.addressModeV = upload.sampler.addressModeV;
-		samplerConfig.addressModeW = upload.sampler.addressModeW;
-		samplerConfig.anisotropyEnable = upload.sampler.anisotropyEnable;
-		samplerConfig.maxAnisotropy = upload.sampler.maxAnisotropy;
-
-		renderError = sampler.Initialize(*_device, samplerConfig);
+		renderError = sampler.Initialize(*_device, upload.sampler);
 		if (renderError != virasa::RenderError::None)
 		{
 			LogRendererError("RegisterTexture sampler create failed");
@@ -776,16 +781,6 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 uint32_t SceneRenderer::RenderWorld(
 	const virasa::ecs::World& world, virasa::ecs::Entity cameraEntity)
 {
-	// Const-correct system lookup: World::FindSystem is non-const, but RenderWorld
-	// takes the world by const reference, so resolve systems through the const
-	// GetSystemId/GetSystem pair (mirrors FindSystem's nullptr-on-miss contract).
-	auto findSystem = [&world](std::string_view name) -> const virasa::ecs::ComponentSystem* {
-		const virasa::ecs::ComponentId id = world.GetSystemId(name);
-		if (id == 0xFFFFFFFFu)
-			return nullptr;
-		return &world.GetSystem(id);
-	};
-
 	// --- Derive camera matrices ---
 	virasa::math::Mat4 viewMatrix(1.0f);
 	virasa::math::Mat4 projMatrix(1.0f);
@@ -796,7 +791,7 @@ uint32_t SceneRenderer::RenderWorld(
 		// Retrieve camera component from the world's camera system
 		// We access it via the World's component systems directly
 		// The CameraComponent is stored in a system registered under "Camera"
-		const virasa::ecs::ComponentSystem* camSys = findSystem("Camera");
+		const virasa::ecs::ComponentSystem* camSys = FindSystem(world, "Camera");
 		if (camSys != nullptr && camSys->Has(cameraEntity) && transforms.Has(cameraEntity))
 		{
 			const auto* camPtr =
@@ -826,7 +821,7 @@ uint32_t SceneRenderer::RenderWorld(
 		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
 
 		// Directional lights
-		const virasa::ecs::ComponentSystem* dlSys = findSystem("DirectionalLight");
+		const virasa::ecs::ComponentSystem* dlSys = FindSystem(world, "DirectionalLight");
 		if (dlSys != nullptr)
 		{
 			for (auto entity : dlSys->Entities())
@@ -845,7 +840,7 @@ uint32_t SceneRenderer::RenderWorld(
 		}
 
 		// Point lights
-		const virasa::ecs::ComponentSystem* plSys = findSystem("PointLight");
+		const virasa::ecs::ComponentSystem* plSys = FindSystem(world, "PointLight");
 		if (plSys != nullptr)
 		{
 			for (auto entity : plSys->Entities())
@@ -867,7 +862,7 @@ uint32_t SceneRenderer::RenderWorld(
 		}
 
 		// Spot lights
-		const virasa::ecs::ComponentSystem* slSys = findSystem("SpotLight");
+		const virasa::ecs::ComponentSystem* slSys = FindSystem(world, "SpotLight");
 		if (slSys != nullptr)
 		{
 			for (auto entity : slSys->Entities())
@@ -911,8 +906,8 @@ uint32_t SceneRenderer::RenderWorld(
 
 	{
 		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
-		const virasa::ecs::ComponentSystem* visualSys = findSystem("Visual");
-		const virasa::ecs::ComponentSystem* meshSys = findSystem("Mesh");
+		const virasa::ecs::ComponentSystem* visualSys = FindSystem(world, "Visual");
+		const virasa::ecs::ComponentSystem* meshSys = FindSystem(world, "Mesh");
 
 		if (visualSys != nullptr && meshSys != nullptr)
 		{
@@ -991,18 +986,8 @@ uint32_t SceneRenderer::RenderWorld(
 		// We need to find directional and spot lights that cast shadows
 		// Walk the lights vector we already built and match back to components
 		// We need to re-walk the component systems to get castsShadows flag
-		const virasa::ecs::ComponentSystem* dlSys = [&world]() -> const virasa::ecs::ComponentSystem*
-		{
-			const virasa::ecs::ComponentId id = world.GetSystemId("DirectionalLight");
-			if (id == 0xFFFFFFFFu) return nullptr;
-			return &world.GetSystem(id);
-		}();
-		const virasa::ecs::ComponentSystem* slSys = [&world]() -> const virasa::ecs::ComponentSystem*
-		{
-			const virasa::ecs::ComponentId id = world.GetSystemId("SpotLight");
-			if (id == 0xFFFFFFFFu) return nullptr;
-			return &world.GetSystem(id);
-		}();
+		const virasa::ecs::ComponentSystem* dlSys = FindSystem(world, "DirectionalLight");
+		const virasa::ecs::ComponentSystem* slSys = FindSystem(world, "SpotLight");
 
 		// Build a list of shadow-casting light candidates in the same order lights[] was built
 		// We need to correlate lights[] entries back to their source components.
@@ -1326,6 +1311,8 @@ uint32_t SceneRenderer::RenderWorld(
 	_shadowTable.UploadFrame(std::span<const virasa::ShadowGPU>(shadowRecords));
 	_lightTable.UploadFrame(std::span<const virasa::LightGPU>(lights));
 
+	const virasa::ecs::ComponentSystem* highlightSystem = FindSystem(world, "Highlight");
+
 	// --- Capture state for the record callback ---
 	virasa::math::Mat4 capturedView = viewMatrix;
 	virasa::math::Mat4 capturedProj = projMatrix;
@@ -1341,6 +1328,7 @@ uint32_t SceneRenderer::RenderWorld(
 	virasa::LightTable* lightTable = &_lightTable;
 	virasa::ShadowTable* shadowTable = &_shadowTable;
 	const virasa::Device* dev = _device;
+	const virasa::ecs::ComponentSystem* capturedHighlightSystem = highlightSystem;
 
 	// --- Add forward pass ---
 	auto& forwardPass = _graph.AddPass("forward");
@@ -1374,6 +1362,7 @@ uint32_t SceneRenderer::RenderWorld(
 				dev,
 				capturedView,
 				capturedProj,
+				capturedHighlightSystem,
 				allDrawables = std::move(allDrawables)](const virasa::renderer::graph::GraphContext& gc)
 			{
 				VkCommandBuffer cmd = gc.GetCommandBuffer();
@@ -1442,6 +1431,22 @@ uint32_t SceneRenderer::RenderWorld(
 					pc.lightCount = lightTable->GetLightCount();
 					pc.model = d.model;
 					pc.mvp = capturedProj * capturedView * d.model;
+					pc.highlight = virasa::math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+					if (capturedHighlightSystem != nullptr &&
+						capturedHighlightSystem->Has(d.entity))
+					{
+						const auto* highlight =
+							static_cast<const virasa::ecs::HighlightComponent*>(
+								capturedHighlightSystem->GetRaw(d.entity));
+						if (highlight != nullptr)
+						{
+							pc.highlight = virasa::math::Vec4(
+								highlight->color.x,
+								highlight->color.y,
+								highlight->color.z,
+								highlight->intensity);
+						}
+					}
 
 					vkCmdPushConstants(cmd,
 						selectedPipeline->GetLayout(),

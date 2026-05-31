@@ -17,7 +17,7 @@ World::World()
 {
 	// Register built-in systems in the pinned order:
 	// 0 – Transform, 1 – Mesh, 2 – Visual, 3 – DirectionalLight,
-	// 4 – PointLight, 5 – SpotLight, 6 – Camera
+	// 4 – PointLight, 5 – SpotLight, 6 – Camera, 7 – Highlight
 
 	auto transformSys = std::make_unique<TransformSystem>(0u);
 	_transformSystem = transformSys.get();
@@ -35,6 +35,8 @@ World::World()
 		5u, "SpotLight", sizeof(SpotLightComponent)));
 	RegisterSystem(std::make_unique<SparseComponentSystem>(
 		6u, "Camera", sizeof(CameraComponent)));
+	RegisterSystem(std::make_unique<SparseComponentSystem>(
+		7u, "Highlight", sizeof(HighlightComponent)));
 }
 
 World::World(World&& other) noexcept
@@ -657,6 +659,49 @@ void World::UpdateTransforms()
 }
 
 // ---------------------------------------------------------------------------
+// ResolveUniqueNameExcluding
+// ---------------------------------------------------------------------------
+
+std::string World::ResolveUniqueNameExcluding(
+	std::string_view name, Entity exclude) const
+{
+	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
+
+	auto collidesExcludingSelf = [&](const std::string& candidate) -> bool
+	{
+		for (size_t i = 0; i < _nameComponents.size(); ++i)
+		{
+			if (_nameEntities[i] == exclude)
+				continue;
+			if (_nameComponents[i].name == candidate)
+				return true;
+		}
+		return false;
+	};
+
+	if (!collidesExcludingSelf(baseName))
+		return baseName;
+
+	for (uint32_t suffix = 1; ; ++suffix)
+	{
+		std::string candidate;
+		if (suffix < 1000u)
+		{
+			char buf[8];
+			std::snprintf(buf, sizeof(buf), "%03u", suffix);
+			candidate = baseName + "." + buf;
+		}
+		else
+		{
+			candidate = baseName + "." + std::to_string(suffix);
+		}
+
+		if (!collidesExcludingSelf(candidate))
+			return candidate;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SetName
 // ---------------------------------------------------------------------------
 
@@ -673,53 +718,7 @@ void World::SetName(Entity entity, std::string_view name)
 	if (currentName == name)
 		return;
 
-	// Resolve uniqueness, excluding the entity's own current name.
-	// We temporarily rename to empty so ResolveUniqueName won't see our own name.
-	// Instead, implement inline to exclude self.
-	std::string baseName = name.empty() ? std::string("Entity") : std::string(name);
-
-	// Check collision excluding self
-	auto collidesExcludingSelf = [&](const std::string& candidate) -> bool
-	{
-		for (size_t i = 0; i < _nameComponents.size(); ++i)
-		{
-			if (_nameEntities[i] == entity)
-				continue;
-			if (_nameComponents[i].name == candidate)
-				return true;
-		}
-		return false;
-	};
-
-	std::string finalName;
-	if (!collidesExcludingSelf(baseName))
-	{
-		finalName = baseName;
-	}
-	else
-	{
-		for (uint32_t suffix = 1; ; ++suffix)
-		{
-			std::string candidate;
-			if (suffix < 1000u)
-			{
-				char buf[8];
-				std::snprintf(buf, sizeof(buf), "%03u", suffix);
-				candidate = baseName + "." + buf;
-			}
-			else
-			{
-				candidate = baseName + "." + std::to_string(suffix);
-			}
-
-			if (!collidesExcludingSelf(candidate))
-			{
-				finalName = std::move(candidate);
-				break;
-			}
-		}
-	}
-
+	std::string finalName = ResolveUniqueNameExcluding(name, entity);
 	_nameComponents[denseIdx].name = std::move(finalName);
 }
 

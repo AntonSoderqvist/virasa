@@ -126,7 +126,7 @@ TEST(World, test_world_default_constructed_registers_builtin_systems)
 	// Built-in system names are registered.
 	const char* builtins[] = {
 		"Transform", "Mesh", "Visual",
-		"DirectionalLight", "PointLight", "SpotLight", "Camera"
+		"DirectionalLight", "PointLight", "SpotLight", "Camera", "Highlight"
 	};
 	for (const char* name : builtins)
 	{

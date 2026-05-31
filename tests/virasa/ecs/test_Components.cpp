@@ -351,3 +351,74 @@ TEST(Components, test_camera_component_describes_viewpoint)
 	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::CameraComponent>);
 	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::CameraComponent>);
 }
+
+TEST(Components, test_highlight_component_marks_entity_for_color_highlight)
+{
+	virasa::ecs::HighlightComponent defaultComp;
+	EXPECT_FLOAT_EQ(defaultComp.color.x, 0.1f);
+	EXPECT_FLOAT_EQ(defaultComp.color.y, 0.4f);
+	EXPECT_FLOAT_EQ(defaultComp.color.z, 1.0f);
+	EXPECT_FLOAT_EQ(defaultComp.intensity, 1.0f);
+	EXPECT_EQ(defaultComp.priority, 0);
+
+	virasa::ecs::HighlightComponent comp;
+	comp.color = virasa::math::Vec3(1.0f, 0.5f, 0.0f);
+	comp.intensity = 2.5f;
+	comp.priority = 10;
+	EXPECT_FLOAT_EQ(comp.color.x, 1.0f);
+	EXPECT_FLOAT_EQ(comp.color.y, 0.5f);
+	EXPECT_FLOAT_EQ(comp.color.z, 0.0f);
+	EXPECT_FLOAT_EQ(comp.intensity, 2.5f);
+	EXPECT_EQ(comp.priority, 10);
+
+	// Negative priority values are permitted.
+	virasa::ecs::HighlightComponent negPriority;
+	negPriority.priority = -5;
+	EXPECT_EQ(negPriority.priority, -5);
+
+	// HDR color values outside [0,1] are valid.
+	virasa::ecs::HighlightComponent hdr;
+	hdr.color = virasa::math::Vec3(3.0f, 2.0f, 5.0f);
+	EXPECT_FLOAT_EQ(hdr.color.x, 3.0f);
+	EXPECT_FLOAT_EQ(hdr.color.y, 2.0f);
+	EXPECT_FLOAT_EQ(hdr.color.z, 5.0f);
+
+	virasa::ecs::HighlightComponent copy = comp;
+	EXPECT_FLOAT_EQ(copy.color.x, comp.color.x);
+	EXPECT_FLOAT_EQ(copy.color.y, comp.color.y);
+	EXPECT_FLOAT_EQ(copy.color.z, comp.color.z);
+	EXPECT_FLOAT_EQ(copy.intensity, comp.intensity);
+	EXPECT_EQ(copy.priority, comp.priority);
+
+	virasa::ecs::HighlightComponent assigned;
+	assigned = comp;
+	EXPECT_FLOAT_EQ(assigned.color.x, comp.color.x);
+	EXPECT_FLOAT_EQ(assigned.color.y, comp.color.y);
+	EXPECT_FLOAT_EQ(assigned.color.z, comp.color.z);
+	EXPECT_FLOAT_EQ(assigned.intensity, comp.intensity);
+	EXPECT_EQ(assigned.priority, comp.priority);
+
+	virasa::ecs::HighlightComponent moved = std::move(copy);
+	EXPECT_FLOAT_EQ(moved.color.x, comp.color.x);
+	EXPECT_FLOAT_EQ(moved.color.y, comp.color.y);
+	EXPECT_FLOAT_EQ(moved.color.z, comp.color.z);
+	EXPECT_FLOAT_EQ(moved.intensity, comp.intensity);
+	EXPECT_EQ(moved.priority, comp.priority);
+
+	// Priority arbitration: larger value denotes higher priority.
+	virasa::ecs::HighlightComponent winner;
+	winner.color = virasa::math::Vec3(1.0f, 0.0f, 0.0f);
+	winner.priority = 5;
+	virasa::ecs::HighlightComponent loser;
+	loser.color = virasa::math::Vec3(0.0f, 1.0f, 0.0f);
+	loser.priority = 3;
+	EXPECT_GT(winner.priority, loser.priority);
+
+	EXPECT_TRUE(std::is_trivially_destructible_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_trivially_copyable_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_copy_constructible_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_copy_assignable_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::HighlightComponent>);
+	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::HighlightComponent>);
+}

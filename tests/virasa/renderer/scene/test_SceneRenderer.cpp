@@ -155,6 +155,15 @@ TEST(SceneRendererTests, test_register_mesh_uploads_geometry_and_returns_id)
 	err = renderer.RegisterMesh(oneIndex, outId4);
 	EXPECT_EQ(err, RegisterError::InvalidInput);
 	EXPECT_EQ(outId4, 0xDEADBEEFu);
+
+	// Contract: indices.size() == 4 (not a multiple of 3) must return InvalidInput.
+	virasa::MeshData fourIndices;
+	fourIndices.vertices = {v, v, v, v};
+	fourIndices.indices = {0u, 1u, 2u, 3u}; // size 4, not multiple of 3
+	uint32_t outId5 = 0xDEADBEEFu;
+	err = renderer.RegisterMesh(fourIndices, outId5);
+	EXPECT_EQ(err, RegisterError::InvalidInput);
+	EXPECT_EQ(outId5, 0xDEADBEEFu);
 }
 
 TEST(SceneRendererTests, test_register_material_allocates_and_returns_id)

@@ -31,6 +31,11 @@
 #include "virasa/ui/Types.h"
 #include "vulkan/vulkan.h"
 
+namespace virasa::ecs
+{
+class ComponentSystem;
+}
+
 namespace virasa::renderer::scene
 {
 
@@ -44,7 +49,7 @@ namespace virasa::renderer::scene
  */
 class SceneRenderer final
 {
-	public:
+public:
 	SceneRenderer() = default;
 	SceneRenderer(const SceneRenderer&) = delete;
 	SceneRenderer& operator=(const SceneRenderer&) = delete;
