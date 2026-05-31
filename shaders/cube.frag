@@ -78,7 +78,20 @@ void main() {
     VisualMaterialGPU mat = mt.materials[pc.materialId];
 
     vec4 sampled = texture(textures[mat.baseColorTexture], fragUV);
-    vec3 albedo = sampled.rgb * mat.factors.baseColorFactor.rgb;
+    vec4 baseColor = sampled * mat.factors.baseColorFactor;
+    vec3 albedo = baseColor.rgb;
+
+    // Alpha mode (mirrors virasa::AlphaMode: 0 Opaque, 1 Mask, 2 Blend).
+    // Mask discards fragments below the cutoff so the surface reads as a
+    // hard-edged cutout; a surviving Mask fragment is fully opaque since the
+    // Opaque/Mask pipeline keeps depth writes on and blending off. Blend
+    // keeps the base color alpha for source-over compositing in the
+    // depth-write-disabled blend pipeline. Opaque forces alpha to 1.
+    uint alphaMode = mat.factors.alphaModeBits;
+    if (alphaMode == 1u && baseColor.a < mat.factors.alphaCutoff) {
+        discard;
+    }
+    float outAlpha = (alphaMode == 2u) ? baseColor.a : 1.0;
 
     vec3 N = normalize(fragWorldNormal);
 
@@ -126,5 +139,5 @@ void main() {
     }
 
     lit += mat.factors.emissiveFactor;
-    outColor = vec4(lit, 1.0);
+    outColor = vec4(lit, outAlpha);
 }

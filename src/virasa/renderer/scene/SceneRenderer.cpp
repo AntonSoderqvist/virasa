@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "virasa/core/Logger.h"
-#include "virasa/ecs/ComponentAccess.h"
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Projection.h"
 #include "virasa/math/Transform.h"
@@ -355,27 +354,79 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 		}
 	}
 
-	// Step 10: build forward pipeline
+	// Step 10: build four forward pipeline permutations
 	{
-		virasa::PipelineBuilder builder;
-		builder.SetVertexShader(_forwardVertexShader)
-			.SetFragmentShader(_forwardFragmentShader)
-			.SetColorFormat(context.GetSwapchainFormat())
-			.SetDepthFormat(context.GetDepthFormat())
-			.SetCullMode(VK_CULL_MODE_BACK_BIT)
-			.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
-			.SetDepthTest(true)
-			.SetDepthWrite(true)
-			.SetDepthCompareOp(VK_COMPARE_OP_LESS)
-			.AddPushConstantRange(
-				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168)
-			.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
-
-		auto err = builder.Build(device, _forwardPipeline);
-		if (err != virasa::RenderError::None)
+		// Base builder configuration shared by all permutations
+		auto makeBase = [&]() -> virasa::PipelineBuilder
 		{
-			_initialized = false;
-			return err;
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_forwardVertexShader)
+				.SetFragmentShader(_forwardFragmentShader)
+				.SetColorFormat(context.GetSwapchainFormat())
+				.SetDepthFormat(context.GetDepthFormat())
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetDepthTest(true)
+				.SetDepthCompareOp(VK_COMPARE_OP_LESS)
+				.AddPushConstantRange(
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 168)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
+			return b;
+		};
+
+		// _opaquePipeline: back-face cull, depth write on, blend off
+		{
+			auto b = makeBase();
+			b.SetCullMode(VK_CULL_MODE_BACK_BIT)
+				.SetDepthWrite(true)
+				.SetBlendEnabled(false);
+			auto err = b.Build(device, _opaquePipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _opaqueDoubleSidedPipeline: no cull, depth write on, blend off
+		{
+			auto b = makeBase();
+			b.SetCullMode(VK_CULL_MODE_NONE)
+				.SetDepthWrite(true)
+				.SetBlendEnabled(false);
+			auto err = b.Build(device, _opaqueDoubleSidedPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _blendPipeline: back-face cull, depth write OFF, blend on
+		{
+			auto b = makeBase();
+			b.SetCullMode(VK_CULL_MODE_BACK_BIT)
+				.SetDepthWrite(false)
+				.SetBlendEnabled(true);
+			auto err = b.Build(device, _blendPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _blendDoubleSidedPipeline: no cull, depth write OFF, blend on
+		{
+			auto b = makeBase();
+			b.SetCullMode(VK_CULL_MODE_NONE)
+				.SetDepthWrite(false)
+				.SetBlendEnabled(true);
+			auto err = b.Build(device, _blendDoubleSidedPipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
 		}
 	}
 
@@ -638,81 +689,213 @@ virasa::SwapchainStatus SceneRenderer::BeginFrame(uint32_t sceneWidth, uint32_t 
 uint32_t SceneRenderer::RenderWorld(
 	const virasa::ecs::World& world, virasa::ecs::Entity cameraEntity)
 {
+	// Const-correct system lookup: World::FindSystem is non-const, but RenderWorld
+	// takes the world by const reference, so resolve systems through the const
+	// GetSystemId/GetSystem pair (mirrors FindSystem's nullptr-on-miss contract).
+	auto findSystem = [&world](std::string_view name) -> const virasa::ecs::ComponentSystem* {
+		const virasa::ecs::ComponentId id = world.GetSystemId(name);
+		if (id == 0xFFFFFFFFu)
+			return nullptr;
+		return &world.GetSystem(id);
+	};
+
 	// --- Derive camera matrices ---
 	virasa::math::Mat4 viewMatrix(1.0f);
 	virasa::math::Mat4 projMatrix(1.0f);
+	virasa::math::Vec3 cameraEye(0.0f);
 
-	if (world.GetTransforms().Has(cameraEntity) && virasa::ecs::HasCamera(world, cameraEntity))
 	{
-		const auto& cam = virasa::ecs::GetCamera(world, cameraEntity);
+		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
+		// Retrieve camera component from the world's camera system
+		// We access it via the World's component systems directly
+		// The CameraComponent is stored in a system registered under "Camera"
+		const virasa::ecs::ComponentSystem* camSys = findSystem("Camera");
+		if (camSys != nullptr && camSys->Has(cameraEntity) && transforms.Has(cameraEntity))
+		{
+			const auto* camPtr =
+				static_cast<const virasa::ecs::CameraComponent*>(camSys->GetRaw(cameraEntity));
+			if (camPtr != nullptr)
+			{
+				const virasa::ecs::CameraComponent& cam = *camPtr;
+				cameraEye = transforms.GetWorldPosition(cameraEntity);
+				virasa::math::Vec3 forward = transforms.GetWorldForward(cameraEntity);
+				viewMatrix = virasa::math::LookAtRH_ZUp(cameraEye, cameraEye + forward);
 
-		virasa::math::Vec3 eye = world.GetTransforms().GetWorldPosition(cameraEntity);
-		virasa::math::Vec3 forward = world.GetTransforms().GetWorldForward(cameraEntity);
-		viewMatrix = virasa::math::LookAtRH_ZUp(eye, eye + forward);
+				float aspect = (cam.aspect > 0.0f)
+					? cam.aspect
+					: static_cast<float>(_frameSceneWidth) /
+						  static_cast<float>(_frameSceneHeight);
 
-		float aspect = (cam.aspect > 0.0f) ? cam.aspect
-							     : static_cast<float>(_frameSceneWidth) /
-									 static_cast<float>(_frameSceneHeight);
-
-		projMatrix =
-			virasa::math::PerspectiveRH_ZO(cam.fovY, aspect, cam.nearPlane, cam.farPlane);
+				projMatrix = virasa::math::PerspectiveRH_ZO(
+					cam.fovY, aspect, cam.nearPlane, cam.farPlane);
+			}
+		}
 	}
 
 	// --- Gather lights ---
 	std::vector<virasa::LightGPU> lights;
 
-	// Directional lights
-	for (auto entity : virasa::ecs::DirectionalLightEntities(world))
 	{
-		const auto& dl = virasa::ecs::GetDirectionalLight(world, entity);
-		virasa::LightGPU light{};
-		light.type = static_cast<uint32_t>(virasa::LightType::Directional);
-		light.direction = glm::normalize(dl.direction);
-		light.color = dl.color * dl.intensity;
-		lights.push_back(light);
-	}
+		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
 
-	// Point lights
-	for (auto entity : virasa::ecs::PointLightEntities(world))
-	{
-		if (!world.GetTransforms().Has(entity))
-			continue;
-		const auto& pl = virasa::ecs::GetPointLight(world, entity);
-		virasa::LightGPU light{};
-		light.type = static_cast<uint32_t>(virasa::LightType::Point);
-		light.position = world.GetTransforms().GetWorldPosition(entity);
-		light.range = pl.range;
-		light.color = pl.color * pl.intensity;
-		lights.push_back(light);
-	}
+		// Directional lights
+		const virasa::ecs::ComponentSystem* dlSys = findSystem("DirectionalLight");
+		if (dlSys != nullptr)
+		{
+			for (auto entity : dlSys->Entities())
+			{
+				const auto* dlPtr = static_cast<const virasa::ecs::DirectionalLightComponent*>(
+					dlSys->GetRaw(entity));
+				if (dlPtr == nullptr)
+					continue;
+				const auto& dl = *dlPtr;
+				virasa::LightGPU light{};
+				light.type = static_cast<uint32_t>(virasa::LightType::Directional);
+				light.direction = glm::normalize(dl.direction);
+				light.color = dl.color * dl.intensity;
+				lights.push_back(light);
+			}
+		}
 
-	// Spot lights
-	for (auto entity : virasa::ecs::SpotLightEntities(world))
-	{
-		if (!world.GetTransforms().Has(entity))
-			continue;
-		const auto& sl = virasa::ecs::GetSpotLight(world, entity);
-		virasa::LightGPU light{};
-		light.type = static_cast<uint32_t>(virasa::LightType::Spot);
-		light.position = world.GetTransforms().GetWorldPosition(entity);
-		light.direction = world.GetTransforms().GetWorldForward(entity);
-		light.range = sl.range;
-		light.color = sl.color * sl.intensity;
-		light.innerConeCos = sl.innerConeCos;
-		light.outerConeCos = sl.outerConeCos;
-		lights.push_back(light);
+		// Point lights
+		const virasa::ecs::ComponentSystem* plSys = findSystem("PointLight");
+		if (plSys != nullptr)
+		{
+			for (auto entity : plSys->Entities())
+			{
+				if (!transforms.Has(entity))
+					continue;
+				const auto* plPtr = static_cast<const virasa::ecs::PointLightComponent*>(
+					plSys->GetRaw(entity));
+				if (plPtr == nullptr)
+					continue;
+				const auto& pl = *plPtr;
+				virasa::LightGPU light{};
+				light.type = static_cast<uint32_t>(virasa::LightType::Point);
+				light.position = transforms.GetWorldPosition(entity);
+				light.range = pl.range;
+				light.color = pl.color * pl.intensity;
+				lights.push_back(light);
+			}
+		}
+
+		// Spot lights
+		const virasa::ecs::ComponentSystem* slSys = findSystem("SpotLight");
+		if (slSys != nullptr)
+		{
+			for (auto entity : slSys->Entities())
+			{
+				if (!transforms.Has(entity))
+					continue;
+				const auto* slPtr = static_cast<const virasa::ecs::SpotLightComponent*>(
+					slSys->GetRaw(entity));
+				if (slPtr == nullptr)
+					continue;
+				const auto& sl = *slPtr;
+				virasa::LightGPU light{};
+				light.type = static_cast<uint32_t>(virasa::LightType::Spot);
+				light.position = transforms.GetWorldPosition(entity);
+				light.direction = transforms.GetWorldForward(entity);
+				light.range = sl.range;
+				light.color = sl.color * sl.intensity;
+				light.innerConeCos = sl.innerConeCos;
+				light.outerConeCos = sl.outerConeCos;
+				lights.push_back(light);
+			}
+		}
 	}
 
 	_lightTable.UploadFrame(std::span<const virasa::LightGPU>(lights));
 
+	// --- Build drawable list ---
+	struct Drawable
+	{
+		virasa::ecs::Entity entity;
+		uint32_t meshId;
+		uint32_t materialId;
+		virasa::AlphaMode alphaMode;
+		bool doubleSided;
+		float eyeDistance;		   // used for blend bucket sorting
+		virasa::math::Mat4 model; // cached world matrix for push constants
+	};
+
+	std::vector<Drawable> opaqueDrawables;
+	std::vector<Drawable> blendDrawables;
+
+	{
+		const virasa::ecs::TransformSystem& transforms = world.GetTransforms();
+		const virasa::ecs::ComponentSystem* visualSys = findSystem("Visual");
+		const virasa::ecs::ComponentSystem* meshSys = findSystem("Mesh");
+
+		if (visualSys != nullptr && meshSys != nullptr)
+		{
+			for (auto entity : visualSys->Entities())
+			{
+				if (!meshSys->Has(entity))
+					continue;
+				const auto* meshCompPtr =
+					static_cast<const virasa::ecs::MeshComponent*>(meshSys->GetRaw(entity));
+				if (meshCompPtr == nullptr)
+					continue;
+				if (!_meshRegistry.IsAllocated(meshCompPtr->meshId))
+					continue;
+				if (!transforms.Has(entity))
+					continue;
+
+				const auto* visualCompPtr =
+					static_cast<const virasa::ecs::VisualComponent*>(visualSys->GetRaw(entity));
+				if (visualCompPtr == nullptr)
+					continue;
+
+				const virasa::VisualMaterialRasterState rasterState =
+					_materialTable.GetRasterState(visualCompPtr->materialId);
+
+				Drawable d{};
+				d.entity = entity;
+				d.meshId = meshCompPtr->meshId;
+				d.materialId = visualCompPtr->materialId;
+				d.alphaMode = rasterState.alphaMode;
+				d.doubleSided = rasterState.doubleSided;
+				d.model = transforms.GetWorld(entity);
+
+				if (rasterState.alphaMode == virasa::AlphaMode::Blend)
+				{
+					virasa::math::Vec3 worldPos = transforms.GetWorldPosition(entity);
+					virasa::math::Vec3 diff = worldPos - cameraEye;
+					d.eyeDistance = glm::dot(diff, diff); // squared distance, sufficient for sort
+					blendDrawables.push_back(d);
+				}
+				else
+				{
+					d.eyeDistance = 0.0f;
+					opaqueDrawables.push_back(d);
+				}
+			}
+		}
+	}
+
+	// Sort blend bucket back-to-front (decreasing distance)
+	std::sort(blendDrawables.begin(),
+		blendDrawables.end(),
+		[](const Drawable& a, const Drawable& b) { return a.eyeDistance > b.eyeDistance; });
+
+	// Concatenate: opaque first, then blend
+	std::vector<Drawable> allDrawables;
+	allDrawables.reserve(opaqueDrawables.size() + blendDrawables.size());
+	for (auto& d : opaqueDrawables)
+		allDrawables.push_back(d);
+	for (auto& d : blendDrawables)
+		allDrawables.push_back(d);
+
 	// --- Capture state for the record callback ---
 	virasa::math::Mat4 capturedView = viewMatrix;
 	virasa::math::Mat4 capturedProj = projMatrix;
-	uint32_t capturedSceneWidth = _frameSceneWidth;
-	uint32_t capturedSceneHeight = _frameSceneHeight;
 
 	// Capture pointers to owned resources for the lambda
-	virasa::Pipeline* pipeline = &_forwardPipeline;
+	virasa::Pipeline* opaquePipeline = &_opaquePipeline;
+	virasa::Pipeline* opaqueDoubleSidedPipeline = &_opaqueDoubleSidedPipeline;
+	virasa::Pipeline* blendPipeline = &_blendPipeline;
+	virasa::Pipeline* blendDoubleSidedPipeline = &_blendDoubleSidedPipeline;
 	virasa::BindlessTextureArray* bindless = &_bindlessTextures;
 	virasa::renderer::MeshRegistry* meshReg = &_meshRegistry;
 	virasa::VisualMaterialTable* matTable = &_materialTable;
@@ -726,7 +909,10 @@ uint32_t SceneRenderer::RenderWorld(
 			virasa::renderer::graph::ClearColor{0.1f, 0.1f, 0.15f, 1.0f})
 		.DepthAttachment(_frameSceneDepthHandle, virasa::renderer::graph::LoadOp::Clear, 1.0f)
 		.Record(
-			[pipeline,
+			[opaquePipeline,
+				opaqueDoubleSidedPipeline,
+				blendPipeline,
+				blendDoubleSidedPipeline,
 				bindless,
 				meshReg,
 				matTable,
@@ -734,7 +920,7 @@ uint32_t SceneRenderer::RenderWorld(
 				dev,
 				capturedView,
 				capturedProj,
-				&world](const virasa::renderer::graph::GraphContext& gc)
+				allDrawables = std::move(allDrawables)](const virasa::renderer::graph::GraphContext& gc)
 			{
 				VkCommandBuffer cmd = gc.GetCommandBuffer();
 				VkExtent2D extent = gc.GetRenderExtent();
@@ -753,54 +939,64 @@ uint32_t SceneRenderer::RenderWorld(
 				scissor.extent = extent;
 				vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-				pipeline->Bind(cmd);
-
+				// Bind descriptor set once
 				VkDescriptorSet descSet = bindless->GetDescriptorSet();
-				vkCmdBindDescriptorSets(cmd,
-					VK_PIPELINE_BIND_POINT_GRAPHICS,
-					pipeline->GetLayout(),
-					0,
-					1,
-					&descSet,
-					0,
-					nullptr);
 
-				for (auto entity : virasa::ecs::VisualEntities(world))
+				virasa::Pipeline* lastBoundPipeline = nullptr;
+
+				for (const auto& d : allDrawables)
 				{
-					if (!virasa::ecs::HasMesh(world, entity))
-					{
+					if (!meshReg->IsAllocated(d.meshId))
 						continue;
+
+					const auto& mesh = meshReg->Get(d.meshId);
+
+					// Select pipeline
+					virasa::Pipeline* selectedPipeline = nullptr;
+					if (d.alphaMode == virasa::AlphaMode::Blend)
+					{
+						selectedPipeline =
+							d.doubleSided ? blendDoubleSidedPipeline : blendPipeline;
+					}
+					else
+					{
+						selectedPipeline =
+							d.doubleSided ? opaqueDoubleSidedPipeline : opaquePipeline;
 					}
 
-					const auto& meshComp = virasa::ecs::GetMesh(world, entity);
-					if (!meshReg->IsAllocated(meshComp.meshId))
+					if (selectedPipeline != lastBoundPipeline)
 					{
-						continue;
+						selectedPipeline->Bind(cmd);
+						vkCmdBindDescriptorSets(cmd,
+							VK_PIPELINE_BIND_POINT_GRAPHICS,
+							selectedPipeline->GetLayout(),
+							0,
+							1,
+							&descSet,
+							0,
+							nullptr);
+						lastBoundPipeline = selectedPipeline;
 					}
-
-					const auto& mesh = meshReg->Get(meshComp.meshId);
-					const auto& visualComp = virasa::ecs::GetVisual(world, entity);
-
-					if (!world.GetTransforms().Has(entity))
-					{
-						continue;
-					}
-					const virasa::math::Mat4 model = world.GetTransforms().GetWorld(entity);
-
-					const virasa::math::Mat4 mvp = capturedProj * capturedView * model;
 
 					PushConstants pc{};
-					pc.mvp = mvp;
-					pc.model = model;
+					pc.model = {}; // will be set below — placeholder
 					pc.vertexBufferAddress = mesh.GetVertexBufferAddress(*dev);
 					pc.indexBufferAddress = mesh.GetIndexBufferAddress(*dev);
 					pc.materialBufferAddress = matTable->GetBufferAddress();
 					pc.lightBufferAddress = lightTable->GetBufferAddress();
-					pc.materialId = visualComp.materialId;
+					pc.materialId = d.materialId;
 					pc.lightCount = lightTable->GetLightCount();
 
+					// We need the world matrix — it was pre-gathered; store it in the drawable
+					// We stored it via allDrawables which captured world matrices at build time.
+					// Since we can't call world.GetTransforms() here (world not captured),
+					// we need to capture the model matrix in the Drawable struct.
+					// NOTE: model matrix is stored in d.model (see below — we add it to Drawable)
+					pc.model = d.model;
+					pc.mvp = capturedProj * capturedView * d.model;
+
 					vkCmdPushConstants(cmd,
-						pipeline->GetLayout(),
+						selectedPipeline->GetLayout(),
 						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 						0,
 						sizeof(PushConstants),

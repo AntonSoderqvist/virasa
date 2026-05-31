@@ -158,7 +158,10 @@ class SceneRenderer final
 
 	virasa::ShaderModule _forwardVertexShader = {};
 	virasa::ShaderModule _forwardFragmentShader = {};
-	virasa::Pipeline _forwardPipeline = {};
+	virasa::Pipeline _opaquePipeline = {};
+	virasa::Pipeline _opaqueDoubleSidedPipeline = {};
+	virasa::Pipeline _blendPipeline = {};
+	virasa::Pipeline _blendDoubleSidedPipeline = {};
 
 	virasa::renderer::graph::ImageRegistry _imageRegistry = {};
 	virasa::renderer::graph::BufferRegistry _bufferRegistry = {};
