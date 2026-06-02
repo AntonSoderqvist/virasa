@@ -13,12 +13,23 @@
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-vs2022-x64"
+    },
+    {
+      "name": "linux",
+      "displayName": "Linux",
+      "description": "Configure Virasa on Linux with Ninja.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build"
     }
   ],
   "buildPresets": [
     {
       "name": "windows-vs2022-x64",
       "configurePreset": "windows-vs2022-x64"
+    },
+    {
+      "name": "linux",
+      "configurePreset": "linux"
     }
   ]
 }
