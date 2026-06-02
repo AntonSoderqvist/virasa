@@ -1,7 +1,9 @@
 #include "virasa/renderer/text/UiPass.h"
 
 #include <array>
+#include <bit>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <string_view>
 #include <utility>
@@ -14,6 +16,7 @@ namespace virasa::renderer::text
 namespace
 {
 constexpr VkDeviceSize kPerFrameGeometryBufferSize = 65536;
+constexpr VkDeviceSize kMaxPerFrameSliceSize = 16777216;
 
 struct QuadVertex
 {
@@ -67,8 +70,36 @@ struct GeometryLayout
 	VkDeviceSize textVertexOffset = 0;
 	VkDeviceSize textIndexOffset = 0;
 	uint32_t textIndexCount = 0;
-	VkBuffer buffer = VK_NULL_HANDLE;
 };
+
+struct PackedGeometry
+{
+	std::vector<std::byte> bytes;
+	GeometryLayout layout = {};
+};
+
+[[nodiscard]] VkDeviceSize AlignUp(VkDeviceSize value, VkDeviceSize alignment) noexcept
+{
+	return alignment == 0 ? value : ((value + alignment - 1) / alignment) * alignment;
+}
+
+[[nodiscard]] VkDeviceSize NextPowerOfTwoClamped(VkDeviceSize value) noexcept
+{
+	if (value <= 1)
+	{
+		return 1;
+	}
+
+	if (value >= kMaxPerFrameSliceSize)
+	{
+		return kMaxPerFrameSliceSize;
+	}
+
+	const uint64_t rounded = std::bit_ceil(static_cast<uint64_t>(value));
+	return static_cast<VkDeviceSize>(rounded > kMaxPerFrameSliceSize ?
+		kMaxPerFrameSliceSize :
+		rounded);
+}
 
 [[nodiscard]] uint32_t DecodeUtf8Codepoint(std::string_view text, size_t& offset) noexcept
 {
@@ -117,15 +148,15 @@ struct GeometryLayout
 
 UiPass::~UiPass()
 {
-	if (_device != VK_NULL_HANDLE)
+	if (_device != nullptr)
 	{
 		if (_textDescriptorPool != VK_NULL_HANDLE)
 		{
-			vkDestroyDescriptorPool(_device, _textDescriptorPool, nullptr);
+			vkDestroyDescriptorPool(_device->GetHandle(), _textDescriptorPool, nullptr);
 		}
 		if (_textSetLayout != VK_NULL_HANDLE)
 		{
-			vkDestroyDescriptorSetLayout(_device, _textSetLayout, nullptr);
+			vkDestroyDescriptorSetLayout(_device->GetHandle(), _textSetLayout, nullptr);
 		}
 	}
 }
@@ -142,7 +173,7 @@ UiPass::UiPass(UiPass&& other) noexcept
 {
 	other._perFrameSliceSize = 0;
 	other._framesInFlight = 0;
-	other._device = VK_NULL_HANDLE;
+	other._device = nullptr;
 	other._textSetLayout = VK_NULL_HANDLE;
 	other._textDescriptorPool = VK_NULL_HANDLE;
 	other._textDescriptorSet = VK_NULL_HANDLE;
@@ -155,15 +186,15 @@ UiPass& UiPass::operator=(UiPass&& other) noexcept
 	{
 		return *this;
 	}
-	if (_device != VK_NULL_HANDLE)
+	if (_device != nullptr)
 	{
 		if (_textDescriptorPool != VK_NULL_HANDLE)
 		{
-			vkDestroyDescriptorPool(_device, _textDescriptorPool, nullptr);
+			vkDestroyDescriptorPool(_device->GetHandle(), _textDescriptorPool, nullptr);
 		}
 		if (_textSetLayout != VK_NULL_HANDLE)
 		{
-			vkDestroyDescriptorSetLayout(_device, _textSetLayout, nullptr);
+			vkDestroyDescriptorSetLayout(_device->GetHandle(), _textSetLayout, nullptr);
 		}
 	}
 	_atlasImage = std::move(other._atlasImage);
@@ -179,12 +210,12 @@ UiPass& UiPass::operator=(UiPass&& other) noexcept
 	_textDescriptorPool = other._textDescriptorPool;
 	_textDescriptorSet = other._textDescriptorSet;
 	_initialized = other._initialized;
-	other._device = VK_NULL_HANDLE;
+	other._perFrameSliceSize = 0;
+	other._framesInFlight = 0;
+	other._device = nullptr;
 	other._textSetLayout = VK_NULL_HANDLE;
 	other._textDescriptorPool = VK_NULL_HANDLE;
 	other._textDescriptorSet = VK_NULL_HANDLE;
-	other._perFrameSliceSize = 0;
-	other._framesInFlight = 0;
 	other._initialized = false;
 	return *this;
 }
@@ -457,7 +488,7 @@ RenderError UiPass::Initialize(const Device& device, const Context& context,
 	layoutInfo.bindingCount = 1;
 	layoutInfo.pBindings = &atlasBinding;
 
-	fresh._device = device.GetHandle();
+	fresh._device = &device;
 	if (vkCreateDescriptorSetLayout(
 		    device.GetHandle(), &layoutInfo, nullptr, &fresh._textSetLayout) != VK_SUCCESS)
 	{
@@ -589,13 +620,17 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 {
 	assert(_initialized);
 	assert(frameIndex < _framesInFlight);
-	const VkDeviceSize frameBase = static_cast<VkDeviceSize>(frameIndex) * _perFrameSliceSize;
 
+	PackedGeometry packed = {};
 	std::vector<QuadVertex> quadVertices;
-	std::vector<uint16_t> quadIndices;
+	std::vector<uint32_t> quadIndices;
+	std::vector<ImageQuadVertex> imageVertices;
+	std::vector<uint32_t> imageIndices;
+	std::vector<TextVertex> textVertices;
+	std::vector<uint32_t> textIndices;
+
 	quadVertices.reserve(list.GetQuads().size() * 4);
 	quadIndices.reserve(list.GetQuads().size() * 6);
-
 	for (const virasa::ui::QuadCommand& quad : list.GetQuads())
 	{
 		if (quad.width <= 0.0f || quad.height <= 0.0f)
@@ -603,7 +638,7 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			continue;
 		}
 
-		const uint16_t baseIndex = static_cast<uint16_t>(quadVertices.size());
+		const uint32_t baseIndex = static_cast<uint32_t>(quadVertices.size());
 		const float x0 = quad.x;
 		const float y0 = quad.y;
 		const float x1 = quad.x + quad.width;
@@ -626,11 +661,8 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 		quadIndices.push_back(baseIndex + 3);
 	}
 
-	std::vector<ImageQuadVertex> imageVertices;
-	std::vector<uint16_t> imageIndices;
 	imageVertices.reserve(list.GetImageQuads().size() * 4);
 	imageIndices.reserve(list.GetImageQuads().size() * 6);
-
 	for (const virasa::ui::ImageQuadCommand& quad : list.GetImageQuads())
 	{
 		if (quad.width <= 0.0f || quad.height <= 0.0f)
@@ -638,7 +670,7 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			continue;
 		}
 
-		const uint16_t baseIndex = static_cast<uint16_t>(imageVertices.size());
+		const uint32_t baseIndex = static_cast<uint32_t>(imageVertices.size());
 		const float x0 = quad.x;
 		const float y0 = quad.y;
 		const float x1 = quad.x + quad.width;
@@ -689,12 +721,9 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 		imageIndices.push_back(baseIndex + 3);
 	}
 
-	std::vector<TextVertex> textVertices;
-	std::vector<uint16_t> textIndices;
 	const std::string_view textBuffer = list.GetTextBuffer();
 	const float atlasWidth = static_cast<float>(atlas.GetAtlasWidth());
 	const float atlasHeight = static_cast<float>(atlas.GetAtlasHeight());
-
 	for (const virasa::ui::TextCommand& text : list.GetTexts())
 	{
 		if (text.textLength == 0)
@@ -714,15 +743,15 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 
 			if (glyph.width > 0 && glyph.height > 0)
 			{
-				const uint16_t baseIndex = static_cast<uint16_t>(textVertices.size());
+				const uint32_t baseIndex = static_cast<uint32_t>(textVertices.size());
 				const float x0 = penX + static_cast<float>(glyph.bearingX);
 				const float y0 = penY - static_cast<float>(glyph.bearingY);
 				const float x1 = x0 + static_cast<float>(glyph.width);
 				const float y1 = y0 + static_cast<float>(glyph.height);
-				const float u0 = static_cast<float>(glyph.u0) / atlasWidth;
-				const float v0 = static_cast<float>(glyph.v0) / atlasHeight;
-				const float u1 = static_cast<float>(glyph.u1) / atlasWidth;
-				const float v1 = static_cast<float>(glyph.v1) / atlasHeight;
+				const float u0 = atlasWidth > 0.0f ? static_cast<float>(glyph.u0) / atlasWidth : 0.0f;
+				const float v0 = atlasHeight > 0.0f ? static_cast<float>(glyph.v0) / atlasHeight : 0.0f;
+				const float u1 = atlasWidth > 0.0f ? static_cast<float>(glyph.u1) / atlasWidth : 0.0f;
+				const float v1 = atlasHeight > 0.0f ? static_cast<float>(glyph.v1) / atlasHeight : 0.0f;
 
 				textVertices.push_back({x0,
 					y0,
@@ -769,81 +798,107 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 		}
 	}
 
-	GeometryLayout geometry = {};
-	geometry.quadVertexOffset = frameBase;
-	geometry.quadIndexOffset =
-		geometry.quadVertexOffset +
+	const VkDeviceSize quadVertexBytes =
 		static_cast<VkDeviceSize>(quadVertices.size() * sizeof(QuadVertex));
-	geometry.quadIndexCount = static_cast<uint32_t>(quadIndices.size());
-	geometry.imageVertexOffset = geometry.quadIndexOffset +
-					     static_cast<VkDeviceSize>(quadIndices.size() * sizeof(uint16_t));
-	geometry.imageIndexOffset =
-		geometry.imageVertexOffset +
+	const VkDeviceSize quadIndexBytes =
+		static_cast<VkDeviceSize>(quadIndices.size() * sizeof(uint32_t));
+	const VkDeviceSize imageVertexBytes =
 		static_cast<VkDeviceSize>(imageVertices.size() * sizeof(ImageQuadVertex));
-	geometry.imageIndexCount = static_cast<uint32_t>(imageIndices.size());
-	geometry.textVertexOffset = geometry.imageIndexOffset +
-					    static_cast<VkDeviceSize>(imageIndices.size() * sizeof(uint16_t));
-	geometry.textIndexOffset =
-		geometry.textVertexOffset +
+	const VkDeviceSize imageIndexBytes =
+		static_cast<VkDeviceSize>(imageIndices.size() * sizeof(uint32_t));
+	const VkDeviceSize textVertexBytes =
 		static_cast<VkDeviceSize>(textVertices.size() * sizeof(TextVertex));
-	geometry.textIndexCount = static_cast<uint32_t>(textIndices.size());
+	const VkDeviceSize textIndexBytes =
+		static_cast<VkDeviceSize>(textIndices.size() * sizeof(uint32_t));
 
-	const VkDeviceSize totalSize =
-		geometry.textIndexOffset +
-		static_cast<VkDeviceSize>(textIndices.size() * sizeof(uint16_t));
-	assert(totalSize <= frameBase + _perFrameSliceSize);
+	VkDeviceSize cursor = 0;
+	packed.layout.quadVertexOffset = cursor;
+	cursor += quadVertexBytes;
+	packed.layout.quadIndexOffset = cursor;
+	cursor += quadIndexBytes;
+	packed.layout.quadIndexCount = static_cast<uint32_t>(quadIndices.size());
+	packed.layout.imageVertexOffset = cursor;
+	cursor += imageVertexBytes;
+	packed.layout.imageIndexOffset = cursor;
+	cursor += imageIndexBytes;
+	packed.layout.imageIndexCount = static_cast<uint32_t>(imageIndices.size());
+	packed.layout.textVertexOffset = cursor;
+	cursor += textVertexBytes;
+	packed.layout.textIndexOffset = cursor;
+	cursor += textIndexBytes;
+	packed.layout.textIndexCount = static_cast<uint32_t>(textIndices.size());
+
+	const VkDeviceSize requiredSize = cursor;
+	if (requiredSize > _perFrameSliceSize)
+	{
+		const VkDeviceSize newSliceSize = NextPowerOfTwoClamped(requiredSize);
+		if (newSliceSize > _perFrameSliceSize)
+		{
+			assert(_device != nullptr);
+			vkDeviceWaitIdle(_device->GetHandle());
+			BufferConfig geometryConfig = {};
+			geometryConfig.size = newSliceSize * _framesInFlight;
+			geometryConfig.usage =
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+			geometryConfig.memoryProperties =
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+			(void)_geometryBuffer.Initialize(*_device, geometryConfig);
+			_perFrameSliceSize = newSliceSize;
+		}
+	}
+
+	const VkDeviceSize sliceCapacity = _perFrameSliceSize > kMaxPerFrameSliceSize ?
+		kMaxPerFrameSliceSize :
+		_perFrameSliceSize;
+	packed.bytes.resize(static_cast<size_t>(requiredSize > sliceCapacity ? sliceCapacity : requiredSize));
+
+	auto appendBytes = [&packed](VkDeviceSize offset, const void* src, VkDeviceSize sizeBytes)
+	{
+		if (sizeBytes == 0 || offset >= packed.bytes.size())
+		{
+			return;
+		}
+
+		const VkDeviceSize writable = static_cast<VkDeviceSize>(packed.bytes.size()) - offset;
+		const VkDeviceSize copyBytes = sizeBytes < writable ? sizeBytes : writable;
+		std::memcpy(packed.bytes.data() + static_cast<size_t>(offset), src, static_cast<size_t>(copyBytes));
+	};
+
+	appendBytes(packed.layout.quadVertexOffset, quadVertices.data(), quadVertexBytes);
+	appendBytes(packed.layout.quadIndexOffset, quadIndices.data(), quadIndexBytes);
+	appendBytes(packed.layout.imageVertexOffset, imageVertices.data(), imageVertexBytes);
+	appendBytes(packed.layout.imageIndexOffset, imageIndices.data(), imageIndexBytes);
+	appendBytes(packed.layout.textVertexOffset, textVertices.data(), textVertexBytes);
+	appendBytes(packed.layout.textIndexOffset, textIndices.data(), textIndexBytes);
+
+	const VkDeviceSize frameBase = static_cast<VkDeviceSize>(frameIndex) * _perFrameSliceSize;
+	packed.layout.quadVertexOffset += frameBase;
+	packed.layout.quadIndexOffset += frameBase;
+	packed.layout.imageVertexOffset += frameBase;
+	packed.layout.imageIndexOffset += frameBase;
+	packed.layout.textVertexOffset += frameBase;
+	packed.layout.textIndexOffset += frameBase;
 
 	void* mapped = _geometryBuffer.Map();
 	assert(mapped != nullptr);
-
-	uint8_t* bytes = static_cast<uint8_t*>(mapped);
-	if (!quadVertices.empty())
+	if (!packed.bytes.empty())
 	{
-		std::memcpy(bytes + geometry.quadVertexOffset,
-			quadVertices.data(),
-			quadVertices.size() * sizeof(QuadVertex));
+		std::memcpy(static_cast<std::byte*>(mapped) + frameBase,
+			packed.bytes.data(),
+			packed.bytes.size());
 	}
-	if (!quadIndices.empty())
-	{
-		std::memcpy(bytes + geometry.quadIndexOffset,
-			quadIndices.data(),
-			quadIndices.size() * sizeof(uint16_t));
-	}
-	if (!imageVertices.empty())
-	{
-		std::memcpy(bytes + geometry.imageVertexOffset,
-			imageVertices.data(),
-			imageVertices.size() * sizeof(ImageQuadVertex));
-	}
-	if (!imageIndices.empty())
-	{
-		std::memcpy(bytes + geometry.imageIndexOffset,
-			imageIndices.data(),
-			imageIndices.size() * sizeof(uint16_t));
-	}
-	if (!textVertices.empty())
-	{
-		std::memcpy(bytes + geometry.textVertexOffset,
-			textVertices.data(),
-			textVertices.size() * sizeof(TextVertex));
-	}
-	if (!textIndices.empty())
-	{
-		std::memcpy(bytes + geometry.textIndexOffset,
-			textIndices.data(),
-			textIndices.size() * sizeof(uint16_t));
-	}
-
-	geometry.buffer = _geometryBuffer.GetHandle();
 
 	const PushConstants pushConstants = {
 		2.0f / static_cast<float>(windowWidth), 2.0f / static_cast<float>(windowHeight)};
 
+	const VkPipeline quadPipelineHandle = _quadPipeline.GetHandle();
 	const VkPipelineLayout quadPipelineLayout = _quadPipeline.GetLayout();
+	const VkPipeline imagePipelineHandle = _imageQuadPipeline.GetHandle();
 	const VkPipelineLayout imagePipelineLayout = _imageQuadPipeline.GetLayout();
+	const VkPipeline textPipelineHandle = _textPipeline.GetHandle();
 	const VkPipelineLayout textPipelineLayout = _textPipeline.GetLayout();
-	const VkDescriptorSet textDescriptorSet = _textDescriptorSet;
 	const VkBuffer geometryBufferHandle = _geometryBuffer.GetHandle();
+	const VkDescriptorSet textDescriptorSet = _textDescriptorSet;
 
 	virasa::renderer::graph::PassBuilder& passBuilder = graph.AddPass("ui");
 	passBuilder.ColorAttachment(swapchainTarget, virasa::renderer::graph::LoadOp::Load, {});
@@ -853,14 +908,16 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 	}
 	passBuilder.Record(
 		[pushConstants,
-			geometry,
+			geometry = packed.layout,
 			geometryBufferHandle,
+			quadPipelineHandle,
 			quadPipelineLayout,
+			imagePipelineHandle,
 			imagePipelineLayout,
+			textPipelineHandle,
 			textPipelineLayout,
 			textDescriptorSet,
-			bindlessSet,
-			this](const virasa::renderer::graph::GraphContext& ctx)
+			bindlessSet](const virasa::renderer::graph::GraphContext& ctx)
 		{
 			const VkCommandBuffer cmd = ctx.GetCommandBuffer();
 			const VkExtent2D extent = ctx.GetRenderExtent();
@@ -881,13 +938,13 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			{
 				vkCmdSetViewport(cmd, 0, 1, &viewport);
 				vkCmdSetScissor(cmd, 0, 1, &scissor);
-				this->_quadPipeline.Bind(cmd);
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, quadPipelineHandle);
 				const VkDeviceSize vertexOffset = geometry.quadVertexOffset;
 				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
 				vkCmdBindIndexBuffer(cmd,
 					geometryBufferHandle,
 					geometry.quadIndexOffset,
-					VK_INDEX_TYPE_UINT16);
+					VK_INDEX_TYPE_UINT32);
 				vkCmdPushConstants(cmd,
 					quadPipelineLayout,
 					VK_SHADER_STAGE_VERTEX_BIT,
@@ -901,13 +958,13 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			{
 				vkCmdSetViewport(cmd, 0, 1, &viewport);
 				vkCmdSetScissor(cmd, 0, 1, &scissor);
-				this->_imageQuadPipeline.Bind(cmd);
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, imagePipelineHandle);
 				const VkDeviceSize vertexOffset = geometry.imageVertexOffset;
 				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
 				vkCmdBindIndexBuffer(cmd,
 					geometryBufferHandle,
 					geometry.imageIndexOffset,
-					VK_INDEX_TYPE_UINT16);
+					VK_INDEX_TYPE_UINT32);
 				vkCmdPushConstants(cmd,
 					imagePipelineLayout,
 					VK_SHADER_STAGE_VERTEX_BIT,
@@ -929,13 +986,13 @@ void UiPass::Submit(virasa::renderer::graph::Graph& graph,
 			{
 				vkCmdSetViewport(cmd, 0, 1, &viewport);
 				vkCmdSetScissor(cmd, 0, 1, &scissor);
-				this->_textPipeline.Bind(cmd);
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, textPipelineHandle);
 				const VkDeviceSize vertexOffset = geometry.textVertexOffset;
 				vkCmdBindVertexBuffers(cmd, 0, 1, &geometryBufferHandle, &vertexOffset);
 				vkCmdBindIndexBuffer(cmd,
 					geometryBufferHandle,
 					geometry.textIndexOffset,
-					VK_INDEX_TYPE_UINT16);
+					VK_INDEX_TYPE_UINT32);
 				vkCmdPushConstants(cmd,
 					textPipelineLayout,
 					VK_SHADER_STAGE_VERTEX_BIT,

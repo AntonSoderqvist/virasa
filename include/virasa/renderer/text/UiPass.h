@@ -75,7 +75,7 @@ class UiPass final
 	Buffer _geometryBuffer = {};
 	VkDeviceSize _perFrameSliceSize = 0;
 	uint32_t _framesInFlight = 0;
-	VkDevice _device = VK_NULL_HANDLE;
+	const Device* _device = nullptr;
 	VkDescriptorSetLayout _textSetLayout = VK_NULL_HANDLE;
 	VkDescriptorPool _textDescriptorPool = VK_NULL_HANDLE;
 	VkDescriptorSet _textDescriptorSet = VK_NULL_HANDLE;
