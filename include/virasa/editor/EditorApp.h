@@ -37,6 +37,8 @@ private:
 	float _cameraYaw   = 0.0f;
 	float _cameraPitch = 0.0f;
 	virasa::math::Vec3 _cameraPosition = {4.0f, 4.0f, 3.0f};
+	int _touchpadScrollLatch = 0;
+	int _pinchLatch = 0;
 };
 
 } // namespace virasa::editor

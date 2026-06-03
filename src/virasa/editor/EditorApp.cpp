@@ -329,12 +329,54 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		inputState.Update(events);
 
-		float wheelScrollY = 0.0f;
+		if (_touchpadScrollLatch > 0)
+			--_touchpadScrollLatch;
+		if (_pinchLatch > 0)
+			--_pinchLatch;
+
+		float wheelDollyY  = 0.0f;
+		float padScrollX   = 0.0f;
+		float padScrollY   = 0.0f;
+		float pinchScale   = 1.0f;
+		int   pinchCount   = 0;
+		bool  hasPinch     = false;
+
+		for (const auto& event : events)
+		{
+			if (event.type == virasa::EventType::Pinch)
+			{
+				pinchScale = event.pinch.scale; // use last event, not product
+				++pinchCount;
+				hasPinch = true;
+			}
+		}
+
+		if (pinchCount > 1)
+		{
+			LOG_DEBUG(logger, "pinch events per frame: {} last scale: {:.4f}", pinchCount, pinchScale);
+		}
+
+		if (hasPinch)
+			_pinchLatch = 10;
+
 		for (const auto& event : events)
 		{
 			if (event.type == virasa::EventType::MouseWheel)
 			{
-				wheelScrollY += event.mouseWheel.scrollY;
+				if (_pinchLatch > 0)
+				{
+					// Suppress all scroll during and briefly after a pinch.
+				}
+				else if (_touchpadScrollLatch > 0 || event.mouseWheel.integerY == 0)
+				{
+					padScrollX += event.mouseWheel.scrollX;
+					padScrollY += event.mouseWheel.scrollY;
+					_touchpadScrollLatch = 4;
+				}
+				else
+				{
+					wheelDollyY += event.mouseWheel.scrollY;
+				}
 			}
 		}
 
@@ -342,10 +384,13 @@ int EditorApp::Run(int argc, char** argv)
 		// Step 3: Camera control
 		// ------------------------------------------------------------------
 		{
-			const float kRotateSensitivity = 0.005f;
-			const float kPanSensitivity = 0.01f;
-			const float kZoomSensitivity = 0.5f;
-			const float kPitchLimit = glm::radians(89.0f);
+			const float kRotateSensitivity        = 0.005f;
+			const float kPanSensitivity           = 0.01f;
+			const float kZoomSensitivity          = 0.5f;
+			const float kTouchpadRotateSensitivity = 1.0f;
+			const float kTouchpadPanSensitivity   = 1.0f;
+			const float kPinchZoomSensitivity     = 2.0f;
+			const float kPitchLimit               = glm::radians(89.0f);
 
 			virasa::math::Quat yawQuat =
 				glm::angleAxis(_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
@@ -353,14 +398,15 @@ int EditorApp::Run(int argc, char** argv)
 				glm::angleAxis(_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
 			virasa::math::Quat orientation = yawQuat * pitchQuat;
 
+			// Middle-mouse: orbit or pan (Shift)
 			if (inputState.IsMouseButtonDown(virasa::MouseButton::Middle))
 			{
 				auto [dx, dy] = inputState.GetMouseDelta();
 
-				const bool ctrlHeld = inputState.IsKeyDown(virasa::KeyCode::LCtrl) ||
-							    inputState.IsKeyDown(virasa::KeyCode::RCtrl);
+				const bool shiftHeld = inputState.IsKeyDown(virasa::KeyCode::LShift) ||
+				                       inputState.IsKeyDown(virasa::KeyCode::RShift);
 
-				if (ctrlHeld)
+				if (shiftHeld)
 				{
 					_cameraPosition +=
 						(orientation * virasa::math::Vec3(1.0f, 0.0f, 0.0f)) *
@@ -383,10 +429,49 @@ int EditorApp::Run(int argc, char** argv)
 				}
 			}
 
-			if (wheelScrollY != 0.0f)
+			// Touchpad two-finger drag: orbit or pan (Shift)
+			if (padScrollX != 0.0f || padScrollY != 0.0f)
+			{
+				const bool shiftHeld = inputState.IsKeyDown(virasa::KeyCode::LShift) ||
+				                       inputState.IsKeyDown(virasa::KeyCode::RShift);
+
+				if (shiftHeld)
+				{
+					_cameraPosition +=
+						(orientation * virasa::math::Vec3(1.0f, 0.0f, 0.0f)) *
+						(-padScrollX * kTouchpadPanSensitivity);
+					_cameraPosition +=
+						(orientation * virasa::math::Vec3(0.0f, 0.0f, 1.0f)) *
+						(padScrollY * kTouchpadPanSensitivity);
+				}
+				else
+				{
+					_cameraYaw -= padScrollX * kTouchpadRotateSensitivity;
+					_cameraPitch -= padScrollY * kTouchpadRotateSensitivity;
+					_cameraPitch = std::clamp(_cameraPitch, -kPitchLimit, kPitchLimit);
+
+					yawQuat = glm::angleAxis(
+						_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+					pitchQuat = glm::angleAxis(
+						_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+					orientation = yawQuat * pitchQuat;
+				}
+			}
+
+			// Mouse wheel: zoom (dolly)
+			if (wheelDollyY != 0.0f)
 			{
 				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
-							 (wheelScrollY * kZoomSensitivity);
+				                   (wheelDollyY * kZoomSensitivity);
+			}
+
+			// Touchpad pinch: zoom (dolly)
+			if (pinchScale != 1.0f)
+			{
+				constexpr float kMaxPinchDollyPerFrame = 0.4f;
+				const float rawDolly = (pinchScale - 1.0f) * kPinchZoomSensitivity;
+				const float dolly    = std::clamp(rawDolly, -kMaxPinchDollyPerFrame, kMaxPinchDollyPerFrame);
+				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) * dolly;
 			}
 
 			virasa::math::Transform camTransform = world.Transforms().GetLocal(cameraEntity);

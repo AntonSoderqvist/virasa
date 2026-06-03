@@ -31,6 +31,7 @@ enum class EventType : uint8_t
 	MouseMoved,
 	MouseWheel,
 	TextInput,
+	Pinch,
 	Count
 };
 
@@ -216,10 +217,27 @@ public:
 	struct MouseWheelPayload
 	{
 	public:
-		/// Horizontal scroll amount.
+		/// Horizontal scroll amount (precise, sub-tick for touchpads).
 		float scrollX;
-		/// Vertical scroll amount.
+		/// Vertical scroll amount (precise, sub-tick for touchpads).
 		float scrollY;
+		/// Accumulated whole-tick horizontal scroll count (SDL integer_x).
+		int32_t integerX;
+		/// Accumulated whole-tick vertical scroll count (SDL integer_y).
+		int32_t integerY;
+	};
+
+	/**
+	 * @brief Touchpad pinch gesture event payload.
+	 *
+	 * Valid when type is Pinch. scale > 1.0 means fingers apart (zoom in);
+	 * scale < 1.0 means fingers together (zoom out).
+	 */
+	struct PinchPayload
+	{
+	public:
+		/// Cumulative pinch scale factor for this gesture update.
+		float scale;
 	};
 
 	/**
@@ -256,6 +274,9 @@ public:
 
 		/// Valid when type is TextInput.
 		TextInputData textInput;
+
+		/// Valid when type is Pinch.
+		PinchPayload pinch;
 	};
 
 	/// @brief Default-constructs an Event with type None and timestamp 0.

@@ -44,10 +44,12 @@ TEST(Events, test_event_type_enum_values_in_declared_order)
 		static_cast<uint8_t>(EventType::MouseWheel));
 	EXPECT_LT(static_cast<uint8_t>(EventType::MouseWheel),
 		static_cast<uint8_t>(EventType::TextInput));
-	EXPECT_LT(static_cast<uint8_t>(EventType::TextInput), static_cast<uint8_t>(EventType::Count));
+	EXPECT_LT(static_cast<uint8_t>(EventType::TextInput),
+		static_cast<uint8_t>(EventType::Pinch));
+	EXPECT_LT(static_cast<uint8_t>(EventType::Pinch), static_cast<uint8_t>(EventType::Count));
 
-	// Count equals the number of preceding values (14 values before Count: None..TextInput).
-	EXPECT_EQ(static_cast<uint8_t>(EventType::Count), uint8_t{14});
+	// Count equals the number of preceding values (15 values before Count: None..Pinch).
+	EXPECT_EQ(static_cast<uint8_t>(EventType::Count), uint8_t{15});
 }
 
 // ---------------------------------------------------------------------------
@@ -249,15 +251,19 @@ TEST(Events, test_event_payload_is_valid_only_for_matching_type)
 		EXPECT_EQ(ev.mouseMove.deltaY, int32_t{3});
 	}
 
-	// MouseWheel — mouseWheel payload.
+	// MouseWheel — mouseWheel payload including integer tick fields.
 	{
 		Event ev;
 		ev.type = EventType::MouseWheel;
 		ev.timestamp = 6u;
 		ev.mouseWheel.scrollX = 0.0f;
 		ev.mouseWheel.scrollY = -1.5f;
+		ev.mouseWheel.integerX = 0;
+		ev.mouseWheel.integerY = -1;
 		EXPECT_FLOAT_EQ(ev.mouseWheel.scrollX, 0.0f);
 		EXPECT_FLOAT_EQ(ev.mouseWheel.scrollY, -1.5f);
+		EXPECT_EQ(ev.mouseWheel.integerX, int32_t{0});
+		EXPECT_EQ(ev.mouseWheel.integerY, int32_t{-1});
 	}
 
 	// WindowResized — resize payload.
@@ -282,5 +288,14 @@ TEST(Events, test_event_payload_is_valid_only_for_matching_type)
 		ev.textInput.length = kLen;
 		EXPECT_EQ(ev.textInput.length, kLen);
 		EXPECT_STREQ(ev.textInput.utf8, "hello");
+	}
+
+	// Pinch — pinch payload.
+	{
+		Event ev;
+		ev.type = EventType::Pinch;
+		ev.timestamp = 9u;
+		ev.pinch.scale = 1.25f;
+		EXPECT_FLOAT_EQ(ev.pinch.scale, 1.25f);
 	}
 }

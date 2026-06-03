@@ -404,6 +404,28 @@ std::span<const Event> Platform::PollEvents()
 				ev.type = EventType::MouseWheel;
 				ev.mouseWheel.scrollX = sdlEvent.wheel.x;
 				ev.mouseWheel.scrollY = sdlEvent.wheel.y;
+				ev.mouseWheel.integerX = sdlEvent.wheel.integer_x;
+				ev.mouseWheel.integerY = sdlEvent.wheel.integer_y;
+				break;
+			}
+
+			case SDL_EVENT_PINCH_BEGIN:
+			{
+				ev.type = EventType::Pinch;
+				ev.pinch.scale = 1.0f; // gesture-start sentinel; contributes no zoom
+				break;
+			}
+
+			case SDL_EVENT_PINCH_UPDATE:
+			{
+				ev.type = EventType::Pinch;
+				ev.pinch.scale = sdlEvent.pinch.scale;
+				break;
+			}
+
+			case SDL_EVENT_PINCH_END:
+			{
+				translated = false;
 				break;
 			}
 
