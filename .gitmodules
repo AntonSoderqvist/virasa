@@ -23,5 +23,5 @@
 	url = https://github.com/g-truc/glm.git
 	ignore = dirty
 [submodule ".contracts"]
-	path = virasa/.contracts
+	path = .contracts
 	url = git@github.com:AntonSoderqvist/virasa-contracts.git
