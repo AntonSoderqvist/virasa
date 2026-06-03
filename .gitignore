@@ -1,5 +1,4 @@
 .env
-.contracts/
 .agents/
 build/
 .tmp/
