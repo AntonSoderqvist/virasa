@@ -25,3 +25,5 @@
 [submodule ".contracts"]
 	path = .contracts
 	url = git@github.com:AntonSoderqvist/virasa-contracts.git
+	ignore = dirty
+	branch = main
