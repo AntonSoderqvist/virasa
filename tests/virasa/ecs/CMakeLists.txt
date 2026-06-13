@@ -4,6 +4,7 @@ add_executable(virasa_ecs_tests
     test_ComponentSystem.cpp
     test_TransformSystem.cpp
     test_World.cpp
+    test_Scheduler.cpp
 )
 
 target_link_libraries(virasa_ecs_tests
