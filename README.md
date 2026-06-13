@@ -1,6 +1,8 @@
 # virasa
 
-virasa is (soon) a vi-like 3d editor built with [calchestra](https://github.com/AntonSoderqvist/calchestra).
+virasa is a (currently not so good) vi-like 3d editor built with [calchestra](https://github.com/AntonSoderqvist/calchestra).
+
+I am a big fan of 3D applications and vim. I figured it would be kind of nice to merge both worlds.
 
 ## Status
 
@@ -8,17 +10,13 @@ Early days on this project, as of May 19 2026, virasa can load gltf files and ac
 
 ## Goals
 
-I am a big fan of 3D applications and vim. I figured it would be kind of nice to merge both worlds.
-
-The main goal is to be able to add, delete, and interact with entities in a 3d viewport.
-
 I am also considering implementing some AI native mechanisms to autonomously interact with the 3d viewport.
 
 The aspirations are strong, but the flesh is weak. Very happy to entertain suggestions, but as you might be able to tell, my work is cut out for me in the immediate future. Leave a note on the Discussions page!
 
 ## Roadmap
 
-Will be dialing in the ECS, improving draw efficiency, adding shadow mapping, improving asset loading, hot reloading shaders/assets, and improving/expanding the UI capabilities.
+Will be adding ECS behavior system support, improving draw efficiency, hot reloading shaders/assets, and improving/expanding the UI capabilities.
 
 ## Build
 
