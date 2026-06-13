@@ -653,8 +653,14 @@ int EditorApp::Run(int argc, char** argv)
 			virasa::ecs::ComponentSystem* highlightSys = world.FindSystem("Highlight");
 			if (highlightSys)
 			{
+				// The hierarchy hover highlight only tracks the cursor while the
+				// hierarchy view holds input focus. When focus is elsewhere, the
+				// cursor entity is treated as invalid so existing hover highlights
+				// are cleared below.
 				virasa::ecs::Entity cursorEntity =
-					viewManager.GetHierarchyView().GetCursorEntity(world);
+					viewManager.GetFocus() == virasa::editor::Focus::Hierarchy
+						? viewManager.GetHierarchyView().GetCursorEntity(world)
+						: virasa::ecs::Entity::Invalid();
 
 				struct HoverMark
 				{

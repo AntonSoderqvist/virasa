@@ -131,6 +131,12 @@ TEST(EditorApp, test_editor_app_highlights_hierarchy_cursor_entity)
 	viewManager.GetHierarchyView().SetCursorToEntity(world, root);
 	EXPECT_EQ(viewManager.GetHierarchyView().GetCursorEntity(world), root);
 
+	// The hover highlight is gated on input focus: it is only installed while
+	// the hierarchy view is focused (GetFocus() == Focus::Hierarchy). A freshly
+	// constructed ViewManager focuses the command bar, so even with a valid
+	// cursor entity no hover highlight would be applied.
+	EXPECT_NE(viewManager.GetFocus(), virasa::editor::Focus::Hierarchy);
+
 	virasa::ecs::ComponentSystem* highlightSystem = world.FindSystem("Highlight");
 	ASSERT_NE(highlightSystem, nullptr);
 
