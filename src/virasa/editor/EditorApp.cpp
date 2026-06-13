@@ -17,6 +17,7 @@
 
 #include "virasa/core/Logger.h"
 #include "virasa/ecs/Components.h"
+#include "virasa/ecs/Scheduler.h"
 #include "virasa/ecs/Types.h"
 #include "virasa/ecs/World.h"
 #include "virasa/editor/ViewManager.h"
@@ -26,6 +27,7 @@
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/scene/SceneRenderer.h"
+#include "virasa/sim/Tick.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
 #include "virasa/ui/Types.h"
@@ -197,6 +199,11 @@ int EditorApp::Run(int argc, char** argv)
 	// Stage 8: Input state
 	// -------------------------------------------------------------------------
 	virasa::InputState inputState;
+	virasa::sim::Clock simClock;
+	virasa::sim::Stepper simStepper(1.0f / 60.0f, 5u);
+	// No Behaviors are registered yet; this establishes the spine so gameplay
+	// Behaviors can be added later without changing the loop.
+	virasa::ecs::Scheduler scheduler;
 
 	// -------------------------------------------------------------------------
 	// Stage 9: Main loop
@@ -206,6 +213,7 @@ int EditorApp::Run(int argc, char** argv)
 	std::vector<virasa::ecs::Entity> selectionHighlighted;
 
 	bool running = true;
+	simClock.Reset(); // discard initialization time so the first frame's delta is small
 	while (running)
 	{
 		// ------------------------------------------------------------------
@@ -478,6 +486,18 @@ int EditorApp::Run(int argc, char** argv)
 			camTransform.translation = _cameraPosition;
 			camTransform.rotation = orientation;
 			world.Transforms().SetLocal(cameraEntity, camTransform);
+		}
+
+		// ------------------------------------------------------------------
+		// Step 3b: Fixed-step simulation
+		// ------------------------------------------------------------------
+		{
+			const double rawDelta = simClock.Sample();
+			const uint32_t simSteps = simStepper.Advance(rawDelta);
+			for (uint32_t i = 0u; i < simSteps; ++i)
+			{
+				scheduler.Step(world, simStepper.NextStep());
+			}
 		}
 
 		// ------------------------------------------------------------------
