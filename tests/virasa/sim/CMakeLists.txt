@@ -1,4 +1,5 @@
 add_executable(virasa_sim_tests
+    test_AssetCatalog.cpp
     test_Tick.cpp
 )
 
@@ -12,6 +13,8 @@ add_executable(virasa_scene_tests
     test_BehaviorRegistry.cpp
     test_Scene.cpp
     test_GameplayComponents.cpp
+    test_ComponentCodec.cpp
+    test_SceneSerializer.cpp
     behaviors/test_SpinBehavior.cpp
     test_Builtins.cpp
 )

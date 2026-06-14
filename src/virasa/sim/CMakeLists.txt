@@ -1,4 +1,5 @@
 add_library(virasa_sim_lib STATIC
+    AssetCatalog.cpp
     Tick.cpp
 )
 
@@ -12,7 +13,9 @@ target_include_directories(virasa_sim_lib
 # avoiding a cycle with virasa_ecs_lib (which links virasa_sim_lib for Tick).
 add_library(virasa_scene_lib STATIC
     BehaviorRegistry.cpp
+    ComponentCodec.cpp
     Scene.cpp
+    SceneSerializer.cpp
     behaviors/SpinBehavior.cpp
     Builtins.cpp
 )
@@ -27,4 +30,5 @@ target_link_libraries(virasa_scene_lib
         virasa_ecs_lib
         virasa_sim_lib
         virasa_math_lib
+        virasa_vendor_tinygltf
 )
