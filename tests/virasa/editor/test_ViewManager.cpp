@@ -140,6 +140,8 @@ TEST(ViewManager, test_event_result_enum_values_in_declared_order)
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::Consumed), uint8_t{0});
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::QuitRequested), uint8_t{1});
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::LoadModelRequested), uint8_t{2});
+	EXPECT_EQ(static_cast<uint8_t>(EventResult::PlayRequested), uint8_t{3});
+	EXPECT_EQ(static_cast<uint8_t>(EventResult::StopRequested), uint8_t{4});
 }
 
 // ===========================================================================
@@ -245,6 +247,24 @@ TEST(ViewManager, test_handle_event_forwards_to_focused_view)
 		EXPECT_EQ(vm.HandleEvent(textEv, world), EventResult::Consumed);
 		EXPECT_EQ(vm.GetCommandBarView().GetText(), "abc");
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":play");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::PlayRequested);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":stop");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::StopRequested);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
 	}
 
 	{
@@ -480,6 +500,36 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		vm.GetCommandBarView().SetText(":q");
 		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::QuitRequested);
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":ide");
+		ASSERT_EQ(vm.HandleEvent(enterEv, world), EventResult::Consumed);
+		ASSERT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
+		ASSERT_EQ(vm.GetFocus(), Focus::Editor);
+		ASSERT_EQ(vm.HandleEvent(MakeTextEvent(":"), world), EventResult::Consumed);
+		ASSERT_EQ(vm.GetFocus(), Focus::CommandBar);
+		vm.GetCommandBarView().SetText(":play");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::PlayRequested);
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":tree");
+		ASSERT_EQ(vm.HandleEvent(enterEv, world), EventResult::Consumed);
+		ASSERT_EQ(vm.GetRightPanelMode(), RightPanelMode::Hierarchy);
+		ASSERT_EQ(vm.GetFocus(), Focus::Hierarchy);
+		ASSERT_EQ(vm.HandleEvent(MakeTextEvent(":"), world), EventResult::Consumed);
+		ASSERT_EQ(vm.GetFocus(), Focus::CommandBar);
+		vm.GetCommandBarView().SetText(":stop");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::StopRequested);
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Hierarchy);
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 	}
 

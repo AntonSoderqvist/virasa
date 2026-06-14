@@ -36,6 +36,8 @@ enum class CommandBarKeyResult : uint8_t
  * Close         - empty command ("" or ":"); close the right panel.
  * Quit          - ":q" command; begin application shutdown.
  * LoadModel     - ":load <path>" command; load the submitted model path.
+ * Play          - ":play" command; enter play mode.
+ * Stop          - ":stop" command; leave play mode.
  */
 enum class CommandResult : uint8_t
 {
@@ -44,7 +46,9 @@ enum class CommandResult : uint8_t
 	OpenHierarchy,
 	Close,
 	Quit,
-	LoadModel
+	LoadModel,
+	Play,
+	Stop
 };
 
 /**

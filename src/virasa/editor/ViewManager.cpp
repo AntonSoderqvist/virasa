@@ -273,6 +273,12 @@ EventResult ViewManager::ApplyCommandResult(CommandResult cmd)
 		case CommandResult::LoadModel:
 			_pendingLoadPath = std::string(_commandBarView.GetSubmittedArgument());
 			return EventResult::LoadModelRequested;
+
+		case CommandResult::Play:
+			return EventResult::PlayRequested;
+
+		case CommandResult::Stop:
+			return EventResult::StopRequested;
 	}
 
 	return EventResult::Consumed;

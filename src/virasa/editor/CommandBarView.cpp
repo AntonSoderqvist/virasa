@@ -96,6 +96,16 @@ CommandResult CommandBarView::Submit()
 		_argument.clear();
 		result = CommandResult::Quit;
 	}
+	else if (_text == ":play")
+	{
+		_argument.clear();
+		result = CommandResult::Play;
+	}
+	else if (_text == ":stop")
+	{
+		_argument.clear();
+		result = CommandResult::Stop;
+	}
 	else if (_text.empty() || _text == ":")
 	{
 		_argument.clear();

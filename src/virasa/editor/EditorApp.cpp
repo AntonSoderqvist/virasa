@@ -11,6 +11,7 @@
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,6 +28,10 @@
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/scene/SceneRenderer.h"
+#include "virasa/sim/BehaviorRegistry.h"
+#include "virasa/sim/Builtins.h"
+#include "virasa/sim/GameplayComponents.h"
+#include "virasa/sim/Scene.h"
 #include "virasa/sim/Tick.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
@@ -127,9 +132,11 @@ int EditorApp::Run(int argc, char** argv)
 	constexpr uint32_t kDefaultMaterialId = 0u;
 
 	// -------------------------------------------------------------------------
-	// Stage 6: World seeding
+	// Stage 6: Scene seeding
 	// -------------------------------------------------------------------------
-	virasa::ecs::World world;
+	virasa::sim::Scene authoredScene;
+	virasa::ecs::World& world = authoredScene.GetWorld();
+	virasa::sim::RegisterGameplayComponents(world);
 
 	// Cube entity
 	{
@@ -145,6 +152,14 @@ int EditorApp::Run(int argc, char** argv)
 		virasa::ecs::VisualComponent visualComp;
 		visualComp.materialId = kDefaultMaterialId;
 		world.GetSystem(visualSysId).AddRaw(cubeEntity, &visualComp);
+
+		virasa::sim::SpinComponent spinComp;
+		spinComp.angularVelocity = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+		virasa::ecs::ComponentSystem* spinSys = world.FindSystem("Spin");
+		if (spinSys)
+		{
+			spinSys->AddRaw(cubeEntity, &spinComp);
+		}
 	}
 
 	// Directional light entity
@@ -180,6 +195,14 @@ int EditorApp::Run(int argc, char** argv)
 	_cameraYaw = glm::radians(-135.0f);
 	_cameraPitch = glm::radians(-30.0f);
 
+	authoredScene.AddBehavior("Spin");
+
+	// -------------------------------------------------------------------------
+	// Stage 6b: Behavior registry
+	// -------------------------------------------------------------------------
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
+
 	// -------------------------------------------------------------------------
 	// Stage 7: View manager
 	// -------------------------------------------------------------------------
@@ -201,9 +224,8 @@ int EditorApp::Run(int argc, char** argv)
 	virasa::InputState inputState;
 	virasa::sim::Clock simClock;
 	virasa::sim::Stepper simStepper(1.0f / 60.0f, 5u);
-	// No Behaviors are registered yet; this establishes the spine so gameplay
-	// Behaviors can be added later without changing the loop.
 	virasa::ecs::Scheduler scheduler;
+	scheduler.SetEnabled(false);
 
 	// -------------------------------------------------------------------------
 	// Stage 9: Main loop
@@ -211,6 +233,14 @@ int EditorApp::Run(int argc, char** argv)
 	std::vector<std::future<virasa::editor::io::GltfCpuAsset>> _pendingLoads;
 	std::vector<virasa::ecs::Entity> hoverHighlighted;
 	std::vector<virasa::ecs::Entity> selectionHighlighted;
+
+	bool playing = false;
+	std::optional<virasa::sim::Scene> runtimeScene;
+	auto activeWorld = [&]() -> virasa::ecs::World& {
+		return playing && runtimeScene.has_value()
+			? runtimeScene->GetWorld()
+			: authoredScene.GetWorld();
+	};
 
 	bool running = true;
 	simClock.Reset(); // discard initialization time so the first frame's delta is small
@@ -248,7 +278,7 @@ int EditorApp::Run(int argc, char** argv)
 			virasa::editor::EventResult result = virasa::editor::EventResult::Consumed;
 			if (!shouldExit)
 			{
-				result = viewManager.HandleEvent(event, world);
+				result = viewManager.HandleEvent(event, activeWorld());
 				if (result == virasa::editor::EventResult::QuitRequested)
 				{
 					LOG_INFO(logger, "QuitRequested from ViewManager.");
@@ -270,6 +300,30 @@ int EditorApp::Run(int argc, char** argv)
 						{
 							return virasa::editor::io::ParseGlb(p);
 						}));
+				}
+				else if (result == virasa::editor::EventResult::PlayRequested)
+				{
+					if (!playing)
+					{
+						runtimeScene = authoredScene.Instantiate();
+						if (!runtimeScene->BuildScheduler(behaviorRegistry, scheduler))
+						{
+							LOG_ERROR(logger, "Failed to build complete play-mode scheduler.");
+						}
+						scheduler.SetEnabled(true);
+						playing = true;
+					}
+				}
+				else if (result == virasa::editor::EventResult::StopRequested)
+				{
+					if (playing)
+					{
+						scheduler.SetEnabled(false);
+						scheduler = virasa::ecs::Scheduler();
+						scheduler.SetEnabled(false);
+						runtimeScene.reset();
+						playing = false;
+					}
 				}
 			}
 
@@ -296,6 +350,7 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 1b: Commit completed parses
 		// ------------------------------------------------------------------
+		virasa::ecs::World& world = activeWorld();
 		{
 			auto it = _pendingLoads.begin();
 			while (it != _pendingLoads.end())

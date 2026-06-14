@@ -22,6 +22,7 @@ target_link_libraries(virasa_editor_lib
         virasa_window_lib
         virasa_ui_lib
         virasa_ecs_lib
+        virasa_scene_lib
         virasa_renderer_lib
         virasa_renderer_scene_lib
     PRIVATE

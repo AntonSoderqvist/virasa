@@ -2,13 +2,23 @@
 
 #include "virasa/editor/EditorApp.h"
 
+#include "virasa/ecs/ComponentSystem.h"
 #include "virasa/ecs/Components.h"
+#include "virasa/ecs/Scheduler.h"
 #include "virasa/ecs/World.h"
 #include "virasa/editor/ViewManager.h"
 #include "virasa/math/Transform.h"
 #include "virasa/renderer/Types.h"
+#include "virasa/sim/BehaviorRegistry.h"
+#include "virasa/sim/Builtins.h"
+#include "virasa/sim/GameplayComponents.h"
+#include "virasa/sim/Scene.h"
+#include "virasa/sim/Tick.h"
+
+#include "glm/gtc/quaternion.hpp"
 
 #include <concepts>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 
@@ -33,6 +43,70 @@ concept HasCameraPositionMember = requires(T value)
 	value._cameraPosition;
 };
 
+struct SeededEditorScene
+{
+	virasa::sim::Scene scene;
+	virasa::ecs::Entity cube = virasa::ecs::Entity::Invalid();
+	virasa::ecs::Entity camera = virasa::ecs::Entity::Invalid();
+};
+
+constexpr float kEps = 1e-5f;
+
+void ExpectQuatNear(const virasa::math::Quat& actual, const virasa::math::Quat& expected)
+{
+	EXPECT_NEAR(actual.w, expected.w, kEps);
+	EXPECT_NEAR(actual.x, expected.x, kEps);
+	EXPECT_NEAR(actual.y, expected.y, kEps);
+	EXPECT_NEAR(actual.z, expected.z, kEps);
+}
+
+SeededEditorScene SeedAuthoredEditorScene(uint32_t cubeMeshId = 17u)
+{
+	SeededEditorScene seeded;
+	virasa::ecs::World& world = seeded.scene.GetWorld();
+	virasa::sim::RegisterGameplayComponents(world);
+
+	seeded.cube = world.CreateEntity("Cube");
+	world.Transforms().Add(seeded.cube, virasa::math::Transform::Identity());
+
+	virasa::ecs::MeshComponent meshComp;
+	meshComp.meshId = cubeMeshId;
+	world.GetSystem(world.GetSystemId("Mesh")).AddRaw(seeded.cube, &meshComp);
+
+	virasa::ecs::VisualComponent visualComp;
+	visualComp.materialId = 0u;
+	world.GetSystem(world.GetSystemId("Visual")).AddRaw(seeded.cube, &visualComp);
+
+	virasa::sim::SpinComponent spinComp;
+	spinComp.angularVelocity = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+	if (virasa::ecs::ComponentSystem* spinSys = world.FindSystem("Spin"))
+	{
+		spinSys->AddRaw(seeded.cube, &spinComp);
+	}
+
+	virasa::ecs::Entity lightEntity = world.CreateEntity("DirectionalLight");
+	virasa::ecs::DirectionalLightComponent light;
+	light.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
+	light.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+	light.intensity = 1.0f;
+	world.GetSystem(world.GetSystemId("DirectionalLight")).AddRaw(lightEntity, &light);
+
+	seeded.camera = world.CreateEntity("Camera");
+	virasa::math::Transform camTransform;
+	camTransform.translation = virasa::math::Vec3(4.0f, 4.0f, 3.0f);
+	world.Transforms().Add(seeded.camera, camTransform);
+
+	virasa::ecs::CameraComponent cam;
+	cam.domain = virasa::CameraDomain::Editor;
+	cam.fovY = glm::radians(45.0f);
+	cam.nearPlane = 0.1f;
+	cam.farPlane = 100.0f;
+	world.GetSystem(world.GetSystemId("Camera")).AddRaw(seeded.camera, &cam);
+
+	seeded.scene.AddBehavior("Spin");
+	return seeded;
+}
+
 } // namespace
 
 TEST(EditorApp, test_editor_app_is_top_level_orchestrator)
@@ -52,6 +126,33 @@ TEST(EditorApp, test_editor_app_is_top_level_orchestrator)
 TEST(EditorApp, test_run_is_program_lifecycle)
 {
 	using virasa::editor::EditorApp;
+
+	SeededEditorScene seeded = SeedAuthoredEditorScene();
+	virasa::ecs::World& world = seeded.scene.GetWorld();
+
+	const virasa::ecs::ComponentId spinId = world.GetSystemId("Spin");
+	ASSERT_NE(spinId, virasa::ecs::kInvalidComponentId);
+	virasa::ecs::ComponentSystem& spinSystem = world.GetSystem(spinId);
+	ASSERT_TRUE(spinSystem.Has(seeded.cube));
+
+	const auto* spin = static_cast<const virasa::sim::SpinComponent*>(
+		spinSystem.GetRaw(seeded.cube));
+	ASSERT_NE(spin, nullptr);
+	EXPECT_FLOAT_EQ(spin->angularVelocity.x, 0.0f);
+	EXPECT_FLOAT_EQ(spin->angularVelocity.y, 0.0f);
+	EXPECT_FLOAT_EQ(spin->angularVelocity.z, 1.0f);
+	EXPECT_TRUE(seeded.scene.HasBehavior("Spin"));
+	ASSERT_EQ(seeded.scene.Behaviors().size(), 1u);
+	EXPECT_EQ(seeded.scene.Behaviors()[0], "Spin");
+
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
+	EXPECT_TRUE(behaviorRegistry.Contains("Spin"));
+
+	virasa::sim::Scene runtimeScene = seeded.scene.Instantiate();
+	virasa::ecs::Scheduler scheduler;
+	EXPECT_TRUE(runtimeScene.BuildScheduler(behaviorRegistry, scheduler));
+	EXPECT_EQ(scheduler.BehaviorCount(virasa::ecs::Phase::Step), 1u);
 
 	// Run returns 0 on clean shutdown or -1 on any subsystem initialization failure.
 	// We cannot guarantee a full clean shutdown in a headless CI environment, so we
@@ -222,6 +323,124 @@ TEST(EditorApp, test_editor_app_highlights_selection_entities)
 		highlightSystem->GetRaw(hovered));
 	ASSERT_NE(storedHover, nullptr);
 	EXPECT_EQ(storedHover->priority, 0);
+}
+
+TEST(EditorApp, test_editor_app_drives_fixed_step_simulation)
+{
+	SeededEditorScene seeded = SeedAuthoredEditorScene();
+	virasa::ecs::World& authoredWorld = seeded.scene.GetWorld();
+
+	const virasa::math::Transform authoredInitial =
+		authoredWorld.Transforms().GetLocal(seeded.cube);
+
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
+
+	virasa::ecs::Scheduler scheduler;
+	scheduler.SetEnabled(false);
+	EXPECT_FALSE(scheduler.IsEnabled());
+	EXPECT_EQ(scheduler.BehaviorCount(virasa::ecs::Phase::Step), 0u);
+
+	virasa::sim::TickContext tick;
+	tick.deltaTime = 1.0f / 60.0f;
+	tick.totalTime = tick.deltaTime;
+	tick.tickIndex = 1u;
+
+	scheduler.Step(authoredWorld, tick);
+	ExpectQuatNear(authoredWorld.Transforms().GetLocal(seeded.cube).rotation,
+		authoredInitial.rotation);
+
+	virasa::sim::Scene runtimeScene = seeded.scene.Instantiate();
+	ASSERT_TRUE(runtimeScene.BuildScheduler(behaviorRegistry, scheduler));
+	scheduler.SetEnabled(true);
+	ASSERT_TRUE(scheduler.IsEnabled());
+	EXPECT_EQ(scheduler.BehaviorCount(virasa::ecs::Phase::Step), 1u);
+
+	virasa::ecs::World& runtimeWorld = runtimeScene.GetWorld();
+	scheduler.Step(runtimeWorld, tick);
+
+	const virasa::math::Quat expectedRuntimeRotation = glm::normalize(
+		authoredInitial.rotation *
+		glm::angleAxis(tick.deltaTime, virasa::math::Vec3(0.0f, 0.0f, 1.0f)));
+	ExpectQuatNear(runtimeWorld.Transforms().GetLocal(seeded.cube).rotation,
+		expectedRuntimeRotation);
+	ExpectQuatNear(authoredWorld.Transforms().GetLocal(seeded.cube).rotation,
+		authoredInitial.rotation);
+
+	virasa::math::Transform cameraTransform = runtimeWorld.Transforms().GetLocal(seeded.camera);
+	cameraTransform.translation = virasa::math::Vec3(8.0f, 9.0f, 10.0f);
+	runtimeWorld.Transforms().SetLocal(seeded.camera, cameraTransform);
+	runtimeWorld.UpdateTransforms();
+
+	const virasa::math::Vec3 runtimeCameraPosition =
+		runtimeWorld.Transforms().GetWorldPosition(seeded.camera);
+	EXPECT_NEAR(runtimeCameraPosition.x, 8.0f, kEps);
+	EXPECT_NEAR(runtimeCameraPosition.y, 9.0f, kEps);
+	EXPECT_NEAR(runtimeCameraPosition.z, 10.0f, kEps);
+
+	const virasa::math::Vec3 authoredCameraPosition =
+		authoredWorld.Transforms().GetLocal(seeded.camera).translation;
+	EXPECT_NEAR(authoredCameraPosition.x, 4.0f, kEps);
+	EXPECT_NEAR(authoredCameraPosition.y, 4.0f, kEps);
+	EXPECT_NEAR(authoredCameraPosition.z, 3.0f, kEps);
+}
+
+TEST(EditorApp, test_editor_app_play_mode_clones_and_reverts_scene)
+{
+	SeededEditorScene seeded = SeedAuthoredEditorScene();
+	virasa::ecs::World& authoredWorld = seeded.scene.GetWorld();
+	const virasa::math::Transform authoredInitial =
+		authoredWorld.Transforms().GetLocal(seeded.cube);
+
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
+
+	bool playing = false;
+	std::optional<virasa::sim::Scene> runtimeScene;
+	virasa::ecs::Scheduler scheduler;
+	scheduler.SetEnabled(false);
+
+	runtimeScene = seeded.scene.Instantiate();
+	ASSERT_TRUE(runtimeScene.has_value());
+	ASSERT_TRUE(runtimeScene->GetWorld().IsValid(seeded.cube));
+	ASSERT_TRUE(runtimeScene->GetWorld().GetSystem(runtimeScene->GetWorld().GetSystemId("Spin"))
+		.Has(seeded.cube));
+	EXPECT_TRUE(runtimeScene->BuildScheduler(behaviorRegistry, scheduler));
+	scheduler.SetEnabled(true);
+	playing = true;
+
+	ASSERT_TRUE(playing);
+	EXPECT_TRUE(scheduler.IsEnabled());
+	EXPECT_EQ(scheduler.BehaviorCount(virasa::ecs::Phase::Step), 1u);
+	EXPECT_NE(&runtimeScene->GetWorld(), &authoredWorld);
+
+	virasa::sim::TickContext tick;
+	tick.deltaTime = 1.0f;
+	tick.totalTime = 1.0;
+	tick.tickIndex = 1u;
+	scheduler.Step(runtimeScene->GetWorld(), tick);
+
+	const virasa::math::Quat expectedRuntimeRotation = glm::normalize(
+		authoredInitial.rotation *
+		glm::angleAxis(1.0f, virasa::math::Vec3(0.0f, 0.0f, 1.0f)));
+	ExpectQuatNear(runtimeScene->GetWorld().Transforms().GetLocal(seeded.cube).rotation,
+		expectedRuntimeRotation);
+	ExpectQuatNear(authoredWorld.Transforms().GetLocal(seeded.cube).rotation,
+		authoredInitial.rotation);
+
+	scheduler.SetEnabled(false);
+	scheduler = virasa::ecs::Scheduler();
+	scheduler.SetEnabled(false);
+	runtimeScene.reset();
+	playing = false;
+
+	EXPECT_FALSE(playing);
+	EXPECT_FALSE(runtimeScene.has_value());
+	EXPECT_FALSE(scheduler.IsEnabled());
+	EXPECT_EQ(scheduler.BehaviorCount(virasa::ecs::Phase::Step), 0u);
+	ExpectQuatNear(authoredWorld.Transforms().GetLocal(seeded.cube).rotation,
+		authoredInitial.rotation);
+	EXPECT_TRUE(authoredWorld.IsValid(seeded.cube));
 }
 
 TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)

@@ -95,6 +95,8 @@ TEST(CommandBarView, test_command_result_enum_values_in_declared_order)
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Close), 3u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Quit), 4u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::LoadModel), 5u);
+	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Play), 6u);
+	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Stop), 7u);
 }
 
 TEST(CommandBarView, test_get_text_returns_internal_byte_view)
@@ -315,7 +317,25 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("scene.glb"));
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
+	view.SetText(":play");
+	EXPECT_EQ(view.Submit(), CommandResult::Play);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
+	view.SetText(":stop");
+	EXPECT_EQ(view.Submit(), CommandResult::Stop);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
 	view.SetText(":load ");
+	EXPECT_EQ(view.Submit(), CommandResult::None);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
+	view.SetText(":play now");
 	EXPECT_EQ(view.Submit(), CommandResult::None);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_TRUE(view.GetSubmittedArgument().empty());
@@ -330,6 +350,12 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 	EXPECT_FLOAT_EQ(view.GetPanel().GetConfig().paddingX, 23.0f);
+
+	view.SetText(":Stop");
+	EXPECT_EQ(view.Submit(), CommandResult::None);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
 }
 
 TEST(CommandBarView, test_render_delegates_to_owned_command_bar)

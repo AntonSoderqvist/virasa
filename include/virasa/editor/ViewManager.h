@@ -47,7 +47,9 @@ enum class EventResult : uint8_t
 {
 	Consumed,
 	QuitRequested,
-	LoadModelRequested
+	LoadModelRequested,
+	PlayRequested,
+	StopRequested
 };
 
 /**
@@ -170,7 +172,7 @@ public:
 	 * @brief Dispatches an input event to the focused view and processes the result.
 	 * @param event The input event to handle.
 	 * @param world The current ECS world (passed through to views that need it).
-	 * @return EventResult::QuitRequested if ':q' was submitted, EventResult::LoadModelRequested if ':load <path>' was submitted, EventResult::Consumed otherwise.
+	 * @return EventResult::QuitRequested if ':q' was submitted, EventResult::LoadModelRequested if ':load <path>' was submitted, EventResult::PlayRequested if ':play' was submitted, EventResult::StopRequested if ':stop' was submitted, EventResult::Consumed otherwise.
 	 */
 	EventResult HandleEvent(const virasa::Event& event, const virasa::ecs::World& world);
 
