@@ -13,6 +13,8 @@ target_include_directories(virasa_sim_lib
 add_library(virasa_scene_lib STATIC
     BehaviorRegistry.cpp
     Scene.cpp
+    behaviors/SpinBehavior.cpp
+    Builtins.cpp
 )
 
 target_include_directories(virasa_scene_lib

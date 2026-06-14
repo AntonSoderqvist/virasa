@@ -11,6 +11,9 @@ target_link_libraries(virasa_sim_tests
 add_executable(virasa_scene_tests
     test_BehaviorRegistry.cpp
     test_Scene.cpp
+    test_GameplayComponents.cpp
+    behaviors/test_SpinBehavior.cpp
+    test_Builtins.cpp
 )
 
 target_link_libraries(virasa_scene_tests
