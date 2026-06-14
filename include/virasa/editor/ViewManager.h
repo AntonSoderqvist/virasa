@@ -49,7 +49,9 @@ enum class EventResult : uint8_t
 	QuitRequested,
 	LoadModelRequested,
 	PlayRequested,
-	StopRequested
+	StopRequested,
+	LoadSceneRequested,
+	SaveSceneRequested
 };
 
 /**
@@ -139,6 +141,12 @@ public:
 	[[nodiscard]] std::string_view GetPendingLoadPath() const noexcept;
 
 	/**
+	 * @brief Returns a string_view over the path of the most recently requested scene save.
+	 * @return A string_view over _pendingSavePath; empty if no save has been requested.
+	 */
+	[[nodiscard]] std::string_view GetPendingSavePath() const noexcept;
+
+	/**
 	 * @brief Makes the supplied entity the sole committed selection.
 	 * @param entity The entity to select, or virasa::ecs::Entity::Invalid() to clear.
 	 */
@@ -172,7 +180,7 @@ public:
 	 * @brief Dispatches an input event to the focused view and processes the result.
 	 * @param event The input event to handle.
 	 * @param world The current ECS world (passed through to views that need it).
-	 * @return EventResult::QuitRequested if ':q' was submitted, EventResult::LoadModelRequested if ':load <path>' was submitted, EventResult::PlayRequested if ':play' was submitted, EventResult::StopRequested if ':stop' was submitted, EventResult::Consumed otherwise.
+	 * @return EventResult::QuitRequested if ':q' was submitted, EventResult::LoadModelRequested or EventResult::LoadSceneRequested if ':load <path>' was submitted, EventResult::SaveSceneRequested if ':save <path>' was submitted, EventResult::PlayRequested if ':play' was submitted, EventResult::StopRequested if ':stop' was submitted, EventResult::Consumed otherwise.
 	 */
 	EventResult HandleEvent(const virasa::Event& event, const virasa::ecs::World& world);
 
@@ -202,6 +210,7 @@ private:
 	Focus _focus = Focus::CommandBar;
 	RightPanelMode _rightPanelMode = RightPanelMode::Closed;
 	std::string _pendingLoadPath = {};
+	std::string _pendingSavePath = {};
 	std::vector<virasa::ecs::Entity> _selection = {};
 };
 

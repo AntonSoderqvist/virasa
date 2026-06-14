@@ -1,11 +1,49 @@
 #include "virasa/editor/ViewManager.h"
 
+#include <cctype>
 #include <cmath>
 
 #include "virasa/editor/Motions.h"
 
 namespace virasa::editor
 {
+namespace
+{
+
+[[nodiscard]] bool EqualsAsciiCaseInsensitive(std::string_view lhs, std::string_view rhs)
+{
+	if (lhs.size() != rhs.size())
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < lhs.size(); ++i)
+	{
+		const auto left = static_cast<unsigned char>(lhs[i]);
+		const auto right = static_cast<unsigned char>(rhs[i]);
+		if (std::tolower(left) != std::tolower(right))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+[[nodiscard]] bool IsSceneLoadPath(std::string_view path)
+{
+	const size_t dot = path.find_last_of('.');
+	if (dot == std::string_view::npos)
+	{
+		return false;
+	}
+
+	const std::string_view extension = path.substr(dot + 1u);
+	return EqualsAsciiCaseInsensitive(extension, "scene")
+		|| EqualsAsciiCaseInsensitive(extension, "json");
+}
+
+} // namespace
 
 Focus ViewManager::GetFocus() const noexcept
 {
@@ -60,6 +98,11 @@ const virasa::editor::EntityEditorView& ViewManager::GetEntityEditorView() const
 std::string_view ViewManager::GetPendingLoadPath() const noexcept
 {
 	return _pendingLoadPath;
+}
+
+std::string_view ViewManager::GetPendingSavePath() const noexcept
+{
+	return _pendingSavePath;
 }
 
 void ViewManager::SetSelection(virasa::ecs::Entity entity)
@@ -272,6 +315,10 @@ EventResult ViewManager::ApplyCommandResult(CommandResult cmd)
 
 		case CommandResult::LoadModel:
 			_pendingLoadPath = std::string(_commandBarView.GetSubmittedArgument());
+			if (IsSceneLoadPath(_pendingLoadPath))
+			{
+				return EventResult::LoadSceneRequested;
+			}
 			return EventResult::LoadModelRequested;
 
 		case CommandResult::Play:
@@ -279,6 +326,10 @@ EventResult ViewManager::ApplyCommandResult(CommandResult cmd)
 
 		case CommandResult::Stop:
 			return EventResult::StopRequested;
+
+		case CommandResult::SaveScene:
+			_pendingSavePath = std::string(_commandBarView.GetSubmittedArgument());
+			return EventResult::SaveSceneRequested;
 	}
 
 	return EventResult::Consumed;

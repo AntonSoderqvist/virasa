@@ -9,16 +9,23 @@
 #include "virasa/editor/ViewManager.h"
 #include "virasa/math/Transform.h"
 #include "virasa/renderer/Types.h"
+#include "virasa/sim/AssetCatalog.h"
 #include "virasa/sim/BehaviorRegistry.h"
 #include "virasa/sim/Builtins.h"
+#include "virasa/sim/ComponentCodec.h"
 #include "virasa/sim/GameplayComponents.h"
 #include "virasa/sim/Scene.h"
+#include "virasa/sim/SceneSerializer.h"
 #include "virasa/sim/Tick.h"
 
 #include "glm/gtc/quaternion.hpp"
 
 #include <concepts>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -58,6 +65,32 @@ void ExpectQuatNear(const virasa::math::Quat& actual, const virasa::math::Quat& 
 	EXPECT_NEAR(actual.x, expected.x, kEps);
 	EXPECT_NEAR(actual.y, expected.y, kEps);
 	EXPECT_NEAR(actual.z, expected.z, kEps);
+}
+
+void ExpectVec3Near(const virasa::math::Vec3& actual, const virasa::math::Vec3& expected)
+{
+	EXPECT_NEAR(actual.x, expected.x, kEps);
+	EXPECT_NEAR(actual.y, expected.y, kEps);
+	EXPECT_NEAR(actual.z, expected.z, kEps);
+}
+
+template <typename T>
+const T* FindComponent(const virasa::ecs::World& world, virasa::ecs::Entity entity,
+	const char* systemName)
+{
+	const virasa::ecs::ComponentId systemId = world.GetSystemId(systemName);
+	if (systemId == virasa::ecs::kInvalidComponentId)
+	{
+		return nullptr;
+	}
+
+	const virasa::ecs::ComponentSystem& system = world.GetSystem(systemId);
+	if (!system.Has(entity))
+	{
+		return nullptr;
+	}
+
+	return static_cast<const T*>(system.GetRaw(entity));
 }
 
 SeededEditorScene SeedAuthoredEditorScene(uint32_t cubeMeshId = 17u)
@@ -441,6 +474,256 @@ TEST(EditorApp, test_editor_app_play_mode_clones_and_reverts_scene)
 	ExpectQuatNear(authoredWorld.Transforms().GetLocal(seeded.cube).rotation,
 		authoredInitial.rotation);
 	EXPECT_TRUE(authoredWorld.IsValid(seeded.cube));
+}
+
+TEST(EditorApp, test_editor_app_loads_serialized_scene)
+{
+	constexpr uint32_t kRuntimeCubeMeshId = 41u;
+
+	virasa::sim::ComponentCodecRegistry codecRegistry;
+	virasa::sim::RegisterBuiltinComponentCodecs(codecRegistry);
+
+	virasa::sim::AssetCatalog assetCatalog;
+	assetCatalog.Bind(
+		virasa::sim::AssetKind::Mesh,
+		"builtin:cube",
+		kRuntimeCubeMeshId);
+	ASSERT_TRUE(assetCatalog.HasKey(virasa::sim::AssetKind::Mesh, "builtin:cube"));
+	EXPECT_EQ(
+		assetCatalog.IdForKey(virasa::sim::AssetKind::Mesh, "builtin:cube"),
+		kRuntimeCubeMeshId);
+	EXPECT_EQ(
+		assetCatalog.KeyForId(virasa::sim::AssetKind::Mesh, kRuntimeCubeMeshId),
+		std::string_view("builtin:cube"));
+
+	virasa::sim::Scene serializedScene;
+	serializedScene.SetName("Loaded Editor Scene");
+	serializedScene.AddBehavior("Spin");
+
+	virasa::ecs::World& serializedWorld = serializedScene.GetWorld();
+	virasa::sim::RegisterGameplayComponents(serializedWorld);
+
+	const virasa::ecs::Entity cube = serializedWorld.CreateEntity("SerializedCube");
+	virasa::math::Transform cubeTransform;
+	cubeTransform.translation = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
+	cubeTransform.rotation = glm::angleAxis(
+		0.25f,
+		virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+	cubeTransform.scale = virasa::math::Vec3(2.0f, 2.0f, 2.0f);
+	serializedWorld.Transforms().Add(cube, cubeTransform);
+
+	virasa::ecs::MeshComponent mesh;
+	mesh.meshId = kRuntimeCubeMeshId;
+	serializedWorld.GetSystem(serializedWorld.GetSystemId("Mesh")).AddRaw(cube, &mesh);
+
+	virasa::sim::SpinComponent spin;
+	spin.angularVelocity = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+	serializedWorld.GetSystem(serializedWorld.GetSystemId("Spin")).AddRaw(cube, &spin);
+
+	const virasa::ecs::Entity camera = serializedWorld.CreateEntity("SerializedCamera");
+	virasa::math::Transform cameraTransform;
+	cameraTransform.translation = virasa::math::Vec3(4.0f, 4.0f, 3.0f);
+	serializedWorld.Transforms().Add(camera, cameraTransform);
+
+	virasa::ecs::CameraComponent cameraComponent;
+	cameraComponent.domain = virasa::CameraDomain::Editor;
+	cameraComponent.fovY = glm::radians(45.0f);
+	cameraComponent.nearPlane = 0.1f;
+	cameraComponent.farPlane = 100.0f;
+	serializedWorld.GetSystem(serializedWorld.GetSystemId("Camera"))
+		.AddRaw(camera, &cameraComponent);
+	serializedScene.SetDefaultCamera(camera);
+
+	const nlohmann::json json =
+		virasa::sim::SerializeSceneToJson(serializedScene, codecRegistry, assetCatalog);
+	ASSERT_TRUE(json.is_object());
+	ASSERT_TRUE(json["entities"].is_array());
+	ASSERT_EQ(json["entities"].size(), 2u);
+	EXPECT_EQ(
+		json["entities"][0]["components"]["Mesh"]["meshId"],
+		"builtin:cube");
+
+	const std::string serializedText =
+		virasa::sim::SerializeScene(serializedScene, codecRegistry, assetCatalog);
+	std::optional<virasa::sim::Scene> loaded =
+		virasa::sim::DeserializeScene(serializedText, codecRegistry, assetCatalog);
+	ASSERT_TRUE(loaded.has_value());
+
+	virasa::sim::Scene authoredScene;
+	virasa::ecs::Entity staleEntity = authoredScene.GetWorld().CreateEntity("StaleEntity");
+	virasa::editor::ViewManager viewManager;
+	viewManager.SetSelection(staleEntity);
+	ASSERT_EQ(viewManager.GetActiveSelection(), staleEntity);
+
+	authoredScene = std::move(*loaded);
+	viewManager.SetSelection(virasa::ecs::Entity::Invalid());
+
+	const virasa::ecs::World& loadedWorld = authoredScene.GetWorld();
+	const virasa::ecs::Entity loadedCube = loadedWorld.FindEntityByName("SerializedCube");
+	const virasa::ecs::Entity loadedCamera = loadedWorld.FindEntityByName("SerializedCamera");
+	ASSERT_TRUE(loadedWorld.IsValid(loadedCube));
+	ASSERT_TRUE(loadedWorld.IsValid(loadedCamera));
+	EXPECT_FALSE(loadedWorld.IsValid(loadedWorld.FindEntityByName("StaleEntity")));
+	EXPECT_TRUE(viewManager.GetSelection().empty());
+	EXPECT_EQ(viewManager.GetActiveSelection(), virasa::ecs::Entity::Invalid());
+
+	EXPECT_EQ(authoredScene.GetName(), "Loaded Editor Scene");
+	ASSERT_EQ(authoredScene.Behaviors().size(), 1u);
+	EXPECT_EQ(authoredScene.Behaviors()[0], "Spin");
+	EXPECT_TRUE(authoredScene.HasBehavior("Spin"));
+	EXPECT_EQ(authoredScene.GetDefaultCamera(), loadedCamera);
+
+	const virasa::math::Transform& loadedCubeTransform =
+		loadedWorld.GetTransforms().GetLocal(loadedCube);
+	ExpectVec3Near(loadedCubeTransform.translation, cubeTransform.translation);
+	ExpectQuatNear(loadedCubeTransform.rotation, cubeTransform.rotation);
+	ExpectVec3Near(loadedCubeTransform.scale, cubeTransform.scale);
+
+	const auto* loadedMesh =
+		FindComponent<virasa::ecs::MeshComponent>(loadedWorld, loadedCube, "Mesh");
+	ASSERT_NE(loadedMesh, nullptr);
+	EXPECT_EQ(loadedMesh->meshId, kRuntimeCubeMeshId);
+	EXPECT_EQ(
+		assetCatalog.KeyForId(virasa::sim::AssetKind::Mesh, loadedMesh->meshId),
+		std::string_view("builtin:cube"));
+
+	const auto* loadedSpin =
+		FindComponent<virasa::sim::SpinComponent>(loadedWorld, loadedCube, "Spin");
+	ASSERT_NE(loadedSpin, nullptr);
+	ExpectVec3Near(loadedSpin->angularVelocity, spin.angularVelocity);
+
+	const auto* loadedCameraComponent =
+		FindComponent<virasa::ecs::CameraComponent>(loadedWorld, loadedCamera, "Camera");
+	ASSERT_NE(loadedCameraComponent, nullptr);
+	EXPECT_EQ(loadedCameraComponent->domain, virasa::CameraDomain::Editor);
+	EXPECT_FLOAT_EQ(loadedCameraComponent->fovY, glm::radians(45.0f));
+	EXPECT_FLOAT_EQ(loadedCameraComponent->nearPlane, 0.1f);
+	EXPECT_FLOAT_EQ(loadedCameraComponent->farPlane, 100.0f);
+}
+
+TEST(EditorApp, test_editor_app_saves_serialized_scene)
+{
+	constexpr uint32_t kCubeMeshId = 57u;
+
+	virasa::sim::ComponentCodecRegistry codecRegistry;
+	virasa::sim::RegisterBuiltinComponentCodecs(codecRegistry);
+
+	virasa::sim::AssetCatalog assetCatalog;
+	assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:cube", kCubeMeshId);
+	ASSERT_TRUE(assetCatalog.HasKey(virasa::sim::AssetKind::Mesh, "builtin:cube"));
+	EXPECT_EQ(
+		assetCatalog.IdForKey(virasa::sim::AssetKind::Mesh, "builtin:cube"),
+		kCubeMeshId);
+
+	SeededEditorScene seeded = SeedAuthoredEditorScene(kCubeMeshId);
+	seeded.scene.SetName("Saved Editor Scene");
+	seeded.scene.SetDefaultCamera(seeded.camera);
+	virasa::ecs::World& authoredWorld = seeded.scene.GetWorld();
+	const virasa::math::Transform authoredCubeTransform =
+		authoredWorld.Transforms().GetLocal(seeded.cube);
+	const virasa::math::Transform authoredCameraTransform =
+		authoredWorld.Transforms().GetLocal(seeded.camera);
+
+	virasa::sim::Scene runtimeScene = seeded.scene.Instantiate();
+	ASSERT_NE(&runtimeScene.GetWorld(), &authoredWorld);
+	virasa::math::Transform runtimeCubeTransform =
+		runtimeScene.GetWorld().Transforms().GetLocal(seeded.cube);
+	runtimeCubeTransform.translation = virasa::math::Vec3(99.0f, 88.0f, 77.0f);
+	runtimeScene.GetWorld().Transforms().SetLocal(seeded.cube, runtimeCubeTransform);
+	runtimeScene.SetName("Runtime Clone");
+
+	const nlohmann::json json =
+		virasa::sim::SerializeSceneToJson(seeded.scene, codecRegistry, assetCatalog);
+	ASSERT_TRUE(json.is_object());
+	ASSERT_TRUE(json["entities"].is_array());
+
+	bool sawCubeMeshKey = false;
+	for (const nlohmann::json& entityJson : json["entities"])
+	{
+		if (entityJson.value("name", "") == "Cube")
+		{
+			ASSERT_TRUE(entityJson["components"].contains("Mesh"));
+			EXPECT_EQ(entityJson["components"]["Mesh"]["meshId"], "builtin:cube");
+			sawCubeMeshKey = true;
+		}
+	}
+	EXPECT_TRUE(sawCubeMeshKey);
+
+	const std::filesystem::path path =
+		std::filesystem::temp_directory_path() /
+		"virasa_editor_app_saves_serialized_scene_test.vscene";
+	std::filesystem::remove(path);
+
+	{
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		ASSERT_TRUE(file);
+		file << virasa::sim::SerializeScene(seeded.scene, codecRegistry, assetCatalog);
+		ASSERT_TRUE(file);
+	}
+
+	std::string serializedText;
+	{
+		std::ifstream file(path, std::ios::binary);
+		ASSERT_TRUE(file);
+		serializedText.assign(
+			std::istreambuf_iterator<char>(file),
+			std::istreambuf_iterator<char>());
+	}
+	std::filesystem::remove(path);
+
+	std::optional<virasa::sim::Scene> loaded =
+		virasa::sim::DeserializeScene(serializedText, codecRegistry, assetCatalog);
+	ASSERT_TRUE(loaded.has_value());
+
+	const virasa::ecs::World& loadedWorld = loaded->GetWorld();
+	const virasa::ecs::Entity loadedCube = loadedWorld.FindEntityByName("Cube");
+	const virasa::ecs::Entity loadedCamera = loadedWorld.FindEntityByName("Camera");
+	ASSERT_TRUE(loadedWorld.IsValid(loadedCube));
+	ASSERT_TRUE(loadedWorld.IsValid(loadedCamera));
+
+	EXPECT_EQ(loaded->GetName(), "Saved Editor Scene");
+	EXPECT_EQ(loaded->GetDefaultCamera(), loadedCamera);
+	ASSERT_EQ(loaded->Behaviors().size(), 1u);
+	EXPECT_EQ(loaded->Behaviors()[0], "Spin");
+	EXPECT_TRUE(loaded->HasBehavior("Spin"));
+
+	ExpectVec3Near(
+		loadedWorld.GetTransforms().GetLocal(loadedCube).translation,
+		authoredCubeTransform.translation);
+	ExpectQuatNear(
+		loadedWorld.GetTransforms().GetLocal(loadedCube).rotation,
+		authoredCubeTransform.rotation);
+	ExpectVec3Near(
+		loadedWorld.GetTransforms().GetLocal(loadedCube).scale,
+		authoredCubeTransform.scale);
+	ExpectVec3Near(
+		loadedWorld.GetTransforms().GetLocal(loadedCamera).translation,
+		authoredCameraTransform.translation);
+
+	const auto* loadedMesh =
+		FindComponent<virasa::ecs::MeshComponent>(loadedWorld, loadedCube, "Mesh");
+	ASSERT_NE(loadedMesh, nullptr);
+	EXPECT_EQ(loadedMesh->meshId, kCubeMeshId);
+	EXPECT_EQ(
+		assetCatalog.KeyForId(virasa::sim::AssetKind::Mesh, loadedMesh->meshId),
+		std::string_view("builtin:cube"));
+	EXPECT_EQ(
+		assetCatalog.IdForKey(virasa::sim::AssetKind::Mesh, "builtin:cube"),
+		loadedMesh->meshId);
+
+	const auto* loadedSpin =
+		FindComponent<virasa::sim::SpinComponent>(loadedWorld, loadedCube, "Spin");
+	ASSERT_NE(loadedSpin, nullptr);
+	ExpectVec3Near(
+		loadedSpin->angularVelocity,
+		virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+
+	ExpectVec3Near(
+		authoredWorld.Transforms().GetLocal(seeded.cube).translation,
+		authoredCubeTransform.translation);
+	ExpectVec3Near(
+		runtimeScene.GetWorld().Transforms().GetLocal(seeded.cube).translation,
+		virasa::math::Vec3(99.0f, 88.0f, 77.0f));
 }
 
 TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)

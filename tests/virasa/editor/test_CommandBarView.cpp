@@ -97,6 +97,7 @@ TEST(CommandBarView, test_command_result_enum_values_in_declared_order)
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::LoadModel), 5u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Play), 6u);
 	EXPECT_EQ(static_cast<uint8_t>(CommandResult::Stop), 7u);
+	EXPECT_EQ(static_cast<uint8_t>(CommandResult::SaveScene), 8u);
 }
 
 TEST(CommandBarView, test_get_text_returns_internal_byte_view)
@@ -143,6 +144,14 @@ TEST(CommandBarView, test_get_submitted_argument_returns_last_argument)
 
 	view.SetText(":q");
 	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::Quit);
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+
+	view.SetText(":save saved.scene");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::SaveScene);
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("saved.scene"));
+
+	view.SetText(":stop");
+	EXPECT_EQ(view.Submit(), virasa::editor::CommandResult::Stop);
 	EXPECT_TRUE(view.GetSubmittedArgument().empty());
 }
 
@@ -317,6 +326,12 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("scene.glb"));
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
+	view.SetText(":save foo.scene");
+	EXPECT_EQ(view.Submit(), CommandResult::SaveScene);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_EQ(view.GetSubmittedArgument(), std::string_view("foo.scene"));
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
 	view.SetText(":play");
 	EXPECT_EQ(view.Submit(), CommandResult::Play);
 	EXPECT_TRUE(view.GetText().empty());
@@ -330,6 +345,12 @@ TEST(CommandBarView, test_submit_parses_text_and_returns_command_result)
 	EXPECT_EQ(view.GetCursorByte(), 0u);
 
 	view.SetText(":load ");
+	EXPECT_EQ(view.Submit(), CommandResult::None);
+	EXPECT_TRUE(view.GetText().empty());
+	EXPECT_TRUE(view.GetSubmittedArgument().empty());
+	EXPECT_EQ(view.GetCursorByte(), 0u);
+
+	view.SetText(":save ");
 	EXPECT_EQ(view.Submit(), CommandResult::None);
 	EXPECT_TRUE(view.GetText().empty());
 	EXPECT_TRUE(view.GetSubmittedArgument().empty());

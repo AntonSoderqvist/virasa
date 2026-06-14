@@ -142,6 +142,8 @@ TEST(ViewManager, test_event_result_enum_values_in_declared_order)
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::LoadModelRequested), uint8_t{2});
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::PlayRequested), uint8_t{3});
 	EXPECT_EQ(static_cast<uint8_t>(EventResult::StopRequested), uint8_t{4});
+	EXPECT_EQ(static_cast<uint8_t>(EventResult::LoadSceneRequested), uint8_t{5});
+	EXPECT_EQ(static_cast<uint8_t>(EventResult::SaveSceneRequested), uint8_t{6});
 }
 
 // ===========================================================================
@@ -178,11 +180,13 @@ TEST(ViewManager, test_get_pending_load_path_returns_last_load_request)
 	ViewManager vm;
 
 	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	EXPECT_TRUE(vm.GetPendingSavePath().empty());
 
 	vm.GetCommandBarView().SetText(":load first.glb");
 	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
 		EventResult::LoadModelRequested);
 	EXPECT_EQ(vm.GetPendingLoadPath(), "first.glb");
+	EXPECT_TRUE(vm.GetPendingSavePath().empty());
 
 	const std::string_view firstView = vm.GetPendingLoadPath();
 	EXPECT_EQ(vm.HandleEvent(MakeUnknownEvent(), world), EventResult::Consumed);
@@ -199,6 +203,55 @@ TEST(ViewManager, test_get_pending_load_path_returns_last_load_request)
 	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
 		EventResult::LoadModelRequested);
 	EXPECT_EQ(vm.GetPendingLoadPath(), "second.glb");
+
+	vm.GetCommandBarView().SetText(":load third.scene");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::LoadSceneRequested);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "third.scene");
+	EXPECT_TRUE(vm.GetPendingSavePath().empty());
+}
+
+// ===========================================================================
+// get_pending_save_path_returns_last_save_request
+// ===========================================================================
+TEST(ViewManager, test_get_pending_save_path_returns_last_save_request)
+{
+	virasa::ecs::World world;
+	ViewManager vm;
+
+	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	EXPECT_TRUE(vm.GetPendingSavePath().empty());
+
+	vm.GetCommandBarView().SetText(":save first.scene");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::SaveSceneRequested);
+	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	EXPECT_EQ(vm.GetPendingSavePath(), "first.scene");
+
+	const std::string_view firstView = vm.GetPendingSavePath();
+	EXPECT_EQ(vm.HandleEvent(MakeUnknownEvent(), world), EventResult::Consumed);
+	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	EXPECT_EQ(vm.GetPendingSavePath(), "first.scene");
+	EXPECT_EQ(firstView, "first.scene");
+
+	virasa::ui::DrawList drawList;
+	virasa::ui::FontAtlas atlas;
+	vm.Render(drawList, world, atlas, 320u, 200u);
+	EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+	EXPECT_EQ(vm.GetPendingSavePath(), "first.scene");
+	EXPECT_EQ(firstView, "first.scene");
+
+	vm.GetCommandBarView().SetText(":load loaded.scene");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::LoadSceneRequested);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "loaded.scene");
+	EXPECT_EQ(vm.GetPendingSavePath(), "first.scene");
+
+	vm.GetCommandBarView().SetText(":save second.scene");
+	EXPECT_EQ(vm.HandleEvent(MakeKeyEvent(virasa::KeyCode::Enter), world),
+		EventResult::SaveSceneRequested);
+	EXPECT_EQ(vm.GetPendingLoadPath(), "loaded.scene");
+	EXPECT_EQ(vm.GetPendingSavePath(), "second.scene");
 }
 
 // ===========================================================================
@@ -256,6 +309,7 @@ TEST(ViewManager, test_handle_event_forwards_to_focused_view)
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 	}
 
 	{
@@ -265,6 +319,7 @@ TEST(ViewManager, test_handle_event_forwards_to_focused_view)
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 	}
 
 	{
@@ -437,6 +492,7 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 		EXPECT_TRUE(vm.GetCommandBarView().GetText().empty());
 		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 	}
 
 	{
@@ -514,6 +570,7 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		vm.GetCommandBarView().SetText(":play");
 		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::PlayRequested);
 		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 	}
@@ -529,6 +586,7 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		vm.GetCommandBarView().SetText(":stop");
 		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::StopRequested);
 		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Hierarchy);
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 	}
@@ -543,7 +601,73 @@ TEST(ViewManager, test_handle_event_consumes_command_bar_submitted_results)
 		vm.GetCommandBarView().SetText(":load model_a.glb");
 		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadModelRequested);
 		EXPECT_EQ(vm.GetPendingLoadPath(), "model_a.glb");
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
 		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Editor);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load scene_a.scene");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadSceneRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "scene_a.scene");
+		EXPECT_TRUE(vm.GetPendingSavePath().empty());
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":save foo.scene");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::SaveSceneRequested);
+		EXPECT_EQ(vm.GetPendingSavePath(), "foo.scene");
+		EXPECT_TRUE(vm.GetPendingLoadPath().empty());
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load scene_b.json");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadSceneRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "scene_b.json");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load SCENE_C.SCENE");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadSceneRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "SCENE_C.SCENE");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load SCENE_D.JSON");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadSceneRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "SCENE_D.JSON");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load model_b.gltf");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadModelRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "model_b.gltf");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
+		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
+	}
+
+	{
+		ViewManager vm;
+		vm.GetCommandBarView().SetText(":load asset_without_extension");
+		EXPECT_EQ(vm.HandleEvent(enterEv, world), EventResult::LoadModelRequested);
+		EXPECT_EQ(vm.GetPendingLoadPath(), "asset_without_extension");
+		EXPECT_EQ(vm.GetRightPanelMode(), RightPanelMode::Closed);
 		EXPECT_EQ(vm.GetFocus(), Focus::CommandBar);
 	}
 

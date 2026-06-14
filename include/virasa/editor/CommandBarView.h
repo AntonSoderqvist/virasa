@@ -38,6 +38,7 @@ enum class CommandBarKeyResult : uint8_t
  * LoadModel     - ":load <path>" command; load the submitted model path.
  * Play          - ":play" command; enter play mode.
  * Stop          - ":stop" command; leave play mode.
+ * SaveScene     - ":save <path>" command; save the current scene.
  */
 enum class CommandResult : uint8_t
 {
@@ -48,7 +49,8 @@ enum class CommandResult : uint8_t
 	Quit,
 	LoadModel,
 	Play,
-	Stop
+	Stop,
+	SaveScene
 };
 
 /**
@@ -123,8 +125,8 @@ public:
 	 * @brief Parses the current text buffer and returns the matching command.
 	 *
 	 * Clears the text buffer and resets the cursor after parsing. When the
-	 * parsed command is ":load <path>", stores the submitted path in the
-	 * internal argument buffer.
+	 * parsed command is ":load <path>" or ":save <path>", stores the
+	 * submitted path in the internal argument buffer.
 	 * @return The CommandResult corresponding to the current text.
 	 */
 	CommandResult Submit();

@@ -116,6 +116,11 @@ CommandResult CommandBarView::Submit()
 		_argument = _text.substr(6u);
 		result = CommandResult::LoadModel;
 	}
+	else if (_text.size() > 6u && _text.compare(0u, 6u, ":save ") == 0)
+	{
+		_argument = _text.substr(6u);
+		result = CommandResult::SaveScene;
+	}
 	else
 	{
 		_argument.clear();

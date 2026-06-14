@@ -6,12 +6,14 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <future>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,10 +30,13 @@
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/scene/SceneRenderer.h"
+#include "virasa/sim/AssetCatalog.h"
 #include "virasa/sim/BehaviorRegistry.h"
 #include "virasa/sim/Builtins.h"
+#include "virasa/sim/ComponentCodec.h"
 #include "virasa/sim/GameplayComponents.h"
 #include "virasa/sim/Scene.h"
+#include "virasa/sim/SceneSerializer.h"
 #include "virasa/sim/Tick.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
@@ -122,7 +127,19 @@ int EditorApp::Run(int argc, char** argv)
 		}
 	}
 
+	// -------------------------------------------------------------------------
+	// Stage 5b: Runtime registries and catalogs
+	// -------------------------------------------------------------------------
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
+
+	virasa::sim::ComponentCodecRegistry codecRegistry;
+	virasa::sim::RegisterBuiltinComponentCodecs(codecRegistry);
+
+	virasa::sim::AssetCatalog assetCatalog;
+
 	uint32_t cubeMeshId = sceneRenderer.CreateDefaultCubeMesh();
+	assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:cube", cubeMeshId);
 	if (cubeMeshId == 0xFFFFFFFFu)
 	{
 		LOG_ERROR(logger, "CreateDefaultCubeMesh failed.");
@@ -196,12 +213,6 @@ int EditorApp::Run(int argc, char** argv)
 	_cameraPitch = glm::radians(-30.0f);
 
 	authoredScene.AddBehavior("Spin");
-
-	// -------------------------------------------------------------------------
-	// Stage 6b: Behavior registry
-	// -------------------------------------------------------------------------
-	virasa::sim::BehaviorRegistry behaviorRegistry;
-	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
 
 	// -------------------------------------------------------------------------
 	// Stage 7: View manager
@@ -300,6 +311,65 @@ int EditorApp::Run(int argc, char** argv)
 						{
 							return virasa::editor::io::ParseGlb(p);
 						}));
+				}
+				else if (result == virasa::editor::EventResult::LoadSceneRequested)
+				{
+					std::string path(viewManager.GetPendingLoadPath());
+					if (playing)
+					{
+						LOG_WARNING(logger,
+							"Ignoring scene load request while play mode is active: {}.",
+							path);
+					}
+					else
+					{
+						std::ifstream file(path, std::ios::binary);
+						if (!file)
+						{
+							LOG_ERROR(logger, "Failed to read scene file: {}.", path);
+						}
+						else
+						{
+							std::ostringstream buffer;
+							buffer << file.rdbuf();
+
+							std::optional<virasa::sim::Scene> loadedScene =
+								virasa::sim::DeserializeScene(
+									buffer.str(), codecRegistry, assetCatalog);
+							if (!loadedScene.has_value())
+							{
+								LOG_ERROR(logger, "Failed to deserialize scene file: {}.", path);
+							}
+							else
+							{
+								authoredScene = std::move(*loadedScene);
+								cameraEntity = authoredScene.GetDefaultCamera();
+								viewManager.ClearSelection();
+								selectionHighlighted.clear();
+								hoverHighlighted.clear();
+							}
+						}
+					}
+				}
+				else if (result == virasa::editor::EventResult::SaveSceneRequested)
+				{
+					std::string path(viewManager.GetPendingSavePath());
+					std::ofstream file(path, std::ios::binary | std::ios::trunc);
+					if (!file)
+					{
+						LOG_ERROR(logger, "Failed to open scene file for writing: {}.", path);
+					}
+					else
+					{
+						const std::string document =
+							virasa::sim::SerializeScene(
+								authoredScene, codecRegistry, assetCatalog);
+						file << document;
+						if (!file)
+						{
+							LOG_ERROR(logger, "Failed to write scene file: {}.", path);
+						}
+					}
 				}
 				else if (result == virasa::editor::EventResult::PlayRequested)
 				{
@@ -537,10 +607,13 @@ int EditorApp::Run(int argc, char** argv)
 				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) * dolly;
 			}
 
-			virasa::math::Transform camTransform = world.Transforms().GetLocal(cameraEntity);
-			camTransform.translation = _cameraPosition;
-			camTransform.rotation = orientation;
-			world.Transforms().SetLocal(cameraEntity, camTransform);
+			if (world.IsValid(cameraEntity) && world.Transforms().Has(cameraEntity))
+			{
+				virasa::math::Transform camTransform = world.Transforms().GetLocal(cameraEntity);
+				camTransform.translation = _cameraPosition;
+				camTransform.rotation = orientation;
+				world.Transforms().SetLocal(cameraEntity, camTransform);
+			}
 		}
 
 		// ------------------------------------------------------------------
