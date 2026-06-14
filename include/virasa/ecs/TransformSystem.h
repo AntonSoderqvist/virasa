@@ -7,6 +7,7 @@
 #include "virasa/math/Types.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace virasa::ecs
@@ -90,6 +91,12 @@ public:
 	 * @return Normalized world-space forward direction as a Vec3.
 	 */
 	[[nodiscard]] virasa::math::Vec3 GetWorldForward(virasa::ecs::Entity entity) const;
+
+	/**
+	 * @brief Creates an independent TransformSystem with copied local storage and world cache.
+	 * @return New ComponentSystem instance with copied TransformSystem state.
+	 */
+	[[nodiscard]] std::unique_ptr<virasa::ecs::ComponentSystem> Clone() const override;
 
 protected:
 	/// @brief Hook called after a new local Transform is appended; appends an identity world matrix.

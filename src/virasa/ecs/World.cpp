@@ -39,6 +39,10 @@ World::World()
 		7u, "Highlight", sizeof(HighlightComponent)));
 }
 
+World::World(NoBuiltinSystemsTag)
+{
+}
+
 World::World(World&& other) noexcept
 	: _slots(std::move(other._slots))
 	, _parents(std::move(other._parents))
@@ -656,6 +660,45 @@ void World::UpdateTransforms()
 	}
 
 	_transformSystem->ClearAllDirty();
+}
+
+// ---------------------------------------------------------------------------
+// Clone
+// ---------------------------------------------------------------------------
+
+World World::Clone() const
+{
+	World clone(NoBuiltinSystemsTag{});
+
+	clone._slots = _slots;
+	clone._parents = _parents;
+	clone._children = _children;
+	clone._roots = _roots;
+	clone._freeList = _freeList;
+	clone._entityCount = _entityCount;
+
+	clone._nameComponents = _nameComponents;
+	clone._nameEntities = _nameEntities;
+	clone._nameSparse = _nameSparse;
+
+	clone._systems.reserve(_systems.size());
+	clone._systemNameToId.reserve(_systemNameToId.size());
+	for (const auto& system : _systems)
+	{
+		auto clonedSystem = system->Clone();
+		const virasa::ecs::ComponentId id = static_cast<virasa::ecs::ComponentId>(clone._systems.size());
+		clonedSystem->SetId(id);
+
+		if (auto* transforms = dynamic_cast<virasa::ecs::TransformSystem*>(clonedSystem.get()))
+		{
+			clone._transformSystem = transforms;
+		}
+
+		clone._systemNameToId.emplace_back(clonedSystem->Name(), id);
+		clone._systems.push_back(std::move(clonedSystem));
+	}
+
+	return clone;
 }
 
 // ---------------------------------------------------------------------------

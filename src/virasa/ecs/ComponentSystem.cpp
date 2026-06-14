@@ -3,6 +3,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cassert>
+#include <memory>
 
 namespace virasa::ecs
 {
@@ -186,6 +187,21 @@ void SparseComponentSystem::ClearAllDirty()
 void SparseComponentSystem::Update()
 {
 	// No-op for the base SparseComponentSystem.
+}
+
+std::unique_ptr<virasa::ecs::ComponentSystem> SparseComponentSystem::Clone() const
+{
+	auto clone = std::make_unique<virasa::ecs::SparseComponentSystem>(_id, _name, _elementSize);
+	CopyStorageInto(*clone);
+	return clone;
+}
+
+void SparseComponentSystem::CopyStorageInto(virasa::ecs::SparseComponentSystem& target) const
+{
+	target._denseData = _denseData;
+	target._denseEntities = _denseEntities;
+	target._sparse = _sparse;
+	target._dirty = _dirty;
 }
 
 void SparseComponentSystem::MarkDirty(virasa::ecs::Entity entity)

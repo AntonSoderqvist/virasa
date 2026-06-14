@@ -204,8 +204,18 @@ public:
 	 */
 	void UpdateTransforms();
 
+	/**
+	 * @brief Creates an independent deep copy of this World.
+	 * @return A new World with identical entity handles, hierarchy, names, and component systems.
+	 */
+	[[nodiscard]] virasa::ecs::World Clone() const;
+
 
 private:
+	struct NoBuiltinSystemsTag {};
+
+	explicit World(NoBuiltinSystemsTag);
+
 	// --- Entity table ---
 	struct Slot
 	{

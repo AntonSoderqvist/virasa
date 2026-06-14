@@ -10,6 +10,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -323,4 +324,57 @@ TEST(TransformSystem, test_transform_system_does_not_own_hierarchy_propagation)
 
 	// Dirty set is now empty.
 	EXPECT_TRUE(sys.Dirty().empty());
+}
+
+// ---------------------------------------------------------------------------
+// transform_system_clone_copies_world_cache
+// ---------------------------------------------------------------------------
+TEST(TransformSystem, test_transform_system_clone_copies_world_cache)
+{
+	virasa::ecs::TransformSystem sys(kTestComponentId);
+
+	virasa::ecs::Entity e0 = MakeEntity(0);
+	virasa::ecs::Entity e1 = MakeEntity(1);
+	virasa::math::Transform t0 = MakeTestTransform(1.0f, 2.0f, 3.0f);
+	virasa::math::Transform t1 = MakeTestTransform(4.0f, 5.0f, 6.0f);
+	sys.Add(e0, t0);
+	sys.Add(e1, t1);
+	sys.ClearDirty(e0);
+
+	virasa::math::Mat4 w0 = glm::mat4(1.0f);
+	w0[3][0] = 10.0f;
+	w0[3][1] = 20.0f;
+	w0[3][2] = 30.0f;
+	virasa::math::Mat4 w1 = glm::mat4(1.0f);
+	w1[3][0] = 40.0f;
+	w1[3][1] = 50.0f;
+	w1[3][2] = 60.0f;
+	sys.SetWorld(e0, w0);
+	sys.SetWorld(e1, w1);
+
+	std::unique_ptr<virasa::ecs::ComponentSystem> cloneBase = sys.Clone();
+	auto* clone = dynamic_cast<virasa::ecs::TransformSystem*>(cloneBase.get());
+	ASSERT_NE(clone, nullptr);
+
+	EXPECT_EQ(clone->Id(), sys.Id());
+	EXPECT_EQ(clone->Entities(), sys.Entities());
+	EXPECT_EQ(clone->Dirty(), sys.Dirty());
+	EXPECT_TRUE(clone->Has(e0));
+	EXPECT_TRUE(clone->Has(e1));
+
+	EXPECT_NEAR(clone->GetLocal(e0).translation.x, 1.0f, kEps);
+	EXPECT_NEAR(clone->GetLocal(e1).translation.x, 4.0f, kEps);
+	EXPECT_NEAR(clone->GetWorld(e0)[3][0], 10.0f, kEps);
+	EXPECT_NEAR(clone->GetWorld(e0)[3][1], 20.0f, kEps);
+	EXPECT_NEAR(clone->GetWorld(e1)[3][0], 40.0f, kEps);
+	EXPECT_NEAR(clone->GetWorld(e1)[3][1], 50.0f, kEps);
+
+	virasa::math::Mat4 changedOriginal = glm::mat4(1.0f);
+	changedOriginal[3][0] = 99.0f;
+	sys.SetWorld(e0, changedOriginal);
+	EXPECT_NEAR(clone->GetWorld(e0)[3][0], 10.0f, kEps);
+
+	virasa::math::Transform changedCloneLocal = MakeTestTransform(7.0f, 8.0f, 9.0f);
+	clone->SetLocal(e1, changedCloneLocal);
+	EXPECT_NEAR(sys.GetLocal(e1).translation.x, 4.0f, kEps);
 }

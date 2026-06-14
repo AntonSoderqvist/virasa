@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <memory>
 #include <vector>
 #include <functional>
 
@@ -129,6 +130,12 @@ public:
 
 	/// @brief Resolves any derived state the concrete system maintains.
 	virtual void Update() = 0;
+
+	/**
+	 * @brief Creates an independent deep copy of this component system.
+	 * @return New ComponentSystem instance with copied storage.
+	 */
+	[[nodiscard]] virtual std::unique_ptr<virasa::ecs::ComponentSystem> Clone() const = 0;
 };
 
 /**
@@ -246,7 +253,19 @@ public:
 	/// @brief No-op for the base SparseComponentSystem; subclasses override to drain dirty state.
 	void Update() override;
 
+	/**
+	 * @brief Creates an independent SparseComponentSystem with copied base storage.
+	 * @return New ComponentSystem instance with copied sparse-set storage.
+	 */
+	[[nodiscard]] std::unique_ptr<virasa::ecs::ComponentSystem> Clone() const override;
+
 protected:
+	/**
+	 * @brief Copies the base sparse-set storage into a compatible target system.
+	 * @param target Target system that receives dense data, dense entities, sparse indices, and dirty set.
+	 */
+	void CopyStorageInto(virasa::ecs::SparseComponentSystem& target) const;
+
 	/**
 	 * Adds entity to the dirty set if not already present.
 	 * Available to subclasses that need to flag additional entities.

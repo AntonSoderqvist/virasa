@@ -9,6 +9,7 @@
 #include "virasa/math/Types.h"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -45,6 +46,12 @@ public:
 	void ClearDirty(Entity) override {}
 	void ClearAllDirty() override {}
 	void Update() override {}
+	std::unique_ptr<ComponentSystem> Clone() const override
+	{
+		auto clone = std::make_unique<TestSystem>(mName);
+		clone->SetId(mId);
+		return clone;
+	}
 
 	void SetId(ComponentId id) { mId = id; }
 
@@ -865,4 +872,92 @@ TEST(World, test_world_set_name_renames_entity_with_collision_resolution)
 	EXPECT_TRUE(world.HasNameComponent(e2));
 	EXPECT_TRUE(world.HasNameComponent(e3));
 	EXPECT_TRUE(world.HasNameComponent(e4));
+}
+
+// ===========================================================================
+// world_clone_deep_copies_state
+// ===========================================================================
+TEST(World, test_world_clone_deep_copies_state)
+{
+	World world;
+
+	Entity root = world.CreateEntity("Root");
+	Entity child = world.CreateEntity("Child");
+	Entity sibling = world.CreateEntity("Sibling");
+	Entity recycled = world.CreateEntity("Recycled");
+	world.DestroyEntity(recycled);
+	EXPECT_EQ(world.SetParent(child, root), EcsError::None);
+
+	Transform rootLocal;
+	rootLocal.translation = Vec3(1.0f, 0.0f, 0.0f);
+	Transform childLocal;
+	childLocal.translation = Vec3(0.0f, 2.0f, 0.0f);
+	world.Transforms().Add(root, rootLocal);
+	world.Transforms().Add(child, childLocal);
+	world.UpdateTransforms();
+
+	ComponentId meshId = world.GetSystemId("Mesh");
+	ComponentId visualId = world.GetSystemId("Visual");
+	ASSERT_NE(meshId, kInvalidComponentId);
+	ASSERT_NE(visualId, kInvalidComponentId);
+
+	MeshComponent mesh;
+	mesh.meshId = 123u;
+	world.GetSystem(meshId).AddRaw(root, &mesh);
+
+	VisualComponent visual;
+	visual.materialId = 456u;
+	world.GetSystem(visualId).AddRaw(child, &visual);
+
+	World clone = world.Clone();
+
+	EXPECT_EQ(clone.GetEntityCount(), world.GetEntityCount());
+	EXPECT_TRUE(clone.IsValid(root));
+	EXPECT_TRUE(clone.IsValid(child));
+	EXPECT_TRUE(clone.IsValid(sibling));
+	EXPECT_FALSE(clone.IsValid(recycled));
+	EXPECT_EQ(clone.GetParent(root), Entity::Invalid());
+	EXPECT_EQ(clone.GetParent(child), root);
+	ASSERT_EQ(clone.GetChildren(root).size(), 1u);
+	EXPECT_EQ(clone.GetChildren(root)[0], child);
+	EXPECT_EQ(clone.FindEntityByName("Root"), root);
+	EXPECT_EQ(clone.FindEntityByName("Child"), child);
+	EXPECT_EQ(clone.GetNameComponent(root).name, "Root");
+
+	ComponentId transformId = clone.GetSystemId("Transform");
+	ASSERT_NE(transformId, kInvalidComponentId);
+	EXPECT_EQ(&clone.Transforms(), &clone.GetSystem(transformId));
+	EXPECT_NE(&clone.Transforms(), &world.Transforms());
+	EXPECT_EQ(clone.GetSystemId("Mesh"), meshId);
+	EXPECT_EQ(clone.GetSystemId("Visual"), visualId);
+	EXPECT_TRUE(clone.GetSystem(meshId).Has(root));
+	EXPECT_TRUE(clone.GetSystem(visualId).Has(child));
+
+	MeshComponent clonedMesh;
+	std::memcpy(&clonedMesh, clone.GetSystem(meshId).GetRaw(root), sizeof(MeshComponent));
+	EXPECT_EQ(clonedMesh.meshId, 123u);
+
+	VisualComponent clonedVisual;
+	std::memcpy(&clonedVisual, clone.GetSystem(visualId).GetRaw(child), sizeof(VisualComponent));
+	EXPECT_EQ(clonedVisual.materialId, 456u);
+
+	EXPECT_NEAR(clone.Transforms().GetLocal(root).translation.x, 1.0f, 1e-5f);
+	EXPECT_NEAR(clone.Transforms().GetWorld(child)[3][0], 1.0f, 1e-5f);
+	EXPECT_NEAR(clone.Transforms().GetWorld(child)[3][1], 2.0f, 1e-5f);
+
+	world.SetName(root, "OriginalRoot");
+	world.GetSystem(meshId).Remove(root);
+	Transform movedRoot;
+	movedRoot.translation = Vec3(10.0f, 0.0f, 0.0f);
+	world.Transforms().SetLocal(root, movedRoot);
+	world.UpdateTransforms();
+
+	EXPECT_EQ(clone.GetNameComponent(root).name, "Root");
+	EXPECT_TRUE(clone.GetSystem(meshId).Has(root));
+	EXPECT_NEAR(clone.Transforms().GetLocal(root).translation.x, 1.0f, 1e-5f);
+
+	clone.SetName(child, "CloneChild");
+	clone.GetSystem(visualId).Remove(child);
+	EXPECT_EQ(world.GetNameComponent(child).name, "Child");
+	EXPECT_TRUE(world.GetSystem(visualId).Has(child));
 }

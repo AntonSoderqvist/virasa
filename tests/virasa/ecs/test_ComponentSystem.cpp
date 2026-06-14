@@ -3,6 +3,8 @@
 #include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
+#include <memory>
+#include <string_view>
 #include <vector>
 
 #include "virasa/ecs/ComponentSystem.h"
@@ -516,4 +518,94 @@ TEST(SparseComponentSystem, test_sparse_component_system_provides_subclass_hooks
 	base->AddRaw(e1, &v);
 	base->Remove(e0);
 	EXPECT_EQ(sys2.swapCalls.size(), 1u);
+}
+
+// ===========================================================================
+// component_system_clone_deep_copies_storage
+// ===========================================================================
+TEST(SparseComponentSystem, test_component_system_clone_deep_copies_storage)
+{
+	std::unique_ptr<virasa::ecs::ComponentSystem> sys = std::make_unique<Vec3System>(12u);
+
+	virasa::ecs::Entity e0 = MakeEntity(0u);
+	virasa::ecs::Entity e1 = MakeEntity(1u);
+	Vec3 v0{1.f, 2.f, 3.f};
+	Vec3 v1{4.f, 5.f, 6.f};
+	sys->AddRaw(e0, &v0);
+	sys->AddRaw(e1, &v1);
+	sys->ClearDirty(e0);
+
+	std::unique_ptr<virasa::ecs::ComponentSystem> clone = sys->Clone();
+	ASSERT_NE(clone, nullptr);
+	EXPECT_NE(clone.get(), sys.get());
+	EXPECT_EQ(clone->Id(), sys->Id());
+	EXPECT_EQ(clone->Name(), std::string_view(sys->Name()));
+	EXPECT_EQ(clone->Size(), 2u);
+	EXPECT_TRUE(clone->Has(e0));
+	EXPECT_TRUE(clone->Has(e1));
+	ASSERT_EQ(clone->Dirty().size(), 1u);
+	EXPECT_EQ(clone->Dirty()[0], e1);
+
+	Vec3 cloneE0;
+	std::memcpy(&cloneE0, clone->GetRaw(e0), sizeof(Vec3));
+	EXPECT_FLOAT_EQ(cloneE0.x, 1.f);
+	EXPECT_FLOAT_EQ(cloneE0.y, 2.f);
+	EXPECT_FLOAT_EQ(cloneE0.z, 3.f);
+
+	Vec3 changedOriginal{9.f, 9.f, 9.f};
+	sys->SetRaw(e0, &changedOriginal);
+
+	Vec3 stillCloneE0;
+	std::memcpy(&stillCloneE0, clone->GetRaw(e0), sizeof(Vec3));
+	EXPECT_FLOAT_EQ(stillCloneE0.x, 1.f);
+	EXPECT_FLOAT_EQ(stillCloneE0.y, 2.f);
+	EXPECT_FLOAT_EQ(stillCloneE0.z, 3.f);
+
+	Vec3 changedClone{7.f, 8.f, 9.f};
+	clone->SetRaw(e1, &changedClone);
+
+	Vec3 stillOriginalE1;
+	std::memcpy(&stillOriginalE1, sys->GetRaw(e1), sizeof(Vec3));
+	EXPECT_FLOAT_EQ(stillOriginalE1.x, 4.f);
+	EXPECT_FLOAT_EQ(stillOriginalE1.y, 5.f);
+	EXPECT_FLOAT_EQ(stillOriginalE1.z, 6.f);
+}
+
+// ===========================================================================
+// sparse_component_system_clone_copies_storage
+// ===========================================================================
+TEST(SparseComponentSystem, test_sparse_component_system_clone_copies_storage)
+{
+	Vec3System sys(18u);
+
+	virasa::ecs::Entity e0 = MakeEntity(0u);
+	virasa::ecs::Entity e2 = MakeEntity(2u);
+	Vec3 v0{10.f, 20.f, 30.f};
+	Vec3 v2{40.f, 50.f, 60.f};
+	sys.AddRaw(e0, &v0);
+	sys.AddRaw(e2, &v2);
+	sys.ClearAllDirty();
+	sys.SetRaw(e2, &v2);
+
+	std::unique_ptr<virasa::ecs::ComponentSystem> cloneBase = sys.Clone();
+	auto* clone = dynamic_cast<virasa::ecs::SparseComponentSystem*>(cloneBase.get());
+	ASSERT_NE(clone, nullptr);
+
+	EXPECT_EQ(clone->Id(), 18u);
+	EXPECT_STREQ(clone->Name(), "Vec3");
+	EXPECT_EQ(clone->Entities(), sys.Entities());
+	EXPECT_EQ(clone->Dirty(), sys.Dirty());
+	EXPECT_TRUE(clone->Has(e0));
+	EXPECT_TRUE(clone->Has(e2));
+
+	sys.Remove(e0);
+	EXPECT_TRUE(clone->Has(e0));
+	EXPECT_TRUE(clone->Has(e2));
+	EXPECT_FALSE(sys.Has(e0));
+
+	Vec3 cloneValue;
+	std::memcpy(&cloneValue, clone->GetRaw(e2), sizeof(Vec3));
+	EXPECT_FLOAT_EQ(cloneValue.x, 40.f);
+	EXPECT_FLOAT_EQ(cloneValue.y, 50.f);
+	EXPECT_FLOAT_EQ(cloneValue.z, 60.f);
 }

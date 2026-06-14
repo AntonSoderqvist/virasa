@@ -4,6 +4,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <memory>
+
 namespace virasa::ecs
 {
 
@@ -77,6 +79,14 @@ virasa::math::Vec3 TransformSystem::GetWorldForward(virasa::ecs::Entity entity) 
 		world[1][2]
 	);
 	return glm::normalize(forward);
+}
+
+std::unique_ptr<virasa::ecs::ComponentSystem> TransformSystem::Clone() const
+{
+	auto clone = std::make_unique<virasa::ecs::TransformSystem>(Id());
+	CopyStorageInto(*clone);
+	clone->_worldMatrices = _worldMatrices;
+	return clone;
 }
 
 void TransformSystem::OnAdd(uint32_t /*denseIndex*/)
