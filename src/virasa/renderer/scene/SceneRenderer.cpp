@@ -1188,6 +1188,8 @@ uint32_t SceneRenderer::RenderWorld(
 						visualSys->GetRaw(entity));
 				if (visualCompPtr == nullptr)
 					continue;
+				if (!_materialTable.IsAllocated(visualCompPtr->materialId))
+					continue;
 
 				const virasa::VisualMaterialRasterState rasterState =
 					_materialTable.GetRasterState(visualCompPtr->materialId);
@@ -1791,6 +1793,8 @@ uint32_t SceneRenderer::RenderWorld(
 					static_cast<const virasa::ecs::VisualComponent*>(
 						visualSys2->GetRaw(entity));
 				if (visualCompPtr == nullptr)
+					continue;
+				if (!_materialTable.IsAllocated(visualCompPtr->materialId))
 					continue;
 
 				Drawable d{};

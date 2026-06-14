@@ -170,6 +170,13 @@ class VisualMaterialTable final
 	[[nodiscard]] VisualMaterialRasterState GetRasterState(uint32_t id) const noexcept;
 
 	/**
+	 * @brief Return true if id names a currently-allocated material slot.
+	 * @param id Any material id, including the invalid sentinel 0xFFFFFFFFu.
+	 * @return true if id is in range and not currently freed.
+	 */
+	[[nodiscard]] bool IsAllocated(uint32_t id) const noexcept;
+
+	/**
 	 * @brief Return the VkDeviceAddress of the material buffer.
 	 * @return The device address, or 0 if not initialized.
 	 */

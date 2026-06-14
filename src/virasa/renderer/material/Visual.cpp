@@ -1,5 +1,6 @@
 #include "virasa/renderer/material/Visual.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -209,6 +210,13 @@ void VisualMaterialTable::Free(uint32_t id)
 VisualMaterialRasterState VisualMaterialTable::GetRasterState(uint32_t id) const noexcept
 {
 	return _rasterStates[id];
+}
+
+bool VisualMaterialTable::IsAllocated(uint32_t id) const noexcept
+{
+	if (id >= _rasterStates.size())
+		return false;
+	return std::find(_freeSlots.begin(), _freeSlots.end(), id) == _freeSlots.end();
 }
 
 VkDeviceAddress VisualMaterialTable::GetBufferAddress() const noexcept

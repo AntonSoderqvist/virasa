@@ -386,6 +386,31 @@ TEST(VisualTests, test_visual_material_table_observers)
 	EXPECT_EQ(table.GetBufferAddress(), 0u);
 	EXPECT_EQ(table.GetMaxMaterials(), 0u);
 	EXPECT_EQ(table.IsInitialized(), table.GetBufferAddress() != 0u);
+
+	// A default-constructed table has no allocated slots, so IsAllocated is
+	// false for every id including the invalid sentinel and never reads out
+	// of bounds.
+	EXPECT_FALSE(table.IsAllocated(0u));
+	EXPECT_FALSE(table.IsAllocated(0xFFFFFFFFu));
+
+	// With an initialized table, IsAllocated tracks allocation and freeing.
+	VulkanContext ctx;
+	if (!ctx.valid)
+	{
+		GTEST_SKIP() << "Vulkan not available";
+	}
+
+	VisualMaterialTable allocated;
+	ASSERT_EQ(allocated.Initialize(ctx.device, 4u), RenderError::None);
+
+	uint32_t id = allocated.Allocate(VisualMaterial{});
+	ASSERT_NE(id, UINT32_MAX);
+	EXPECT_TRUE(allocated.IsAllocated(id));
+	EXPECT_FALSE(allocated.IsAllocated(0xFFFFFFFFu));
+	EXPECT_FALSE(allocated.IsAllocated(allocated.GetMaxMaterials()));
+
+	allocated.Free(id);
+	EXPECT_FALSE(allocated.IsAllocated(id));
 }
 
 TEST(VisualTests, test_visual_material_table_is_not_thread_safe_per_instance)

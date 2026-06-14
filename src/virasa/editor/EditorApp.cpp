@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -147,6 +148,8 @@ int EditorApp::Run(int argc, char** argv)
 	}
 
 	constexpr uint32_t kDefaultMaterialId = 0u;
+	assetCatalog.Bind(
+		virasa::sim::AssetKind::Material, "builtin:default", kDefaultMaterialId);
 
 	// -------------------------------------------------------------------------
 	// Stage 6: Scene seeding
@@ -207,6 +210,10 @@ int EditorApp::Run(int argc, char** argv)
 		virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
 		world.GetSystem(camSysId).AddRaw(cameraEntity, &cam);
 	}
+
+	// Register the editor camera as the scene's default viewpoint so it is
+	// persisted on save and recovered on load.
+	authoredScene.SetDefaultCamera(cameraEntity);
 
 	// Initialise camera yaw/pitch
 	_cameraYaw = glm::radians(-135.0f);
@@ -343,7 +350,46 @@ int EditorApp::Run(int argc, char** argv)
 							else
 							{
 								authoredScene = std::move(*loadedScene);
+								virasa::ecs::World& loadedWorld =
+									authoredScene.GetWorld();
+
+								// Recover the viewport camera from the loaded
+								// scene's default camera, falling back to the
+								// first entity carrying a CameraComponent when
+								// the scene records no (valid) default camera.
 								cameraEntity = authoredScene.GetDefaultCamera();
+								if (!loadedWorld.IsValid(cameraEntity))
+								{
+									virasa::ecs::ComponentId camSysId =
+										loadedWorld.GetSystemId("Camera");
+									if (camSysId != virasa::ecs::kInvalidComponentId)
+									{
+										const auto& camEntities =
+											loadedWorld.GetSystem(camSysId).Entities();
+										if (!camEntities.empty())
+											cameraEntity = camEntities.front();
+									}
+								}
+
+								// Restore the saved camera view into the editor
+								// navigation state so the viewport jumps to where
+								// the camera was when the scene was saved. The
+								// editor only ever writes yaw*pitch rotations, so
+								// the rotation decomposes cleanly back into them.
+								if (loadedWorld.IsValid(cameraEntity) &&
+									loadedWorld.Transforms().Has(cameraEntity))
+								{
+									const virasa::math::Transform camT =
+										loadedWorld.Transforms().GetLocal(cameraEntity);
+									_cameraPosition = camT.translation;
+									const glm::mat3 r = glm::mat3_cast(camT.rotation);
+									_cameraYaw = std::atan2(r[0][1], r[0][0]);
+									_cameraPitch = std::atan2(r[1][2], r[2][2]);
+									const float pitchLimit = glm::radians(89.0f);
+									_cameraPitch = std::clamp(
+										_cameraPitch, -pitchLimit, pitchLimit);
+								}
+
 								viewManager.ClearSelection();
 								selectionHighlighted.clear();
 								hoverHighlighted.clear();
