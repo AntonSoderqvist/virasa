@@ -53,10 +53,8 @@ namespace
 
 class NullAssetResolver final : public virasa::sim::AssetResolver
 {
-public:
-	uint32_t Resolve(
-		virasa::sim::AssetKind kind,
-		std::string_view path) override
+	public:
+	uint32_t Resolve(virasa::sim::AssetKind kind, std::string_view path) override
 	{
 		(void)kind;
 		(void)path;
@@ -162,8 +160,7 @@ int EditorApp::Run(int argc, char** argv)
 	}
 
 	constexpr uint32_t kDefaultMaterialId = 0u;
-	assetCatalog.Bind(
-		virasa::sim::AssetKind::Material, "builtin:default", kDefaultMaterialId);
+	assetCatalog.Bind(virasa::sim::AssetKind::Material, "builtin:default", kDefaultMaterialId);
 
 	// -------------------------------------------------------------------------
 	// Stage 6: Scene seeding
@@ -181,12 +178,10 @@ int EditorApp::Run(int argc, char** argv)
 		cameraEntity = scene.GetDefaultCamera();
 		if (!loadedWorld.IsValid(cameraEntity))
 		{
-			virasa::ecs::ComponentId camSysId =
-				loadedWorld.GetSystemId("Camera");
+			virasa::ecs::ComponentId camSysId = loadedWorld.GetSystemId("Camera");
 			if (camSysId != virasa::ecs::kInvalidComponentId)
 			{
-				const auto& camEntities =
-					loadedWorld.GetSystem(camSysId).Entities();
+				const auto& camEntities = loadedWorld.GetSystem(camSysId).Entities();
 				if (!camEntities.empty())
 					cameraEntity = camEntities.front();
 			}
@@ -206,14 +201,12 @@ int EditorApp::Run(int argc, char** argv)
 			_cameraYaw = std::atan2(r[0][1], r[0][0]);
 			_cameraPitch = std::atan2(r[1][2], r[2][2]);
 			const float pitchLimit = glm::radians(89.0f);
-			_cameraPitch = std::clamp(
-				_cameraPitch, -pitchLimit, pitchLimit);
+			_cameraPitch = std::clamp(_cameraPitch, -pitchLimit, pitchLimit);
 		}
 		return hasCamera;
 	};
 
-	auto adoptAuthoredScene =
-		[&](virasa::sim::Scene&& scene, bool resetCameraIfMissing) -> bool
+	auto adoptAuthoredScene = [&](virasa::sim::Scene&& scene, bool resetCameraIfMissing) -> bool
 	{
 		authoredScene = std::move(scene);
 		const bool hasCamera = restoreCameraFromScene(authoredScene);
@@ -229,8 +222,7 @@ int EditorApp::Run(int argc, char** argv)
 	if (argc >= 2 && argv != nullptr && argv[1] != nullptr && argv[1][0] != '\0')
 	{
 		NullAssetResolver resolver;
-		auto loaded = virasa::sim::OpenProject(
-			argv[1], resolver, codecRegistry, assetCatalog);
+		auto loaded = virasa::sim::OpenProject(argv[1], resolver, codecRegistry, assetCatalog);
 		if (loaded.has_value())
 		{
 			adoptAuthoredScene(std::move(loaded->scene), true);
@@ -349,16 +341,15 @@ int EditorApp::Run(int argc, char** argv)
 
 	bool playing = false;
 	std::optional<virasa::sim::Scene> runtimeScene;
-	auto activeWorld = [&]() -> virasa::ecs::World& {
-		return playing && runtimeScene.has_value()
-			? runtimeScene->GetWorld()
-			: authoredScene.GetWorld();
+	auto activeWorld = [&]() -> virasa::ecs::World&
+	{
+		return playing && runtimeScene.has_value() ? runtimeScene->GetWorld()
+									 : authoredScene.GetWorld();
 	};
 
 	auto expandHomePath = [](std::string path) -> std::string
 	{
-		if (!path.empty() && path.front() == '~' &&
-			(path.size() == 1u || path[1] == '/'))
+		if (!path.empty() && path.front() == '~' && (path.size() == 1u || path[1] == '/'))
 		{
 			if (const char* home = std::getenv("HOME"))
 			{
@@ -392,8 +383,7 @@ int EditorApp::Run(int argc, char** argv)
 		}
 
 		NullAssetResolver resolver;
-		auto loaded = virasa::sim::OpenProject(
-			path, resolver, codecRegistry, assetCatalog);
+		auto loaded = virasa::sim::OpenProject(path, resolver, codecRegistry, assetCatalog);
 		if (!loaded.has_value())
 		{
 			LOG_ERROR(logger, "Failed to open project directory: {}.", path);
@@ -427,7 +417,7 @@ int EditorApp::Run(int argc, char** argv)
 				shouldExit = true;
 			}
 			else if (event.type == virasa::EventType::KeyDown &&
-				 event.keyboard.key == virasa::KeyCode::Escape)
+				   event.keyboard.key == virasa::KeyCode::Escape)
 			{
 				if (viewManager.GetRightPanelMode() ==
 						virasa::editor::RightPanelMode::Closed &&
@@ -459,9 +449,7 @@ int EditorApp::Run(int argc, char** argv)
 					{
 						_pendingLoads.push_back(std::async(std::launch::async,
 							[p = std::move(path)]() mutable
-							{
-								return virasa::editor::io::ParseGlb(p);
-							}));
+							{ return virasa::editor::io::ParseGlb(p); }));
 					}
 				}
 				else if (result == virasa::editor::EventResult::LoadSceneRequested)
@@ -475,7 +463,8 @@ int EditorApp::Run(int argc, char** argv)
 					else if (playing)
 					{
 						LOG_WARNING(logger,
-							"Ignoring scene load request while play mode is active: {}.",
+							"Ignoring scene load request while play mode is active: "
+							"{}.",
 							path);
 					}
 					else
@@ -495,7 +484,9 @@ int EditorApp::Run(int argc, char** argv)
 									buffer.str(), codecRegistry, assetCatalog);
 							if (!loadedScene.has_value())
 							{
-								LOG_ERROR(logger, "Failed to deserialize scene file: {}.", path);
+								LOG_ERROR(logger,
+									"Failed to deserialize scene file: {}.",
+									path);
 							}
 							else
 							{
@@ -511,17 +502,19 @@ int EditorApp::Run(int argc, char** argv)
 					std::ofstream file(path, std::ios::binary | std::ios::trunc);
 					if (!file)
 					{
-						LOG_ERROR(logger, "Failed to open scene file for writing: {}.", path);
+						LOG_ERROR(logger,
+							"Failed to open scene file for writing: {}.",
+							path);
 					}
 					else
 					{
-						const std::string document =
-							virasa::sim::SerializeScene(
-								authoredScene, codecRegistry, assetCatalog);
+						const std::string document = virasa::sim::SerializeScene(
+							authoredScene, codecRegistry, assetCatalog);
 						file << document;
 						if (!file)
 						{
-							LOG_ERROR(logger, "Failed to write scene file: {}.", path);
+							LOG_ERROR(
+								logger, "Failed to write scene file: {}.", path);
 						}
 					}
 				}
@@ -532,7 +525,8 @@ int EditorApp::Run(int argc, char** argv)
 						runtimeScene = authoredScene.Instantiate();
 						if (!runtimeScene->BuildScheduler(behaviorRegistry, scheduler))
 						{
-							LOG_ERROR(logger, "Failed to build complete play-mode scheduler.");
+							LOG_ERROR(logger,
+								"Failed to build complete play-mode scheduler.");
 						}
 						scheduler.SetEnabled(true);
 						playing = true;
@@ -619,19 +613,21 @@ int EditorApp::Run(int argc, char** argv)
 		if (_touchpadScrollLatch > 0)
 			--_touchpadScrollLatch;
 
-		float wheelDollyY  = 0.0f;
-		float padScrollX   = 0.0f;
-		float padScrollY   = 0.0f;
+		float wheelDollyY = 0.0f;
+		float padScrollX = 0.0f;
+		float padScrollY = 0.0f;
 
 		for (const auto& event : events)
 		{
 			if (event.type == virasa::EventType::MouseWheel)
 			{
-				if (_touchpadScrollLatch > 0 || event.mouseWheel.integerY == 0)
+				const bool hasTouchpadX = event.mouseWheel.scrollX != 0.0f;
+				if (hasTouchpadX || _touchpadScrollLatch > 0)
 				{
 					padScrollX += event.mouseWheel.scrollX;
 					padScrollY += event.mouseWheel.scrollY;
-					_touchpadScrollLatch = 4;
+					if (hasTouchpadX)
+						_touchpadScrollLatch = 4;
 				}
 				else
 				{
@@ -644,13 +640,13 @@ int EditorApp::Run(int argc, char** argv)
 		// Step 3: Camera control
 		// ------------------------------------------------------------------
 		{
-			const float kRotateSensitivity        = 0.005f;
-			const float kPanSensitivity           = 0.01f;
-			const float kZoomSensitivity          = 0.5f;
+			const float kRotateSensitivity = 0.005f;
+			const float kPanSensitivity = 0.01f;
+			const float kZoomSensitivity = 0.5f;
 			const float kTouchpadRotateSensitivity = 0.05f;
-			const float kTouchpadPanSensitivity   = 1.0f;
-			const float kTouchpadZoomSensitivity  = 0.5f;
-			const float kPitchLimit               = glm::radians(89.0f);
+			const float kTouchpadPanSensitivity = 1.0f;
+			const float kTouchpadZoomSensitivity = 0.5f;
+			const float kPitchLimit = glm::radians(89.0f);
 
 			virasa::math::Quat yawQuat =
 				glm::angleAxis(_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
@@ -664,7 +660,7 @@ int EditorApp::Run(int argc, char** argv)
 				auto [dx, dy] = inputState.GetMouseDelta();
 
 				const bool shiftHeld = inputState.IsKeyDown(virasa::KeyCode::LShift) ||
-				                       inputState.IsKeyDown(virasa::KeyCode::RShift);
+							     inputState.IsKeyDown(virasa::KeyCode::RShift);
 
 				if (shiftHeld)
 				{
@@ -693,9 +689,9 @@ int EditorApp::Run(int argc, char** argv)
 			if (padScrollX != 0.0f || padScrollY != 0.0f)
 			{
 				const bool shiftHeld = inputState.IsKeyDown(virasa::KeyCode::LShift) ||
-				                       inputState.IsKeyDown(virasa::KeyCode::RShift);
-				const bool altHeld   = inputState.IsKeyDown(virasa::KeyCode::LAlt) ||
-				                       inputState.IsKeyDown(virasa::KeyCode::RAlt);
+							     inputState.IsKeyDown(virasa::KeyCode::RShift);
+				const bool altHeld = inputState.IsKeyDown(virasa::KeyCode::LAlt) ||
+							   inputState.IsKeyDown(virasa::KeyCode::RAlt);
 
 				if (shiftHeld)
 				{
@@ -732,12 +728,13 @@ int EditorApp::Run(int argc, char** argv)
 			if (wheelDollyY != 0.0f)
 			{
 				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
-				                   (wheelDollyY * kZoomSensitivity);
+							 (wheelDollyY * kZoomSensitivity);
 			}
 
 			if (world.IsValid(cameraEntity) && world.Transforms().Has(cameraEntity))
 			{
-				virasa::math::Transform camTransform = world.Transforms().GetLocal(cameraEntity);
+				virasa::math::Transform camTransform =
+					world.Transforms().GetLocal(cameraEntity);
 				camTransform.translation = _cameraPosition;
 				camTransform.rotation = orientation;
 				world.Transforms().SetLocal(cameraEntity, camTransform);
@@ -765,9 +762,9 @@ int EditorApp::Run(int argc, char** argv)
 			viewManager.GetCommandBarView().GetPanel().GetConfig().paddingY;
 		const float ascender = fontAtlas.GetAscender();
 		const float descender = fontAtlas.GetDescender();
-		const uint32_t barHeightPixels = static_cast<uint32_t>(std::min(
-			static_cast<float>(extent.height - 1u),
-			ascender - descender + 2.0f * commandBarPaddingY));
+		const uint32_t barHeightPixels =
+			static_cast<uint32_t>(std::min(static_cast<float>(extent.height - 1u),
+				ascender - descender + 2.0f * commandBarPaddingY));
 
 		uint32_t sceneWidth;
 		if (viewManager.GetRightPanelMode() != virasa::editor::RightPanelMode::Closed)
@@ -801,8 +798,8 @@ int EditorApp::Run(int argc, char** argv)
 			static_cast<uint32_t>(clickX) < sceneWidth &&
 			static_cast<uint32_t>(clickY) < sceneHeight)
 		{
-			sceneRenderer.RequestPick(static_cast<uint32_t>(clickX),
-				static_cast<uint32_t>(clickY));
+			sceneRenderer.RequestPick(
+				static_cast<uint32_t>(clickX), static_cast<uint32_t>(clickY));
 		}
 
 		// ------------------------------------------------------------------
@@ -831,7 +828,8 @@ int EditorApp::Run(int argc, char** argv)
 			{
 				auto selection = viewManager.GetSelection();
 
-				auto inDesired = [&](virasa::ecs::Entity e) {
+				auto inDesired = [&](virasa::ecs::Entity e)
+				{
 					for (const virasa::ecs::Entity selected : selection)
 					{
 						if (selected == e)
@@ -884,7 +882,8 @@ int EditorApp::Run(int argc, char** argv)
 						const auto* existing =
 							static_cast<const virasa::ecs::HighlightComponent*>(
 								highlightSys->GetRaw(e));
-						if (existing && existing->priority <= kSelectionHighlightPriority)
+						if (existing &&
+							existing->priority <= kSelectionHighlightPriority)
 						{
 							highlightSys->SetRaw(e, &newHighlight);
 							nextSelection.push_back(e);
@@ -928,8 +927,9 @@ int EditorApp::Run(int argc, char** argv)
 				if (cursorEntity != virasa::ecs::Entity::Invalid() &&
 					world.IsValid(cursorEntity))
 				{
-					desired.push_back(
-						{cursorEntity, kHoverHighlightIntensity, kHoverHighlightPriority});
+					desired.push_back({cursorEntity,
+						kHoverHighlightIntensity,
+						kHoverHighlightPriority});
 
 					const auto& roots = world.GetChildren(cursorEntity);
 					std::vector<virasa::ecs::Entity> stack(roots.begin(), roots.end());
@@ -948,7 +948,8 @@ int EditorApp::Run(int argc, char** argv)
 					}
 				}
 
-				auto inDesired = [&](virasa::ecs::Entity e) {
+				auto inDesired = [&](virasa::ecs::Entity e)
+				{
 					for (const auto& m : desired)
 					{
 						if (m.entity == e)
