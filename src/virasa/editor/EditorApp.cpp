@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <glm/common.hpp>
@@ -36,6 +37,7 @@
 #include "virasa/sim/Builtins.h"
 #include "virasa/sim/ComponentCodec.h"
 #include "virasa/sim/GameplayComponents.h"
+#include "virasa/sim/ProjectLoader.h"
 #include "virasa/sim/Scene.h"
 #include "virasa/sim/SceneSerializer.h"
 #include "virasa/sim/Tick.h"
@@ -46,14 +48,29 @@
 #include "virasa/window/InputState.h"
 #include "virasa/window/Platform.h"
 
+namespace
+{
+
+class NullAssetResolver final : public virasa::sim::AssetResolver
+{
+public:
+	uint32_t Resolve(
+		virasa::sim::AssetKind kind,
+		std::string_view path) override
+	{
+		(void)kind;
+		(void)path;
+		return virasa::sim::kInvalidAssetId;
+	}
+};
+
+} // namespace
+
 namespace virasa::editor
 {
 
 int EditorApp::Run(int argc, char** argv)
 {
-	(void)argc;
-	(void)argv;
-
 	// -------------------------------------------------------------------------
 	// Stage 1: Logger
 	// -------------------------------------------------------------------------
@@ -131,9 +148,6 @@ int EditorApp::Run(int argc, char** argv)
 	// -------------------------------------------------------------------------
 	// Stage 5b: Runtime registries and catalogs
 	// -------------------------------------------------------------------------
-	virasa::sim::BehaviorRegistry behaviorRegistry;
-	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
-
 	virasa::sim::ComponentCodecRegistry codecRegistry;
 	virasa::sim::RegisterBuiltinComponentCodecs(codecRegistry);
 
@@ -155,71 +169,152 @@ int EditorApp::Run(int argc, char** argv)
 	// Stage 6: Scene seeding
 	// -------------------------------------------------------------------------
 	virasa::sim::Scene authoredScene;
-	virasa::ecs::World& world = authoredScene.GetWorld();
-	virasa::sim::RegisterGameplayComponents(world);
+	virasa::ecs::Entity cameraEntity;
 
-	// Cube entity
+	auto restoreCameraFromScene = [&](virasa::sim::Scene& scene) -> bool
 	{
-		virasa::ecs::Entity cubeEntity = world.CreateEntity("Cube");
-		world.Transforms().Add(cubeEntity, virasa::math::Transform::Identity());
+		virasa::ecs::World& loadedWorld = scene.GetWorld();
 
-		virasa::ecs::ComponentId meshSysId = world.GetSystemId("Mesh");
-		virasa::ecs::MeshComponent meshComp;
-		meshComp.meshId = cubeMeshId;
-		world.GetSystem(meshSysId).AddRaw(cubeEntity, &meshComp);
-
-		virasa::ecs::ComponentId visualSysId = world.GetSystemId("Visual");
-		virasa::ecs::VisualComponent visualComp;
-		visualComp.materialId = kDefaultMaterialId;
-		world.GetSystem(visualSysId).AddRaw(cubeEntity, &visualComp);
-
-		virasa::sim::SpinComponent spinComp;
-		spinComp.angularVelocity = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
-		virasa::ecs::ComponentSystem* spinSys = world.FindSystem("Spin");
-		if (spinSys)
+		// Recover the viewport camera from the loaded scene's default camera,
+		// falling back to the first entity carrying a CameraComponent when the
+		// scene records no (valid) default camera.
+		cameraEntity = scene.GetDefaultCamera();
+		if (!loadedWorld.IsValid(cameraEntity))
 		{
-			spinSys->AddRaw(cubeEntity, &spinComp);
+			virasa::ecs::ComponentId camSysId =
+				loadedWorld.GetSystemId("Camera");
+			if (camSysId != virasa::ecs::kInvalidComponentId)
+			{
+				const auto& camEntities =
+					loadedWorld.GetSystem(camSysId).Entities();
+				if (!camEntities.empty())
+					cameraEntity = camEntities.front();
+			}
+		}
+
+		const bool hasCamera = loadedWorld.IsValid(cameraEntity);
+		// Restore the saved camera view into the editor navigation state so the
+		// viewport jumps to where the camera was when the scene was saved. The
+		// editor only ever writes yaw*pitch rotations, so the rotation decomposes
+		// cleanly back into them.
+		if (hasCamera && loadedWorld.Transforms().Has(cameraEntity))
+		{
+			const virasa::math::Transform camT =
+				loadedWorld.Transforms().GetLocal(cameraEntity);
+			_cameraPosition = camT.translation;
+			const glm::mat3 r = glm::mat3_cast(camT.rotation);
+			_cameraYaw = std::atan2(r[0][1], r[0][0]);
+			_cameraPitch = std::atan2(r[1][2], r[2][2]);
+			const float pitchLimit = glm::radians(89.0f);
+			_cameraPitch = std::clamp(
+				_cameraPitch, -pitchLimit, pitchLimit);
+		}
+		return hasCamera;
+	};
+
+	auto adoptAuthoredScene =
+		[&](virasa::sim::Scene&& scene, bool resetCameraIfMissing) -> bool
+	{
+		authoredScene = std::move(scene);
+		const bool hasCamera = restoreCameraFromScene(authoredScene);
+		if (!hasCamera && resetCameraIfMissing)
+		{
+			_cameraYaw = glm::radians(-135.0f);
+			_cameraPitch = glm::radians(-30.0f);
+		}
+		return hasCamera;
+	};
+
+	bool seedStarterScene = true;
+	if (argc >= 2 && argv != nullptr && argv[1] != nullptr && argv[1][0] != '\0')
+	{
+		NullAssetResolver resolver;
+		auto loaded = virasa::sim::OpenProject(
+			argv[1], resolver, codecRegistry, assetCatalog);
+		if (loaded.has_value())
+		{
+			adoptAuthoredScene(std::move(loaded->scene), true);
+			seedStarterScene = false;
+		}
+		else
+		{
+			LOG_ERROR(logger, "Failed to open project directory: {}.", argv[1]);
 		}
 	}
 
-	// Directional light entity
+	if (seedStarterScene)
 	{
-		virasa::ecs::Entity lightEntity = world.CreateEntity("DirectionalLight");
-		virasa::ecs::DirectionalLightComponent light;
-		light.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
-		light.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
-		light.intensity = 1.0f;
-		virasa::ecs::ComponentId lightSysId = world.GetSystemId("DirectionalLight");
-		world.GetSystem(lightSysId).AddRaw(lightEntity, &light);
+		virasa::ecs::World& world = authoredScene.GetWorld();
+		virasa::sim::RegisterGameplayComponents(world);
+
+		// Cube entity
+		{
+			virasa::ecs::Entity cubeEntity = world.CreateEntity("Cube");
+			world.Transforms().Add(cubeEntity, virasa::math::Transform::Identity());
+
+			virasa::ecs::ComponentId meshSysId = world.GetSystemId("Mesh");
+			virasa::ecs::MeshComponent meshComp;
+			meshComp.meshId = cubeMeshId;
+			world.GetSystem(meshSysId).AddRaw(cubeEntity, &meshComp);
+
+			virasa::ecs::ComponentId visualSysId = world.GetSystemId("Visual");
+			virasa::ecs::VisualComponent visualComp;
+			visualComp.materialId = kDefaultMaterialId;
+			world.GetSystem(visualSysId).AddRaw(cubeEntity, &visualComp);
+
+			virasa::sim::SpinComponent spinComp;
+			spinComp.angularVelocity = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+			virasa::ecs::ComponentSystem* spinSys = world.FindSystem("Spin");
+			if (spinSys)
+			{
+				spinSys->AddRaw(cubeEntity, &spinComp);
+			}
+		}
+
+		// Directional light entity
+		{
+			virasa::ecs::Entity lightEntity = world.CreateEntity("DirectionalLight");
+			virasa::ecs::DirectionalLightComponent light;
+			light.direction = virasa::math::Vec3(-1.0f, -1.0f, -1.0f);
+			light.color = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+			light.intensity = 1.0f;
+			virasa::ecs::ComponentId lightSysId = world.GetSystemId("DirectionalLight");
+			world.GetSystem(lightSysId).AddRaw(lightEntity, &light);
+		}
+
+		// Camera entity
+		{
+			cameraEntity = world.CreateEntity("Camera");
+
+			virasa::math::Transform camTransform;
+			camTransform.translation = _cameraPosition;
+			world.Transforms().Add(cameraEntity, camTransform);
+
+			virasa::ecs::CameraComponent cam;
+			cam.domain = virasa::CameraDomain::Editor;
+			cam.fovY = glm::radians(45.0f);
+			cam.nearPlane = 0.1f;
+			cam.farPlane = 100.0f;
+			virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
+			world.GetSystem(camSysId).AddRaw(cameraEntity, &cam);
+		}
+
+		// Register the editor camera as the scene's default viewpoint so it is
+		// persisted on save and recovered on load.
+		authoredScene.SetDefaultCamera(cameraEntity);
+
+		// Initialise camera yaw/pitch
+		_cameraYaw = glm::radians(-135.0f);
+		_cameraPitch = glm::radians(-30.0f);
+
+		authoredScene.AddBehavior("Spin");
 	}
 
-	// Camera entity
-	virasa::ecs::Entity cameraEntity;
-	{
-		cameraEntity = world.CreateEntity("Camera");
-
-		virasa::math::Transform camTransform;
-		camTransform.translation = _cameraPosition;
-		world.Transforms().Add(cameraEntity, camTransform);
-
-		virasa::ecs::CameraComponent cam;
-		cam.domain = virasa::CameraDomain::Editor;
-		cam.fovY = glm::radians(45.0f);
-		cam.nearPlane = 0.1f;
-		cam.farPlane = 100.0f;
-		virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
-		world.GetSystem(camSysId).AddRaw(cameraEntity, &cam);
-	}
-
-	// Register the editor camera as the scene's default viewpoint so it is
-	// persisted on save and recovered on load.
-	authoredScene.SetDefaultCamera(cameraEntity);
-
-	// Initialise camera yaw/pitch
-	_cameraYaw = glm::radians(-135.0f);
-	_cameraPitch = glm::radians(-30.0f);
-
-	authoredScene.AddBehavior("Spin");
+	// -------------------------------------------------------------------------
+	// Stage 6b: Behavior registry
+	// -------------------------------------------------------------------------
+	virasa::sim::BehaviorRegistry behaviorRegistry;
+	virasa::sim::RegisterBuiltinBehaviors(behaviorRegistry);
 
 	// -------------------------------------------------------------------------
 	// Stage 7: View manager
@@ -258,6 +353,56 @@ int EditorApp::Run(int argc, char** argv)
 		return playing && runtimeScene.has_value()
 			? runtimeScene->GetWorld()
 			: authoredScene.GetWorld();
+	};
+
+	auto expandHomePath = [](std::string path) -> std::string
+	{
+		if (!path.empty() && path.front() == '~' &&
+			(path.size() == 1u || path[1] == '/'))
+		{
+			if (const char* home = std::getenv("HOME"))
+			{
+				path.replace(0u, 1u, home);
+			}
+		}
+		return path;
+	};
+
+	auto pathIsDirectory = [](const std::string& path) -> bool
+	{
+		std::error_code ec;
+		return std::filesystem::is_directory(path, ec);
+	};
+
+	auto clearCommittedSelection = [&]()
+	{
+		viewManager.ClearSelection();
+		selectionHighlighted.clear();
+		hoverHighlighted.clear();
+	};
+
+	auto openProjectAtRuntime = [&](const std::string& path) -> bool
+	{
+		if (playing)
+		{
+			LOG_WARNING(logger,
+				"Ignoring project load request while play mode is active: {}.",
+				path);
+			return false;
+		}
+
+		NullAssetResolver resolver;
+		auto loaded = virasa::sim::OpenProject(
+			path, resolver, codecRegistry, assetCatalog);
+		if (!loaded.has_value())
+		{
+			LOG_ERROR(logger, "Failed to open project directory: {}.", path);
+			return false;
+		}
+
+		adoptAuthoredScene(std::move(loaded->scene), false);
+		clearCommittedSelection();
+		return true;
 	};
 
 	bool running = true;
@@ -304,25 +449,30 @@ int EditorApp::Run(int argc, char** argv)
 				}
 				else if (result == virasa::editor::EventResult::LoadModelRequested)
 				{
-					std::string path(viewManager.GetPendingLoadPath());
-					if (!path.empty() && path.front() == '~' &&
-						(path.size() == 1u || path[1] == '/'))
+					std::string path =
+						expandHomePath(std::string(viewManager.GetPendingLoadPath()));
+					if (pathIsDirectory(path))
 					{
-						if (const char* home = std::getenv("HOME"))
-						{
-							path.replace(0u, 1u, home);
-						}
+						openProjectAtRuntime(path);
 					}
-					_pendingLoads.push_back(std::async(std::launch::async,
-						[p = std::move(path)]() mutable
-						{
-							return virasa::editor::io::ParseGlb(p);
-						}));
+					else
+					{
+						_pendingLoads.push_back(std::async(std::launch::async,
+							[p = std::move(path)]() mutable
+							{
+								return virasa::editor::io::ParseGlb(p);
+							}));
+					}
 				}
 				else if (result == virasa::editor::EventResult::LoadSceneRequested)
 				{
-					std::string path(viewManager.GetPendingLoadPath());
-					if (playing)
+					std::string path =
+						expandHomePath(std::string(viewManager.GetPendingLoadPath()));
+					if (pathIsDirectory(path))
+					{
+						openProjectAtRuntime(path);
+					}
+					else if (playing)
 					{
 						LOG_WARNING(logger,
 							"Ignoring scene load request while play mode is active: {}.",
@@ -349,50 +499,8 @@ int EditorApp::Run(int argc, char** argv)
 							}
 							else
 							{
-								authoredScene = std::move(*loadedScene);
-								virasa::ecs::World& loadedWorld =
-									authoredScene.GetWorld();
-
-								// Recover the viewport camera from the loaded
-								// scene's default camera, falling back to the
-								// first entity carrying a CameraComponent when
-								// the scene records no (valid) default camera.
-								cameraEntity = authoredScene.GetDefaultCamera();
-								if (!loadedWorld.IsValid(cameraEntity))
-								{
-									virasa::ecs::ComponentId camSysId =
-										loadedWorld.GetSystemId("Camera");
-									if (camSysId != virasa::ecs::kInvalidComponentId)
-									{
-										const auto& camEntities =
-											loadedWorld.GetSystem(camSysId).Entities();
-										if (!camEntities.empty())
-											cameraEntity = camEntities.front();
-									}
-								}
-
-								// Restore the saved camera view into the editor
-								// navigation state so the viewport jumps to where
-								// the camera was when the scene was saved. The
-								// editor only ever writes yaw*pitch rotations, so
-								// the rotation decomposes cleanly back into them.
-								if (loadedWorld.IsValid(cameraEntity) &&
-									loadedWorld.Transforms().Has(cameraEntity))
-								{
-									const virasa::math::Transform camT =
-										loadedWorld.Transforms().GetLocal(cameraEntity);
-									_cameraPosition = camT.translation;
-									const glm::mat3 r = glm::mat3_cast(camT.rotation);
-									_cameraYaw = std::atan2(r[0][1], r[0][0]);
-									_cameraPitch = std::atan2(r[1][2], r[2][2]);
-									const float pitchLimit = glm::radians(89.0f);
-									_cameraPitch = std::clamp(
-										_cameraPitch, -pitchLimit, pitchLimit);
-								}
-
-								viewManager.ClearSelection();
-								selectionHighlighted.clear();
-								hoverHighlighted.clear();
+								adoptAuthoredScene(std::move(*loadedScene), false);
+								clearCommittedSelection();
 							}
 						}
 					}
