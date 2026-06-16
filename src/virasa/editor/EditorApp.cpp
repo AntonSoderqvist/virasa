@@ -674,8 +674,8 @@ int EditorApp::Run(int argc, char** argv)
 			const float kRotateSensitivity        = 0.005f;
 			const float kPanSensitivity           = 0.01f;
 			const float kZoomSensitivity          = 0.5f;
-			const float kTouchpadRotateSensitivity = 1.0f;
 			const float kTouchpadPanSensitivity   = 1.0f;
+			const float kTouchpadZoomSensitivity  = 0.5f;
 			const float kPinchZoomSensitivity     = 2.0f;
 			const float kPitchLimit               = glm::radians(89.0f);
 
@@ -733,15 +733,10 @@ int EditorApp::Run(int argc, char** argv)
 				}
 				else
 				{
-					_cameraYaw -= padScrollX * kTouchpadRotateSensitivity;
-					_cameraPitch -= padScrollY * kTouchpadRotateSensitivity;
-					_cameraPitch = std::clamp(_cameraPitch, -kPitchLimit, kPitchLimit);
-
-					yawQuat = glm::angleAxis(
-						_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
-					pitchQuat = glm::angleAxis(
-						_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
-					orientation = yawQuat * pitchQuat;
+					// Two-finger scroll (no Shift): zoom/dolly along view forward.
+					_cameraPosition +=
+						(orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
+						(padScrollY * kTouchpadZoomSensitivity);
 				}
 			}
 
