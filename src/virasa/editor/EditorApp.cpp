@@ -618,43 +618,16 @@ int EditorApp::Run(int argc, char** argv)
 
 		if (_touchpadScrollLatch > 0)
 			--_touchpadScrollLatch;
-		if (_pinchLatch > 0)
-			--_pinchLatch;
 
 		float wheelDollyY  = 0.0f;
 		float padScrollX   = 0.0f;
 		float padScrollY   = 0.0f;
-		float pinchScale   = 1.0f;
-		int   pinchCount   = 0;
-		bool  hasPinch     = false;
-
-		for (const auto& event : events)
-		{
-			if (event.type == virasa::EventType::Pinch)
-			{
-				pinchScale = event.pinch.scale; // use last event, not product
-				++pinchCount;
-				hasPinch = true;
-			}
-		}
-
-		if (pinchCount > 1)
-		{
-			LOG_DEBUG(logger, "pinch events per frame: {} last scale: {:.4f}", pinchCount, pinchScale);
-		}
-
-		if (hasPinch)
-			_pinchLatch = 10;
 
 		for (const auto& event : events)
 		{
 			if (event.type == virasa::EventType::MouseWheel)
 			{
-				if (_pinchLatch > 0)
-				{
-					// Suppress all scroll during and briefly after a pinch.
-				}
-				else if (_touchpadScrollLatch > 0 || event.mouseWheel.integerY == 0)
+				if (_touchpadScrollLatch > 0 || event.mouseWheel.integerY == 0)
 				{
 					padScrollX += event.mouseWheel.scrollX;
 					padScrollY += event.mouseWheel.scrollY;
@@ -674,9 +647,9 @@ int EditorApp::Run(int argc, char** argv)
 			const float kRotateSensitivity        = 0.005f;
 			const float kPanSensitivity           = 0.01f;
 			const float kZoomSensitivity          = 0.5f;
+			const float kTouchpadRotateSensitivity = 0.05f;
 			const float kTouchpadPanSensitivity   = 1.0f;
 			const float kTouchpadZoomSensitivity  = 0.5f;
-			const float kPinchZoomSensitivity     = 2.0f;
 			const float kPitchLimit               = glm::radians(89.0f);
 
 			virasa::math::Quat yawQuat =
@@ -716,11 +689,13 @@ int EditorApp::Run(int argc, char** argv)
 				}
 			}
 
-			// Touchpad two-finger drag: orbit or pan (Shift)
+			// Touchpad two-finger drag: orbit, pan (Shift), or zoom (Alt)
 			if (padScrollX != 0.0f || padScrollY != 0.0f)
 			{
 				const bool shiftHeld = inputState.IsKeyDown(virasa::KeyCode::LShift) ||
 				                       inputState.IsKeyDown(virasa::KeyCode::RShift);
+				const bool altHeld   = inputState.IsKeyDown(virasa::KeyCode::LAlt) ||
+				                       inputState.IsKeyDown(virasa::KeyCode::RAlt);
 
 				if (shiftHeld)
 				{
@@ -731,12 +706,25 @@ int EditorApp::Run(int argc, char** argv)
 						(orientation * virasa::math::Vec3(0.0f, 0.0f, 1.0f)) *
 						(padScrollY * kTouchpadPanSensitivity);
 				}
-				else
+				else if (altHeld)
 				{
-					// Two-finger scroll (no Shift): zoom/dolly along view forward.
+					// Alt + two-finger vertical scroll: zoom/dolly.
 					_cameraPosition +=
 						(orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
 						(padScrollY * kTouchpadZoomSensitivity);
+				}
+				else
+				{
+					// Two-finger scroll: horizontal rotates yaw, vertical rotates pitch.
+					_cameraYaw -= padScrollX * kTouchpadRotateSensitivity;
+					_cameraPitch -= padScrollY * kTouchpadRotateSensitivity;
+					_cameraPitch = std::clamp(_cameraPitch, -kPitchLimit, kPitchLimit);
+
+					yawQuat = glm::angleAxis(
+						_cameraYaw, virasa::math::Vec3(0.0f, 0.0f, 1.0f));
+					pitchQuat = glm::angleAxis(
+						_cameraPitch, virasa::math::Vec3(1.0f, 0.0f, 0.0f));
+					orientation = yawQuat * pitchQuat;
 				}
 			}
 
@@ -745,15 +733,6 @@ int EditorApp::Run(int argc, char** argv)
 			{
 				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) *
 				                   (wheelDollyY * kZoomSensitivity);
-			}
-
-			// Touchpad pinch: zoom (dolly)
-			if (pinchScale != 1.0f)
-			{
-				constexpr float kMaxPinchDollyPerFrame = 0.4f;
-				const float rawDolly = (pinchScale - 1.0f) * kPinchZoomSensitivity;
-				const float dolly    = std::clamp(rawDolly, -kMaxPinchDollyPerFrame, kMaxPinchDollyPerFrame);
-				_cameraPosition += (orientation * virasa::math::Vec3(0.0f, -1.0f, 0.0f)) * dolly;
 			}
 
 			if (world.IsValid(cameraEntity) && world.Transforms().Has(cameraEntity))
