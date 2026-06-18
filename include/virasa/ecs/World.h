@@ -11,6 +11,8 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <typeindex>
+#include <unordered_map>
 #include <vector>
 
 namespace virasa::ecs
@@ -210,6 +212,26 @@ public:
 	 */
 	[[nodiscard]] virasa::ecs::World Clone() const;
 
+	/**
+	 * @brief Associates a type-keyed non-owning singleton resource pointer with this World.
+	 * @param type The type key for the resource slot.
+	 * @param resource Borrowed pointer to store; may be nullptr.
+	 */
+	void SetResource(std::type_index type, void* resource);
+
+	/**
+	 * @brief Returns the type-keyed non-owning singleton resource pointer, if present.
+	 * @param type The type key for the resource slot.
+	 * @return The stored borrowed pointer, or nullptr if absent.
+	 */
+	[[nodiscard]] void* GetResource(std::type_index type) const noexcept;
+
+	/**
+	 * @brief Removes a type-keyed singleton resource binding.
+	 * @param type The type key for the resource slot.
+	 */
+	void RemoveResource(std::type_index type);
+
 
 private:
 	struct NoBuiltinSystemsTag {};
@@ -241,6 +263,9 @@ private:
 
 	// Cached typed pointer to the built-in TransformSystem
 	virasa::ecs::TransformSystem*	_transformSystem = nullptr;
+
+	// --- Resource store ---
+	std::unordered_map<std::type_index, void*>	_resources;
 
 	// --- Private helpers ---
 	void DestroyEntityInternal(virasa::ecs::Entity entity, bool isRoot);

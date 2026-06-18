@@ -56,6 +56,7 @@ World::World(World&& other) noexcept
 	, _systems(std::move(other._systems))
 	, _systemNameToId(std::move(other._systemNameToId))
 	, _transformSystem(other._transformSystem)
+	, _resources(std::move(other._resources))
 {
 	other._entityCount = 0u;
 	other._transformSystem = nullptr;
@@ -79,6 +80,7 @@ World& World::operator=(World&& other) noexcept
 	_nameEntities.clear();
 	_nameSparse.clear();
 	_transformSystem = nullptr;
+	_resources.clear();
 
 	// Take ownership
 	_slots = std::move(other._slots);
@@ -93,6 +95,7 @@ World& World::operator=(World&& other) noexcept
 	_systems = std::move(other._systems);
 	_systemNameToId = std::move(other._systemNameToId);
 	_transformSystem = other._transformSystem;
+	_resources = std::move(other._resources);
 
 	other._entityCount = 0u;
 	other._transformSystem = nullptr;
@@ -699,6 +702,28 @@ World World::Clone() const
 	}
 
 	return clone;
+}
+
+// ---------------------------------------------------------------------------
+// Resource store
+// ---------------------------------------------------------------------------
+
+void World::SetResource(std::type_index type, void* resource)
+{
+	_resources[type] = resource;
+}
+
+void* World::GetResource(std::type_index type) const noexcept
+{
+	auto it = _resources.find(type);
+	if (it == _resources.end())
+		return nullptr;
+	return it->second;
+}
+
+void World::RemoveResource(std::type_index type)
+{
+	_resources.erase(type);
 }
 
 // ---------------------------------------------------------------------------

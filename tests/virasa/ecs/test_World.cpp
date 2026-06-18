@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <typeindex>
 #include <vector>
 #include <algorithm>
 
@@ -872,6 +873,67 @@ TEST(World, test_world_set_name_renames_entity_with_collision_resolution)
 	EXPECT_TRUE(world.HasNameComponent(e2));
 	EXPECT_TRUE(world.HasNameComponent(e3));
 	EXPECT_TRUE(world.HasNameComponent(e4));
+}
+
+// ===========================================================================
+// world_resource_store_holds_typed_non_owning_singletons
+// ===========================================================================
+TEST(World, test_world_resource_store_holds_typed_non_owning_singletons)
+{
+	struct InputSnapshot
+	{
+		int frame = 0;
+	};
+
+	struct TimingService
+	{
+		double deltaSeconds = 0.0;
+	};
+
+	World world;
+	const std::type_index inputType(typeid(InputSnapshot));
+	const std::type_index timingType(typeid(TimingService));
+
+	EXPECT_EQ(world.GetResource(inputType), nullptr);
+	EXPECT_EQ(world.GetResource(timingType), nullptr);
+
+	InputSnapshot firstInput{1};
+	InputSnapshot secondInput{2};
+	TimingService timing{0.016};
+
+	world.SetResource(inputType, &firstInput);
+	EXPECT_EQ(world.GetResource(inputType), &firstInput);
+	EXPECT_EQ(static_cast<InputSnapshot*>(world.GetResource(inputType))->frame, 1);
+	EXPECT_EQ(world.GetResource(timingType), nullptr);
+
+	world.SetResource(inputType, &secondInput);
+	world.SetResource(timingType, &timing);
+	const World& constWorld = world;
+	EXPECT_EQ(constWorld.GetResource(inputType), &secondInput);
+	EXPECT_EQ(constWorld.GetResource(timingType), &timing);
+
+	world.SetResource(inputType, nullptr);
+	EXPECT_EQ(world.GetResource(inputType), nullptr);
+
+	world.RemoveResource(inputType);
+	EXPECT_EQ(world.GetResource(inputType), nullptr);
+	world.RemoveResource(inputType);
+	EXPECT_EQ(world.GetResource(inputType), nullptr);
+	EXPECT_EQ(world.GetResource(timingType), &timing);
+
+	World clone = world.Clone();
+	EXPECT_EQ(clone.GetResource(inputType), nullptr);
+	EXPECT_EQ(clone.GetResource(timingType), nullptr);
+	EXPECT_EQ(world.GetResource(timingType), &timing);
+
+	World moved(std::move(world));
+	EXPECT_EQ(moved.GetResource(timingType), &timing);
+
+	World moveAssigned;
+	moveAssigned.SetResource(inputType, &firstInput);
+	moveAssigned = std::move(moved);
+	EXPECT_EQ(moveAssigned.GetResource(timingType), &timing);
+	EXPECT_EQ(moveAssigned.GetResource(inputType), nullptr);
 }
 
 // ===========================================================================
