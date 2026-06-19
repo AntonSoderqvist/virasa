@@ -27,3 +27,6 @@
 	url = git@github.com:AntonSoderqvist/virasa-contracts.git
 	ignore = dirty
 	branch = main
+[submodule "vendor/JoltPhysics"]
+	path = vendor/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git
