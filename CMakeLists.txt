@@ -45,6 +45,17 @@ set(FT_DISABLE_HARFBUZZ TRUE CACHE BOOL "" FORCE)
 set(FT_DISABLE_BROTLI   TRUE CACHE BOOL "" FORCE)
 add_subdirectory(vendor/freetype EXCLUDE_FROM_ALL)
 
+# Jolt Physics (rigid-body dynamics). All JPH_* defines and SIMD compile
+# options are set PUBLIC on the Jolt target, so linking it propagates a
+# matching ABI to consumers automatically. Disable Jolt's global build-flag
+# overrides, LTO, install/export, and -Werror so it slots cleanly into our tree.
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+add_subdirectory(vendor/JoltPhysics/Build EXCLUDE_FROM_ALL)
+
 # --- Engine Modules ---
 add_subdirectory(src/virasa/core)
 add_subdirectory(src/virasa/math)
@@ -52,6 +63,7 @@ add_subdirectory(src/virasa/sim)
 add_subdirectory(src/virasa/window)
 add_subdirectory(src/virasa/renderer)
 add_subdirectory(src/virasa/ecs)
+add_subdirectory(src/virasa/physics)
 add_subdirectory(src/virasa/input)
 add_subdirectory(src/virasa/ui)
 add_subdirectory(src/virasa/renderer/text)
@@ -81,6 +93,7 @@ if(VIRASA_BUILD_TESTS)
     add_subdirectory(tests/virasa/window)
     add_subdirectory(tests/virasa/renderer)
     add_subdirectory(tests/virasa/ecs)
+    add_subdirectory(tests/virasa/physics)
     add_subdirectory(tests/virasa/input)
     add_subdirectory(tests/virasa/ui)
     add_subdirectory(tests/virasa/renderer/text)
@@ -102,3 +115,6 @@ target_link_libraries(virasa_editor
         virasa_renderer_text_lib
         virasa_editor_lib
 )
+
+# --- Examples ---
+add_subdirectory(examples/box-drop)

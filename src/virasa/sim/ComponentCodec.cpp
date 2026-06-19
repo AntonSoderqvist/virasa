@@ -3,6 +3,7 @@
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
+#include "virasa/physics/PhysicsComponents.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/sim/GameplayComponents.h"
 
@@ -583,6 +584,108 @@ public:
 	}
 };
 
+class RigidBodyCodec final :
+	public ConcreteComponentCodec<virasa::physics::RigidBodyComponent>
+{
+public:
+	RigidBodyCodec()
+		: ConcreteComponentCodec("RigidBody")
+	{
+	}
+
+	[[nodiscard]] nlohmann::json ToJson(
+		const void* component,
+		const virasa::sim::AssetCatalog& /*catalog*/) const override
+	{
+		const auto& body =
+			*static_cast<const virasa::physics::RigidBodyComponent*>(component);
+		return {
+			{"bodyType", static_cast<int32_t>(body.bodyType)},
+			{"mass", body.mass},
+			{"linearDamping", body.linearDamping},
+			{"angularDamping", body.angularDamping},
+			{"friction", body.friction},
+			{"restitution", body.restitution},
+			{"gravityFactor", body.gravityFactor},
+		};
+	}
+
+	bool FromJson(
+		const nlohmann::json& json,
+		const virasa::sim::AssetCatalog& /*catalog*/,
+		void* dst) const override
+	{
+		virasa::physics::RigidBodyComponent body{};
+		int32_t bodyType = static_cast<int32_t>(body.bodyType);
+		if (!json.is_object() ||
+			!ReadField(json, "bodyType", bodyType) ||
+			!ReadField(json, "mass", body.mass) ||
+			!ReadField(json, "linearDamping", body.linearDamping) ||
+			!ReadField(json, "angularDamping", body.angularDamping) ||
+			!ReadField(json, "friction", body.friction) ||
+			!ReadField(json, "restitution", body.restitution) ||
+			!ReadField(json, "gravityFactor", body.gravityFactor))
+		{
+			*static_cast<virasa::physics::RigidBodyComponent*>(dst) =
+				virasa::physics::RigidBodyComponent{};
+			return false;
+		}
+
+		body.bodyType = static_cast<virasa::physics::BodyType>(bodyType);
+		*static_cast<virasa::physics::RigidBodyComponent*>(dst) = body;
+		return true;
+	}
+};
+
+class ColliderCodec final :
+	public ConcreteComponentCodec<virasa::physics::ColliderComponent>
+{
+public:
+	ColliderCodec()
+		: ConcreteComponentCodec("Collider")
+	{
+	}
+
+	[[nodiscard]] nlohmann::json ToJson(
+		const void* component,
+		const virasa::sim::AssetCatalog& /*catalog*/) const override
+	{
+		const auto& collider =
+			*static_cast<const virasa::physics::ColliderComponent*>(component);
+		return {
+			{"shape", static_cast<int32_t>(collider.shape)},
+			{"halfExtents", Vec3ToJson(collider.halfExtents)},
+			{"radius", collider.radius},
+			{"halfHeight", collider.halfHeight},
+			{"offset", Vec3ToJson(collider.offset)},
+		};
+	}
+
+	bool FromJson(
+		const nlohmann::json& json,
+		const virasa::sim::AssetCatalog& /*catalog*/,
+		void* dst) const override
+	{
+		virasa::physics::ColliderComponent collider{};
+		int32_t shape = static_cast<int32_t>(collider.shape);
+		if (!json.is_object() ||
+			!ReadField(json, "shape", shape) ||
+			!ReadField(json, "halfExtents", collider.halfExtents) ||
+			!ReadField(json, "radius", collider.radius) ||
+			!ReadField(json, "halfHeight", collider.halfHeight) ||
+			!ReadField(json, "offset", collider.offset))
+		{
+			*static_cast<virasa::physics::ColliderComponent*>(dst) =
+				virasa::physics::ColliderComponent{};
+			return false;
+		}
+
+		collider.shape = static_cast<virasa::physics::ColliderShape>(shape);
+		*static_cast<virasa::physics::ColliderComponent*>(dst) = collider;
+		return true;
+	}
+};
+
 } // namespace
 
 void ComponentCodecRegistry::Register(std::unique_ptr<virasa::sim::ComponentCodec> codec)
@@ -636,6 +739,8 @@ void RegisterBuiltinComponentCodecs(virasa::sim::ComponentCodecRegistry& registr
 	registry.Register(std::make_unique<CameraCodec>());
 	registry.Register(std::make_unique<HighlightCodec>());
 	registry.Register(std::make_unique<SpinCodec>());
+	registry.Register(std::make_unique<RigidBodyCodec>());
+	registry.Register(std::make_unique<ColliderCodec>());
 }
 
 } // namespace virasa::sim

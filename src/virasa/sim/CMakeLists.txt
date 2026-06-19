@@ -26,6 +26,7 @@ add_library(virasa_scene_lib STATIC
     Scene.cpp
     SceneSerializer.cpp
     behaviors/SpinBehavior.cpp
+    behaviors/PhysicsBehavior.cpp
     Builtins.cpp
 )
 
@@ -39,5 +40,6 @@ target_link_libraries(virasa_scene_lib
         virasa_ecs_lib
         virasa_sim_lib
         virasa_math_lib
+        virasa_physics_lib
         virasa_vendor_tinygltf
 )

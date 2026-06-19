@@ -18,6 +18,7 @@ add_executable(virasa_scene_tests
     test_ProjectLoader.cpp
     test_SceneSerializer.cpp
     behaviors/test_SpinBehavior.cpp
+    behaviors/test_PhysicsBehavior.cpp
     test_Builtins.cpp
 )
 

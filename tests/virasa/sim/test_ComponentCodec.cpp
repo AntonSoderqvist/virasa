@@ -4,6 +4,7 @@
 
 #include "virasa/ecs/Components.h"
 #include "virasa/math/Transform.h"
+#include "virasa/physics/PhysicsComponents.h"
 #include "virasa/sim/GameplayComponents.h"
 
 #include <cstdint>
@@ -210,6 +211,8 @@ TEST(ComponentCodec, test_register_builtin_component_codecs_covers_serializable_
 		"Camera",
 		"Highlight",
 		"Spin",
+		"RigidBody",
+		"Collider",
 	};
 
 	EXPECT_EQ(registry.Size(), expectedNames.size());
@@ -308,6 +311,50 @@ TEST(ComponentCodec, test_register_builtin_component_codecs_covers_serializable_
 		catalog,
 		&decodedSpin));
 	ExpectVec3Eq(decodedSpin.angularVelocity, spinComponent.angularVelocity);
+
+	const ComponentCodec& rigidBody = RequireCodec(registry, "RigidBody");
+	virasa::physics::RigidBodyComponent rigidBodyComponent;
+	rigidBodyComponent.bodyType = virasa::physics::BodyType::Kinematic;
+	rigidBodyComponent.mass = 12.5f;
+	rigidBodyComponent.linearDamping = 0.15f;
+	rigidBodyComponent.angularDamping = 0.25f;
+	rigidBodyComponent.friction = 0.65f;
+	rigidBodyComponent.restitution = 0.35f;
+	rigidBodyComponent.gravityFactor = 0.5f;
+	virasa::physics::RigidBodyComponent decodedRigidBody;
+	const nlohmann::json rigidBodyJson = rigidBody.ToJson(&rigidBodyComponent, catalog);
+	EXPECT_EQ(rigidBody.ComponentName(), std::string_view("RigidBody"));
+	EXPECT_EQ(rigidBody.ElementSize(), sizeof(virasa::physics::RigidBodyComponent));
+	EXPECT_EQ(rigidBodyJson["bodyType"].get<uint32_t>(), 1u);
+	ASSERT_TRUE(rigidBody.FromJson(rigidBodyJson, catalog, &decodedRigidBody));
+	EXPECT_EQ(decodedRigidBody.bodyType, rigidBodyComponent.bodyType);
+	EXPECT_FLOAT_EQ(decodedRigidBody.mass, rigidBodyComponent.mass);
+	EXPECT_FLOAT_EQ(decodedRigidBody.linearDamping, rigidBodyComponent.linearDamping);
+	EXPECT_FLOAT_EQ(decodedRigidBody.angularDamping, rigidBodyComponent.angularDamping);
+	EXPECT_FLOAT_EQ(decodedRigidBody.friction, rigidBodyComponent.friction);
+	EXPECT_FLOAT_EQ(decodedRigidBody.restitution, rigidBodyComponent.restitution);
+	EXPECT_FLOAT_EQ(decodedRigidBody.gravityFactor, rigidBodyComponent.gravityFactor);
+
+	const ComponentCodec& collider = RequireCodec(registry, "Collider");
+	virasa::physics::ColliderComponent colliderComponent;
+	colliderComponent.shape = virasa::physics::ColliderShape::Capsule;
+	colliderComponent.halfExtents = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
+	colliderComponent.radius = 0.75f;
+	colliderComponent.halfHeight = 2.5f;
+	colliderComponent.offset = virasa::math::Vec3(-1.0f, 0.5f, 4.0f);
+	virasa::physics::ColliderComponent decodedCollider;
+	const nlohmann::json colliderJson = collider.ToJson(&colliderComponent, catalog);
+	EXPECT_EQ(collider.ComponentName(), std::string_view("Collider"));
+	EXPECT_EQ(collider.ElementSize(), sizeof(virasa::physics::ColliderComponent));
+	EXPECT_EQ(colliderJson["shape"].get<uint32_t>(), 2u);
+	ExpectJsonVec3Eq(colliderJson["halfExtents"], colliderComponent.halfExtents);
+	ExpectJsonVec3Eq(colliderJson["offset"], colliderComponent.offset);
+	ASSERT_TRUE(collider.FromJson(colliderJson, catalog, &decodedCollider));
+	EXPECT_EQ(decodedCollider.shape, colliderComponent.shape);
+	ExpectVec3Eq(decodedCollider.halfExtents, colliderComponent.halfExtents);
+	EXPECT_FLOAT_EQ(decodedCollider.radius, colliderComponent.radius);
+	EXPECT_FLOAT_EQ(decodedCollider.halfHeight, colliderComponent.halfHeight);
+	ExpectVec3Eq(decodedCollider.offset, colliderComponent.offset);
 
 	virasa::ecs::HighlightComponent missingOptional;
 	missingOptional.color = virasa::math::Vec3(9.0f, 9.0f, 9.0f);
