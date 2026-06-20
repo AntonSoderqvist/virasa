@@ -8,14 +8,25 @@
 namespace virasa::ecs
 {
 
+virasa::ecs::SystemLayer ComponentSystem::Layer() const noexcept
+{
+	return virasa::ecs::SystemLayer::Core;
+}
+
 // ---------------------------------------------------------------------------
 // SparseComponentSystem
 // ---------------------------------------------------------------------------
 
-SparseComponentSystem::SparseComponentSystem(virasa::ecs::ComponentId id, const char* name, size_t elementSize)
+SparseComponentSystem::SparseComponentSystem(
+	virasa::ecs::ComponentId id,
+	const char* name,
+	size_t elementSize,
+	virasa::ecs::SystemLayer layer
+)
 	: _id(id)
 	, _name(name)
 	, _elementSize(elementSize)
+	, _layer(layer)
 {
 }
 
@@ -32,6 +43,11 @@ virasa::ecs::ComponentId SparseComponentSystem::Id() const noexcept
 void SparseComponentSystem::SetId(virasa::ecs::ComponentId id) noexcept
 {
 	_id = id;
+}
+
+virasa::ecs::SystemLayer SparseComponentSystem::Layer() const noexcept
+{
+	return _layer;
 }
 
 bool SparseComponentSystem::Has(virasa::ecs::Entity entity) const noexcept
@@ -191,7 +207,7 @@ void SparseComponentSystem::Update()
 
 std::unique_ptr<virasa::ecs::ComponentSystem> SparseComponentSystem::Clone() const
 {
-	auto clone = std::make_unique<virasa::ecs::SparseComponentSystem>(_id, _name, _elementSize);
+	auto clone = std::make_unique<virasa::ecs::SparseComponentSystem>(_id, _name, _elementSize, Layer());
 	CopyStorageInto(*clone);
 	return clone;
 }

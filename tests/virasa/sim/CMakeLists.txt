@@ -22,7 +22,7 @@ add_executable(virasa_scene_tests
     behaviors/test_SpinBehavior.cpp
     behaviors/test_PhysicsBehavior.cpp
     behaviors/test_VehicleBehavior.cpp
-    behaviors/test_VehicleStability.cpp
+    # behaviors/test_VehicleStability.cpp  # FIXME: referenced but file missing/uncommitted (pre-existing)
     behaviors/test_ChaseCameraBehavior.cpp
     test_Builtins.cpp
 )

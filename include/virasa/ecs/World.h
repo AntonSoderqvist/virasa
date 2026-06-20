@@ -18,6 +18,13 @@
 namespace virasa::ecs
 {
 
+struct CloneOptions
+{
+public:
+	virasa::ecs::SystemLayerMask includeLayers = 0xFFFFFFFFu;
+	virasa::ecs::SystemLayerMask excludeTaggedEntityLayers = 0u;
+};
+
 /**
  * @brief Owns the full state of a single entity-component-system instance.
  *
@@ -211,6 +218,13 @@ public:
 	 * @return A new World with identical entity handles, hierarchy, names, and component systems.
 	 */
 	[[nodiscard]] virasa::ecs::World Clone() const;
+
+	/**
+	 * @brief Creates an independent deep copy of this World with layer and tag filters applied.
+	 * @param options Clone filtering options.
+	 * @return A new World with stable surviving entity handles and component ids.
+	 */
+	[[nodiscard]] virasa::ecs::World Clone(const virasa::ecs::CloneOptions& options) const;
 
 	/**
 	 * @brief Associates a type-keyed non-owning singleton resource pointer with this World.

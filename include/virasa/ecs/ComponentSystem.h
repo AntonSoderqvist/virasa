@@ -18,13 +18,24 @@ using ComponentId = uint32_t;
 /// @brief Sentinel ComponentId meaning "no component system".
 inline constexpr ComponentId kInvalidComponentId = 0xFFFFFFFFu;
 
+/// @brief Provenance layer describing the role of a component system's storage.
+enum class SystemLayer : uint32_t
+{
+	Core,
+	Editor,
+	Debug
+};
+
+/// @brief Bitmask of SystemLayer values.
+using SystemLayerMask = uint32_t;
+
 /**
  * @brief Abstract, type-erased interface for a component storage system.
  *
  * ComponentSystem is the base class a virasa::ecs::World uses to own and manipulate
  * storage for one component type without naming that type. It is not copyable and not
  * movable; instances are owned through std::unique_ptr<ComponentSystem> held by the World.
- * Every method is pure virtual; ComponentSystem itself stores no data.
+ * Every method except Layer is pure virtual; ComponentSystem itself stores no data.
  */
 class ComponentSystem
 {
@@ -59,6 +70,12 @@ public:
 	 * @param id The ComponentId to store.
 	 */
 	virtual void SetId(ComponentId id) = 0;
+
+	/**
+	 * @brief Returns the provenance layer for this system.
+	 * @return SystemLayer::Core unless overridden by a derived system.
+	 */
+	[[nodiscard]] virtual virasa::ecs::SystemLayer Layer() const noexcept;
 
 	/**
 	 * @brief Reports whether the given entity owns a component in this system.
@@ -159,8 +176,14 @@ public:
 	 * @param id The ComponentId assigned by the World.
 	 * @param name A stable human-readable name; the pointer must outlive this system.
 	 * @param elementSize The size in bytes of one component value.
+	 * @param layer The provenance layer for this system.
 	 */
-	explicit SparseComponentSystem(virasa::ecs::ComponentId id, const char* name, size_t elementSize);
+	explicit SparseComponentSystem(
+		virasa::ecs::ComponentId id,
+		const char* name,
+		size_t elementSize,
+		virasa::ecs::SystemLayer layer = virasa::ecs::SystemLayer::Core
+	);
 
 	virtual ~SparseComponentSystem() noexcept = default;
 
@@ -181,6 +204,12 @@ public:
 	 * @param id The ComponentId to store.
 	 */
 	void SetId(virasa::ecs::ComponentId id) noexcept override;
+
+	/**
+	 * @brief Returns the provenance layer supplied at construction.
+	 * @return The SystemLayer for this system.
+	 */
+	[[nodiscard]] virasa::ecs::SystemLayer Layer() const noexcept override;
 
 	/**
 	 * @brief Reports whether the entity owns a component in this system.
@@ -296,6 +325,7 @@ private:
 	virasa::ecs::ComponentId _id;
 	const char* _name;
 	size_t _elementSize;
+	virasa::ecs::SystemLayer _layer;
 
 	std::vector<uint8_t> _denseData;       // tightly packed component bytes
 	std::vector<virasa::ecs::Entity> _denseEntities; // parallel dense entity list

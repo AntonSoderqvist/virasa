@@ -9,6 +9,71 @@
 namespace virasa::ecs
 {
 
+namespace
+{
+
+[[nodiscard]] bool IsLayerInMask(SystemLayer layer, SystemLayerMask mask) noexcept
+{
+	return (mask & (1u << static_cast<uint32_t>(layer))) != 0u;
+}
+
+void RemoveEntitiesFromSystem(ComponentSystem& system, const std::vector<bool>& excluded)
+{
+	std::vector<Entity> entities = system.Entities();
+	for (const Entity& entity : entities)
+	{
+		if (entity.index < excluded.size() && excluded[entity.index] && system.Has(entity))
+		{
+			system.Remove(entity);
+		}
+	}
+}
+
+void EmptySystem(ComponentSystem& system)
+{
+	std::vector<Entity> entities = system.Entities();
+	for (const Entity& entity : entities)
+	{
+		if (system.Has(entity))
+		{
+			system.Remove(entity);
+		}
+	}
+}
+
+std::unique_ptr<ComponentSystem> CloneTransformWithEntityFilter(
+	const TransformSystem& source,
+	ComponentId id,
+	const std::vector<bool>& excluded)
+{
+	auto clone = std::make_unique<TransformSystem>(id);
+
+	for (const Entity& entity : source.Entities())
+	{
+		if (entity.index < excluded.size() && excluded[entity.index])
+			continue;
+
+		clone->Add(entity, source.GetLocal(entity));
+		clone->SetWorld(entity, source.GetWorld(entity));
+	}
+
+	clone->ClearAllDirty();
+	for (const Entity& entity : source.Dirty())
+	{
+		if (entity.index < excluded.size() && excluded[entity.index])
+			continue;
+		if (clone->Has(entity))
+		{
+			clone->SetLocal(entity, source.GetLocal(entity));
+			clone->SetWorld(entity, source.GetWorld(entity));
+		}
+	}
+
+	return clone;
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
@@ -17,26 +82,31 @@ World::World()
 {
 	// Register built-in systems in the pinned order:
 	// 0 – Transform, 1 – Mesh, 2 – Visual, 3 – DirectionalLight,
-	// 4 – PointLight, 5 – SpotLight, 6 – Camera, 7 – Highlight
+	// 4 – PointLight, 5 – SpotLight, 6 – Camera, 7 – Highlight,
+	// 8 – EditorOnlyTag, 9 – DebugOnlyTag
 
 	auto transformSys = std::make_unique<TransformSystem>(0u);
 	_transformSystem = transformSys.get();
-	RegisterSystem(std::move(transformSys));
+	(void)RegisterSystem(std::move(transformSys));
 
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		1u, "Mesh", sizeof(MeshComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		2u, "Visual", sizeof(VisualComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		3u, "DirectionalLight", sizeof(DirectionalLightComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		4u, "PointLight", sizeof(PointLightComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		5u, "SpotLight", sizeof(SpotLightComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
 		6u, "Camera", sizeof(CameraComponent)));
-	RegisterSystem(std::make_unique<SparseComponentSystem>(
-		7u, "Highlight", sizeof(HighlightComponent)));
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
+		7u, "Highlight", sizeof(HighlightComponent), SystemLayer::Editor));
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
+		8u, "EditorOnlyTag", sizeof(EditorOnlyTag), SystemLayer::Editor));
+	(void)RegisterSystem(std::make_unique<SparseComponentSystem>(
+		9u, "DebugOnlyTag", sizeof(DebugOnlyTag), SystemLayer::Debug));
 }
 
 World::World(NoBuiltinSystemsTag)
@@ -671,18 +741,150 @@ void World::UpdateTransforms()
 
 World World::Clone() const
 {
+	return Clone(CloneOptions{});
+}
+
+World World::Clone(const CloneOptions& options) const
+{
 	World clone(NoBuiltinSystemsTag{});
 
-	clone._slots = _slots;
-	clone._parents = _parents;
-	clone._children = _children;
-	clone._roots = _roots;
-	clone._freeList = _freeList;
-	clone._entityCount = _entityCount;
+	const bool hasDefaultOptions =
+		options.includeLayers == 0xFFFFFFFFu &&
+		options.excludeTaggedEntityLayers == 0u;
 
-	clone._nameComponents = _nameComponents;
-	clone._nameEntities = _nameEntities;
-	clone._nameSparse = _nameSparse;
+	std::vector<bool> excluded(_slots.size(), false);
+	if (!hasDefaultOptions && options.excludeTaggedEntityLayers != 0u)
+	{
+		auto markSubtreeExcluded = [this, &excluded](Entity root)
+		{
+			std::vector<Entity> stack;
+			stack.push_back(root);
+			while (!stack.empty())
+			{
+				Entity entity = stack.back();
+				stack.pop_back();
+
+				if (entity.index >= excluded.size() || excluded[entity.index])
+					continue;
+				if (!IsValid(entity))
+					continue;
+
+				excluded[entity.index] = true;
+				for (const Entity& child : _children[entity.index])
+				{
+					stack.push_back(child);
+				}
+			}
+		};
+
+		if (IsLayerInMask(SystemLayer::Editor, options.excludeTaggedEntityLayers))
+		{
+			ComponentId editorTagId = GetSystemId("EditorOnlyTag");
+			if (editorTagId != kInvalidComponentId)
+			{
+				for (const Entity& entity : _systems[editorTagId]->Entities())
+				{
+					markSubtreeExcluded(entity);
+				}
+			}
+		}
+
+		if (IsLayerInMask(SystemLayer::Debug, options.excludeTaggedEntityLayers))
+		{
+			ComponentId debugTagId = GetSystemId("DebugOnlyTag");
+			if (debugTagId != kInvalidComponentId)
+			{
+				for (const Entity& entity : _systems[debugTagId]->Entities())
+				{
+					markSubtreeExcluded(entity);
+				}
+			}
+		}
+	}
+
+	const bool hasExcludedEntities =
+		std::find(excluded.begin(), excluded.end(), true) != excluded.end();
+
+	if (!hasExcludedEntities)
+	{
+		clone._slots = _slots;
+		clone._parents = _parents;
+		clone._children = _children;
+		clone._roots = _roots;
+		clone._freeList = _freeList;
+		clone._entityCount = _entityCount;
+
+		clone._nameComponents = _nameComponents;
+		clone._nameEntities = _nameEntities;
+		clone._nameSparse = _nameSparse;
+	}
+	else
+	{
+		clone._slots = _slots;
+		clone._parents.resize(_parents.size(), Entity::Invalid());
+		clone._children.resize(_children.size());
+		clone._roots.reserve(_roots.size());
+		clone._freeList = _freeList;
+		clone._entityCount = 0u;
+
+		for (uint32_t index = 0; index < static_cast<uint32_t>(_slots.size()); ++index)
+		{
+			if (_slots[index].live && excluded[index])
+			{
+				clone._slots[index].live = false;
+				clone._parents[index] = Entity::Invalid();
+				clone._children[index].clear();
+				clone._freeList.push_back(index);
+				continue;
+			}
+
+			if (_slots[index].live)
+			{
+				++clone._entityCount;
+				clone._parents[index] = _parents[index];
+				clone._children[index].reserve(_children[index].size());
+				for (const Entity& child : _children[index])
+				{
+					if (child.index >= excluded.size() || !excluded[child.index])
+					{
+						clone._children[index].push_back(child);
+					}
+				}
+			}
+			else
+			{
+				clone._parents[index] = _parents[index];
+				clone._children[index] = _children[index];
+			}
+		}
+
+		for (const Entity& root : _roots)
+		{
+			if (root.index >= excluded.size() || !excluded[root.index])
+			{
+				clone._roots.push_back(root);
+			}
+		}
+
+		clone._nameSparse.assign(_nameSparse.size(), 0xFFFFFFFFu);
+		clone._nameComponents.reserve(_nameComponents.size());
+		clone._nameEntities.reserve(_nameEntities.size());
+		for (size_t i = 0; i < _nameEntities.size(); ++i)
+		{
+			const Entity& entity = _nameEntities[i];
+			if (entity.index < excluded.size() && excluded[entity.index])
+				continue;
+
+			uint32_t denseIndex = static_cast<uint32_t>(clone._nameComponents.size());
+			if (entity.index >= clone._nameSparse.size())
+			{
+				clone._nameSparse.resize(static_cast<size_t>(entity.index) + 1u, 0xFFFFFFFFu);
+			}
+			clone._nameSparse[entity.index] = denseIndex;
+			clone._nameComponents.push_back(_nameComponents[i]);
+			clone._nameEntities.push_back(entity);
+		}
+	}
 
 	clone._systems.reserve(_systems.size());
 	clone._systemNameToId.reserve(_systemNameToId.size());
@@ -691,6 +893,29 @@ World World::Clone() const
 		auto clonedSystem = system->Clone();
 		const virasa::ecs::ComponentId id = static_cast<virasa::ecs::ComponentId>(clone._systems.size());
 		clonedSystem->SetId(id);
+
+		if (!IsLayerInMask(system->Layer(), options.includeLayers))
+		{
+			if (dynamic_cast<virasa::ecs::TransformSystem*>(clonedSystem.get()) != nullptr)
+			{
+				clonedSystem = std::make_unique<virasa::ecs::TransformSystem>(id);
+			}
+			else
+			{
+				EmptySystem(*clonedSystem);
+			}
+		}
+		else if (hasExcludedEntities)
+		{
+			if (const auto* transforms = dynamic_cast<const virasa::ecs::TransformSystem*>(system.get()))
+			{
+				clonedSystem = CloneTransformWithEntityFilter(*transforms, id, excluded);
+			}
+			else
+			{
+				RemoveEntitiesFromSystem(*clonedSystem, excluded);
+			}
+		}
 
 		if (auto* transforms = dynamic_cast<virasa::ecs::TransformSystem*>(clonedSystem.get()))
 		{

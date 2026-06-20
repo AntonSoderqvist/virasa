@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "virasa/ecs/ComponentSystem.h"
@@ -42,8 +43,11 @@ virasa::ecs::Entity MakeEntity(uint32_t index, uint32_t generation = 1u)
 class Vec3System : public virasa::ecs::SparseComponentSystem
 {
 	public:
-	explicit Vec3System(virasa::ecs::ComponentId id = 0u)
-	    : virasa::ecs::SparseComponentSystem(id, "Vec3", sizeof(Vec3))
+	explicit Vec3System(
+		virasa::ecs::ComponentId id = 0u,
+		virasa::ecs::SystemLayer layer = virasa::ecs::SystemLayer::Core
+	)
+	    : virasa::ecs::SparseComponentSystem(id, "Vec3", sizeof(Vec3), layer)
 	{
 	}
 };
@@ -93,6 +97,66 @@ class HookedVec3System : public virasa::ecs::SparseComponentSystem
 };
 
 } // namespace
+
+// ===========================================================================
+// system_layer_classifies_systems_for_clone_filtering
+// ===========================================================================
+TEST(SparseComponentSystem, test_system_layer_classifies_systems_for_clone_filtering)
+{
+	static_assert(std::is_same_v<
+				  std::underlying_type_t<virasa::ecs::SystemLayer>,
+				  uint32_t>);
+	static_assert(std::is_same_v<virasa::ecs::SystemLayerMask, uint32_t>);
+
+	EXPECT_EQ(static_cast<uint32_t>(virasa::ecs::SystemLayer::Core), 0u);
+	EXPECT_EQ(static_cast<uint32_t>(virasa::ecs::SystemLayer::Editor), 1u);
+	EXPECT_EQ(static_cast<uint32_t>(virasa::ecs::SystemLayer::Debug), 2u);
+
+	auto layerBit =
+		[](virasa::ecs::SystemLayer layer) -> virasa::ecs::SystemLayerMask
+		{
+			return static_cast<virasa::ecs::SystemLayerMask>(
+				1u << static_cast<uint32_t>(layer));
+		};
+
+	const virasa::ecs::SystemLayerMask emptyMask = 0u;
+	EXPECT_EQ(emptyMask & layerBit(virasa::ecs::SystemLayer::Core), 0u);
+	EXPECT_EQ(emptyMask & layerBit(virasa::ecs::SystemLayer::Editor), 0u);
+	EXPECT_EQ(emptyMask & layerBit(virasa::ecs::SystemLayer::Debug), 0u);
+
+	const virasa::ecs::SystemLayerMask editorAndDebugMask =
+		layerBit(virasa::ecs::SystemLayer::Editor) |
+		layerBit(virasa::ecs::SystemLayer::Debug);
+	EXPECT_EQ(editorAndDebugMask & layerBit(virasa::ecs::SystemLayer::Core), 0u);
+	EXPECT_NE(editorAndDebugMask & layerBit(virasa::ecs::SystemLayer::Editor), 0u);
+	EXPECT_NE(editorAndDebugMask & layerBit(virasa::ecs::SystemLayer::Debug), 0u);
+
+	const virasa::ecs::SystemLayerMask allLayersMask =
+		layerBit(virasa::ecs::SystemLayer::Core) |
+		layerBit(virasa::ecs::SystemLayer::Editor) |
+		layerBit(virasa::ecs::SystemLayer::Debug);
+	EXPECT_NE(allLayersMask & layerBit(virasa::ecs::SystemLayer::Core), 0u);
+	EXPECT_NE(allLayersMask & layerBit(virasa::ecs::SystemLayer::Editor), 0u);
+	EXPECT_NE(allLayersMask & layerBit(virasa::ecs::SystemLayer::Debug), 0u);
+}
+
+// ===========================================================================
+// component_system_declares_layer
+// ===========================================================================
+TEST(SparseComponentSystem, test_component_system_declares_layer)
+{
+	virasa::ecs::SparseComponentSystem plain(
+		31u, "Plain", sizeof(Vec3));
+	EXPECT_EQ(plain.Layer(), virasa::ecs::SystemLayer::Core);
+
+	virasa::ecs::SparseComponentSystem editor(
+		32u, "Editor", sizeof(Vec3), virasa::ecs::SystemLayer::Editor);
+	EXPECT_EQ(editor.Layer(), virasa::ecs::SystemLayer::Editor);
+
+	std::unique_ptr<virasa::ecs::ComponentSystem> clone = editor.Clone();
+	ASSERT_NE(clone, nullptr);
+	EXPECT_EQ(clone->Layer(), virasa::ecs::SystemLayer::Editor);
+}
 
 // ===========================================================================
 // component_id_is_runtime_registration_handle

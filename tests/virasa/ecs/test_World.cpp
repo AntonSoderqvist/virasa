@@ -69,6 +69,11 @@ void AddTransform(World& world, Entity entity, const Transform& t = {})
 	world.Transforms().Add(entity, t);
 }
 
+SystemLayerMask LayerMask(SystemLayer layer)
+{
+	return 1u << static_cast<uint32_t>(layer);
+}
+
 } // namespace
 
 // ===========================================================================
@@ -132,15 +137,31 @@ TEST(World, test_world_default_constructed_registers_builtin_systems)
 	EXPECT_EQ(world.FindEntityByName("anything"), Entity::Invalid());
 
 	// Built-in system names are registered.
-	const char* builtins[] = {
-		"Transform", "Mesh", "Visual",
-		"DirectionalLight", "PointLight", "SpotLight", "Camera", "Highlight"
-	};
-	for (const char* name : builtins)
+	struct ExpectedBuiltin
 	{
-		ComponentId id = world.GetSystemId(name);
-		EXPECT_NE(id, kInvalidComponentId) << "Expected valid id for built-in system: " << name;
-		EXPECT_EQ(world.GetSystem(id).Size(), 0u) << "Expected size 0 for: " << name;
+		const char* name;
+		ComponentId id;
+		SystemLayer layer;
+	};
+	const ExpectedBuiltin builtins[] = {
+		{"Transform", 0u, SystemLayer::Core},
+		{"Mesh", 1u, SystemLayer::Core},
+		{"Visual", 2u, SystemLayer::Core},
+		{"DirectionalLight", 3u, SystemLayer::Core},
+		{"PointLight", 4u, SystemLayer::Core},
+		{"SpotLight", 5u, SystemLayer::Core},
+		{"Camera", 6u, SystemLayer::Core},
+		{"Highlight", 7u, SystemLayer::Editor},
+		{"EditorOnlyTag", 8u, SystemLayer::Editor},
+		{"DebugOnlyTag", 9u, SystemLayer::Debug},
+	};
+	for (const ExpectedBuiltin& builtin : builtins)
+	{
+		ComponentId id = world.GetSystemId(builtin.name);
+		EXPECT_EQ(id, builtin.id) << "Expected pinned id for built-in system: " << builtin.name;
+		ASSERT_NE(id, kInvalidComponentId) << "Expected valid id for built-in system: " << builtin.name;
+		EXPECT_EQ(world.GetSystem(id).Size(), 0u) << "Expected size 0 for: " << builtin.name;
+		EXPECT_EQ(world.GetSystem(id).Layer(), builtin.layer) << "Expected layer for: " << builtin.name;
 	}
 
 	// GetSystemId returns kInvalidComponentId for an unregistered name.
@@ -1022,4 +1043,171 @@ TEST(World, test_world_clone_deep_copies_state)
 	clone.GetSystem(visualId).Remove(child);
 	EXPECT_EQ(world.GetNameComponent(child).name, "Child");
 	EXPECT_TRUE(world.GetSystem(visualId).Has(child));
+}
+
+// ===========================================================================
+// world_clone_with_options_filters_layers_and_tagged_entities
+// ===========================================================================
+TEST(World, test_world_clone_with_options_filters_layers_and_tagged_entities)
+{
+	World world;
+
+	ComponentId transformId = world.GetSystemId("Transform");
+	ComponentId meshId = world.GetSystemId("Mesh");
+	ComponentId highlightId = world.GetSystemId("Highlight");
+	ComponentId editorTagId = world.GetSystemId("EditorOnlyTag");
+	ComponentId debugTagId = world.GetSystemId("DebugOnlyTag");
+	ASSERT_NE(transformId, kInvalidComponentId);
+	ASSERT_NE(meshId, kInvalidComponentId);
+	ASSERT_NE(highlightId, kInvalidComponentId);
+	ASSERT_NE(editorTagId, kInvalidComponentId);
+	ASSERT_NE(debugTagId, kInvalidComponentId);
+
+	Entity coreRoot = world.CreateEntity("CoreRoot");
+	Entity highlighted = world.CreateEntity("Highlighted");
+	Entity editorRoot = world.CreateEntity("EditorRoot");
+	Entity editorChild = world.CreateEntity("EditorChild");
+	Entity editorGrandchild = world.CreateEntity("EditorGrandchild");
+	Entity debugRoot = world.CreateEntity("DebugRoot");
+	Entity debugChild = world.CreateEntity("DebugChild");
+	Entity sibling = world.CreateEntity("Sibling");
+
+	ASSERT_EQ(world.SetParent(editorChild, editorRoot), EcsError::None);
+	ASSERT_EQ(world.SetParent(editorGrandchild, editorChild), EcsError::None);
+	ASSERT_EQ(world.SetParent(debugChild, debugRoot), EcsError::None);
+
+	Transform coreTransform;
+	coreTransform.translation = Vec3(1.0f, 2.0f, 3.0f);
+	AddTransform(world, coreRoot, coreTransform);
+	AddTransform(world, highlighted);
+	AddTransform(world, editorRoot);
+	AddTransform(world, editorChild);
+	AddTransform(world, editorGrandchild);
+	AddTransform(world, debugRoot);
+	AddTransform(world, debugChild);
+	AddTransform(world, sibling);
+
+	MeshComponent mesh;
+	mesh.meshId = 42u;
+	world.GetSystem(meshId).AddRaw(coreRoot, &mesh);
+	world.GetSystem(meshId).AddRaw(highlighted, &mesh);
+	world.GetSystem(meshId).AddRaw(sibling, &mesh);
+
+	HighlightComponent highlight;
+	highlight.priority = 7;
+	world.GetSystem(highlightId).AddRaw(highlighted, &highlight);
+
+	EditorOnlyTag editorTag;
+	world.GetSystem(editorTagId).AddRaw(editorRoot, &editorTag);
+
+	DebugOnlyTag debugTag;
+	world.GetSystem(debugTagId).AddRaw(debugRoot, &debugTag);
+
+	const Entity allEntities[] = {
+		coreRoot, highlighted, editorRoot, editorChild,
+		editorGrandchild, debugRoot, debugChild, sibling
+	};
+
+	World noArgClone = world.Clone();
+	World defaultOptionsClone = world.Clone(CloneOptions{});
+
+	EXPECT_EQ(defaultOptionsClone.GetEntityCount(), noArgClone.GetEntityCount());
+	for (Entity entity : allEntities)
+	{
+		EXPECT_TRUE(noArgClone.IsValid(entity));
+		EXPECT_TRUE(defaultOptionsClone.IsValid(entity));
+		EXPECT_EQ(defaultOptionsClone.GetNameComponent(entity).name,
+			noArgClone.GetNameComponent(entity).name);
+		EXPECT_EQ(defaultOptionsClone.GetParent(entity), noArgClone.GetParent(entity));
+		EXPECT_EQ(defaultOptionsClone.Transforms().Has(entity), noArgClone.Transforms().Has(entity));
+	}
+	EXPECT_EQ(defaultOptionsClone.GetSystemId("Transform"), transformId);
+	EXPECT_EQ(defaultOptionsClone.GetSystemId("Mesh"), meshId);
+	EXPECT_EQ(defaultOptionsClone.GetSystemId("Highlight"), highlightId);
+	EXPECT_EQ(defaultOptionsClone.GetSystemId("EditorOnlyTag"), editorTagId);
+	EXPECT_EQ(defaultOptionsClone.GetSystemId("DebugOnlyTag"), debugTagId);
+	EXPECT_TRUE(defaultOptionsClone.GetSystem(meshId).Has(coreRoot));
+	EXPECT_TRUE(defaultOptionsClone.GetSystem(meshId).Has(highlighted));
+	EXPECT_TRUE(defaultOptionsClone.GetSystem(highlightId).Has(highlighted));
+	EXPECT_TRUE(defaultOptionsClone.GetSystem(editorTagId).Has(editorRoot));
+	EXPECT_TRUE(defaultOptionsClone.GetSystem(debugTagId).Has(debugRoot));
+
+	MeshComponent clonedMesh;
+	std::memcpy(&clonedMesh, defaultOptionsClone.GetSystem(meshId).GetRaw(coreRoot),
+		sizeof(MeshComponent));
+	EXPECT_EQ(clonedMesh.meshId, 42u);
+
+	HighlightComponent clonedHighlight;
+	std::memcpy(&clonedHighlight, defaultOptionsClone.GetSystem(highlightId).GetRaw(highlighted),
+		sizeof(HighlightComponent));
+	EXPECT_EQ(clonedHighlight.priority, 7);
+
+	CloneOptions coreOnlyOptions;
+	coreOnlyOptions.includeLayers = LayerMask(SystemLayer::Core);
+	World coreOnlyClone = world.Clone(coreOnlyOptions);
+	EXPECT_TRUE(coreOnlyClone.IsValid(highlighted));
+	EXPECT_TRUE(coreOnlyClone.Transforms().Has(highlighted));
+	EXPECT_TRUE(coreOnlyClone.GetSystem(meshId).Has(highlighted));
+	EXPECT_EQ(coreOnlyClone.GetSystemId("Highlight"), highlightId);
+	EXPECT_EQ(coreOnlyClone.GetSystem(highlightId).Layer(), SystemLayer::Editor);
+	EXPECT_EQ(coreOnlyClone.GetSystem(highlightId).Size(), 0u);
+	EXPECT_FALSE(coreOnlyClone.GetSystem(highlightId).Has(highlighted));
+	EXPECT_EQ(coreOnlyClone.GetSystemId("EditorOnlyTag"), editorTagId);
+	EXPECT_EQ(coreOnlyClone.GetSystem(editorTagId).Size(), 0u);
+	EXPECT_EQ(coreOnlyClone.GetSystemId("DebugOnlyTag"), debugTagId);
+	EXPECT_EQ(coreOnlyClone.GetSystem(debugTagId).Size(), 0u);
+	EXPECT_EQ(coreOnlyClone.GetNameComponent(highlighted).name, "Highlighted");
+	EXPECT_EQ(coreOnlyClone.Transforms().GetLocal(coreRoot).translation.x, 1.0f);
+	EXPECT_EQ(coreOnlyClone.Transforms().GetLocal(coreRoot).translation.y, 2.0f);
+	EXPECT_EQ(coreOnlyClone.Transforms().GetLocal(coreRoot).translation.z, 3.0f);
+
+	CloneOptions excludeEditorOptions;
+	excludeEditorOptions.excludeTaggedEntityLayers = LayerMask(SystemLayer::Editor);
+	World excludeEditorClone = world.Clone(excludeEditorOptions);
+	EXPECT_FALSE(excludeEditorClone.IsValid(editorRoot));
+	EXPECT_FALSE(excludeEditorClone.IsValid(editorChild));
+	EXPECT_FALSE(excludeEditorClone.IsValid(editorGrandchild));
+	EXPECT_TRUE(excludeEditorClone.IsValid(debugRoot));
+	EXPECT_TRUE(excludeEditorClone.IsValid(debugChild));
+	EXPECT_TRUE(excludeEditorClone.IsValid(sibling));
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("EditorRoot"), Entity::Invalid());
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("EditorChild"), Entity::Invalid());
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("EditorGrandchild"), Entity::Invalid());
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("Sibling"), sibling);
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("Sibling").index, sibling.index);
+	EXPECT_EQ(excludeEditorClone.FindEntityByName("Sibling").generation, sibling.generation);
+	EXPECT_TRUE(excludeEditorClone.GetSystem(meshId).Has(sibling));
+	EXPECT_FALSE(excludeEditorClone.GetSystem(editorTagId).Has(editorRoot));
+
+	CloneOptions excludeDebugOptions;
+	excludeDebugOptions.excludeTaggedEntityLayers = LayerMask(SystemLayer::Debug);
+	World excludeDebugClone = world.Clone(excludeDebugOptions);
+	EXPECT_FALSE(excludeDebugClone.IsValid(debugRoot));
+	EXPECT_FALSE(excludeDebugClone.IsValid(debugChild));
+	EXPECT_TRUE(excludeDebugClone.IsValid(editorRoot));
+	EXPECT_TRUE(excludeDebugClone.IsValid(editorChild));
+	EXPECT_TRUE(excludeDebugClone.IsValid(sibling));
+	EXPECT_EQ(excludeDebugClone.FindEntityByName("DebugRoot"), Entity::Invalid());
+	EXPECT_EQ(excludeDebugClone.FindEntityByName("DebugChild"), Entity::Invalid());
+	EXPECT_EQ(excludeDebugClone.FindEntityByName("Sibling"), sibling);
+	EXPECT_EQ(excludeDebugClone.FindEntityByName("Sibling").index, sibling.index);
+	EXPECT_EQ(excludeDebugClone.FindEntityByName("Sibling").generation, sibling.generation);
+	EXPECT_TRUE(excludeDebugClone.GetSystem(meshId).Has(sibling));
+	EXPECT_FALSE(excludeDebugClone.GetSystem(debugTagId).Has(debugRoot));
+
+	CloneOptions noExcludedTagsOptions;
+	noExcludedTagsOptions.excludeTaggedEntityLayers = 0u;
+	World noExcludedTagsClone = world.Clone(noExcludedTagsOptions);
+	EXPECT_EQ(noExcludedTagsClone.GetEntityCount(), world.GetEntityCount());
+	for (Entity entity : allEntities)
+	{
+		EXPECT_TRUE(noExcludedTagsClone.IsValid(entity));
+		EXPECT_EQ(noExcludedTagsClone.FindEntityByName(world.GetNameComponent(entity).name), entity);
+		EXPECT_EQ(noExcludedTagsClone.FindEntityByName(world.GetNameComponent(entity).name).index,
+			entity.index);
+		EXPECT_EQ(noExcludedTagsClone.FindEntityByName(world.GetNameComponent(entity).name).generation,
+			entity.generation);
+	}
+	EXPECT_TRUE(noExcludedTagsClone.GetSystem(editorTagId).Has(editorRoot));
+	EXPECT_TRUE(noExcludedTagsClone.GetSystem(debugTagId).Has(debugRoot));
 }

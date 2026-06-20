@@ -147,6 +147,30 @@ public:
 	int32_t priority = 0;
 };
 
+/**
+ * @brief Tag component marking an entity as editor-only.
+ *
+ * Presence of this component is the entire signal. The reserved byte has no
+ * semantic meaning and exists only to make the tag a one-byte value type.
+ */
+struct EditorOnlyTag
+{
+public:
+	uint8_t reserved = 0u;
+};
+
+/**
+ * @brief Tag component marking an entity as debug-only.
+ *
+ * Presence of this component is the entire signal. The reserved byte has no
+ * semantic meaning and exists only to make the tag a one-byte value type.
+ */
+struct DebugOnlyTag
+{
+public:
+	uint8_t reserved = 0u;
+};
+
 } // namespace virasa::ecs
 
 #endif // VIRASA_ECS_COMPONENTS_H

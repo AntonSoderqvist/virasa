@@ -422,3 +422,30 @@ TEST(Components, test_highlight_component_marks_entity_for_color_highlight)
 	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::HighlightComponent>);
 	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::HighlightComponent>);
 }
+
+TEST(Components, test_editor_and_debug_only_tags_mark_entities_for_clone_exclusion)
+{
+	virasa::ecs::EditorOnlyTag editorTag;
+	EXPECT_EQ(editorTag.reserved, 0u);
+	EXPECT_EQ(sizeof(virasa::ecs::EditorOnlyTag), 1u);
+	EXPECT_EQ(sizeof(virasa::ecs::EditorOnlyTag), sizeof(uint8_t));
+	EXPECT_TRUE(std::is_trivially_copyable_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_TRUE(std::is_copy_constructible_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_TRUE(std::is_copy_assignable_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::EditorOnlyTag>);
+	EXPECT_EQ(offsetof(virasa::ecs::EditorOnlyTag, reserved), 0u);
+
+	virasa::ecs::DebugOnlyTag debugTag;
+	EXPECT_EQ(debugTag.reserved, 0u);
+	EXPECT_EQ(sizeof(virasa::ecs::DebugOnlyTag), 1u);
+	EXPECT_EQ(sizeof(virasa::ecs::DebugOnlyTag), sizeof(uint8_t));
+	EXPECT_TRUE(std::is_trivially_copyable_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_TRUE(std::is_default_constructible_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_TRUE(std::is_copy_constructible_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_TRUE(std::is_copy_assignable_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_TRUE(std::is_move_constructible_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_TRUE(std::is_move_assignable_v<virasa::ecs::DebugOnlyTag>);
+	EXPECT_EQ(offsetof(virasa::ecs::DebugOnlyTag, reserved), 0u);
+}

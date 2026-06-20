@@ -819,7 +819,11 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 5c: Request viewport pick
 		// ------------------------------------------------------------------
-		if (clickPending && clickX >= 0 && clickY >= 0 &&
+		// Editor-only interaction (picking, selection/hover highlighting) must
+		// not run while a simulation is playing: it would mutate the runtime
+		// world's Highlight components. Gate all of steps 5c/5d/5e/5b on edit
+		// mode.
+		if (!playing && clickPending && clickX >= 0 && clickY >= 0 &&
 			static_cast<uint32_t>(clickX) < sceneWidth &&
 			static_cast<uint32_t>(clickY) < sceneHeight)
 		{
@@ -830,6 +834,7 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 5d: Consume pick result
 		// ------------------------------------------------------------------
+		if (!playing)
 		{
 			virasa::PickResult result = sceneRenderer.GetPickResult();
 			if (result.valid)
@@ -842,6 +847,7 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 5e: Selection highlight
 		// ------------------------------------------------------------------
+		if (!playing)
 		{
 			const virasa::math::Vec3 kSelectionHighlightColor{1.0f, 0.6f, 0.1f};
 			const float kSelectionHighlightIntensity = 1.0f;
@@ -923,6 +929,7 @@ int EditorApp::Run(int argc, char** argv)
 		// ------------------------------------------------------------------
 		// Step 5b: Hierarchy hover highlight
 		// ------------------------------------------------------------------
+		if (!playing)
 		{
 			const virasa::math::Vec3 kHoverHighlightColor{0.1f, 0.4f, 1.0f};
 			const float kHoverHighlightIntensity = 1.0f;

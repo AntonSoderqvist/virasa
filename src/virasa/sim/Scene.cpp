@@ -59,7 +59,13 @@ virasa::ecs::Entity Scene::GetDefaultCamera() const noexcept
 virasa::sim::Scene Scene::Instantiate() const
 {
 	virasa::sim::Scene scene;
-	scene._world = _world.Clone();
+	virasa::ecs::CloneOptions opts;
+	opts.includeLayers = static_cast<virasa::ecs::SystemLayerMask>(
+		1u << static_cast<uint32_t>(virasa::ecs::SystemLayer::Core));
+	opts.excludeTaggedEntityLayers =
+		(1u << static_cast<uint32_t>(virasa::ecs::SystemLayer::Editor)) |
+		(1u << static_cast<uint32_t>(virasa::ecs::SystemLayer::Debug));
+	scene._world = _world.Clone(opts);
 	scene._behaviors = _behaviors;
 	scene._name = _name;
 	scene._defaultCamera = _defaultCamera;
