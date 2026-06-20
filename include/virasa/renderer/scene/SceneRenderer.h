@@ -86,6 +86,8 @@ public:
 	 */
 	[[nodiscard]] uint32_t CreateDefaultCubeMesh();
 
+	[[nodiscard]] uint32_t CreateDefaultCylinderMesh();
+
 	/**
 	 * @brief Allocates a default VisualMaterial in the material table.
 	 * @return The assigned material id, or 0xFFFFFFFFu on failure.

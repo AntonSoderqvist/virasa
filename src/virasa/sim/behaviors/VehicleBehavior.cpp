@@ -45,6 +45,7 @@ struct UsableWheel
 	virasa::ecs::Entity entity = virasa::ecs::Entity::Invalid();
 	virasa::sim::WheelComponent component{};
 	virasa::math::Transform local{};
+	virasa::math::Vec3 mount{0.0f, 0.0f, 0.0f};
 	float contactRadius = 0.0f;
 };
 
@@ -183,10 +184,25 @@ void VehicleBehavior::Step(
 			const auto* wheel = static_cast<const virasa::sim::WheelComponent*>(
 				wheelSystem.GetRaw(wheelEntity));
 			const virasa::math::Transform local = transformSystem.GetLocal(wheelEntity);
+
+			// The wheel entity's authored local translation is the fixed strut
+			// mount. Because this behavior also writes the suspension-dropped
+			// visual position back into the same local transform each step, the
+			// mount must be cached on first encounter and reused, rather than
+			// re-read from the (behavior-mutated) transform, or it would march
+			// down every step and the suspension would saturate.
+			auto mountIter = _wheelRestMounts.find(wheelEntity.index);
+			if (mountIter == _wheelRestMounts.end())
+			{
+				mountIter =
+					_wheelRestMounts.emplace(wheelEntity.index, local.translation).first;
+			}
+
 			usableWheels.push_back(UsableWheel{
 				wheelEntity,
 				*wheel,
 				local,
+				mountIter->second,
 				ContactRadius(local, *wheel)});
 
 			if (wheel->driven)
@@ -197,7 +213,7 @@ void VehicleBehavior::Step(
 
 		for (const UsableWheel& wheel : usableWheels)
 		{
-			const virasa::math::Vec3 mountLocal = wheel.local.translation;
+			const virasa::math::Vec3 mountLocal = wheel.mount;
 			const virasa::math::Vec3 mountWorld =
 				chassisPose.translation + chassisPose.rotation * mountLocal;
 			const virasa::math::Vec3 wheelHeading = wheel.component.steered ?

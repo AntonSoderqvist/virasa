@@ -6,6 +6,7 @@
 
 #include "virasa/ecs/Scheduler.h"
 #include "virasa/ecs/Types.h"
+#include "virasa/math/Types.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -58,6 +59,7 @@ public:
 
 private:
 	std::unordered_map<uint32_t, float> _wheelRollAngles;
+	std::unordered_map<uint32_t, virasa::math::Vec3> _wheelRestMounts;
 };
 
 } // namespace virasa::sim::behaviors

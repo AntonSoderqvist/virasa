@@ -162,6 +162,14 @@ int EditorApp::Run(int argc, char** argv)
 		return -1;
 	}
 
+	uint32_t cylinderMeshId = sceneRenderer.CreateDefaultCylinderMesh();
+	assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:cylinder", cylinderMeshId);
+	if (cylinderMeshId == 0xFFFFFFFFu)
+	{
+		LOG_ERROR(logger, "CreateDefaultCylinderMesh failed.");
+		return -1;
+	}
+
 	constexpr uint32_t kDefaultMaterialId = 0u;
 	assetCatalog.Bind(virasa::sim::AssetKind::Material, "builtin:default", kDefaultMaterialId);
 

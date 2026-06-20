@@ -153,6 +153,116 @@ namespace virasa
 
 	return meshData;
 }
+
+/**
+ * @brief Create CPU-side mesh data for a capped cylinder centered at the origin.
+ * @param radius Cylinder radius in the local YZ plane.
+ * @param half_length Half-length of the cylinder along the local X axis.
+ * @param slices Number of radial segments.
+ * @return Mesh data containing the generated cylinder vertices and indices.
+ */
+[[nodiscard]] inline MeshData CreateCylinder(
+	float radius = 0.5f, float half_length = 0.5f, uint32_t slices = 16)
+{
+	MeshData meshData;
+	meshData.vertices.reserve(static_cast<size_t>(4U) * static_cast<size_t>(slices + 1U) + 2U);
+	meshData.indices.reserve(static_cast<size_t>(slices) * 12U);
+
+	constexpr float kTwoPi = 6.28318530717958647692f;
+	const uint32_t ringStride = slices + 1U;
+
+	const uint32_t sidePositiveBase = 0U;
+	const uint32_t sideNegativeBase = ringStride;
+	for (uint32_t side = 0; side < 2U; ++side)
+	{
+		const float x = (side == 0U) ? half_length : -half_length;
+		const float v = static_cast<float>(side);
+
+		for (uint32_t slice = 0; slice <= slices; ++slice)
+		{
+			const float u = static_cast<float>(slice) / static_cast<float>(slices);
+			const float theta = u * kTwoPi;
+			const float sinTheta = std::sin(theta);
+			const float cosTheta = std::cos(theta);
+
+			const glm::vec3 normal(0.0f, cosTheta, sinTheta);
+			const glm::vec3 position(x, radius * cosTheta, radius * sinTheta);
+			const glm::vec4 tangent(0.0f, sinTheta, -cosTheta, 1.0f);
+
+			meshData.vertices.push_back(Vertex{position, normal, tangent, glm::vec2(u, v)});
+		}
+	}
+
+	for (uint32_t slice = 0; slice < slices; ++slice)
+	{
+		const uint32_t a = sidePositiveBase + slice;
+		const uint32_t b = sidePositiveBase + slice + 1U;
+		const uint32_t c = sideNegativeBase + slice;
+		const uint32_t d = sideNegativeBase + slice + 1U;
+
+		meshData.indices.push_back(a);
+		meshData.indices.push_back(c);
+		meshData.indices.push_back(b);
+
+		meshData.indices.push_back(b);
+		meshData.indices.push_back(c);
+		meshData.indices.push_back(d);
+	}
+
+	const uint32_t positiveCapCenter = static_cast<uint32_t>(meshData.vertices.size());
+	meshData.vertices.push_back(Vertex{glm::vec3(half_length, 0.0f, 0.0f),
+		glm::vec3(1.0f, 0.0f, 0.0f),
+		glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),
+		glm::vec2(0.5f, 0.5f)});
+	const uint32_t positiveCapRim = static_cast<uint32_t>(meshData.vertices.size());
+	for (uint32_t slice = 0; slice <= slices; ++slice)
+	{
+		const float u = static_cast<float>(slice) / static_cast<float>(slices);
+		const float theta = u * kTwoPi;
+		const float sinTheta = std::sin(theta);
+		const float cosTheta = std::cos(theta);
+
+		meshData.vertices.push_back(Vertex{glm::vec3(half_length, radius * cosTheta, radius * sinTheta),
+			glm::vec3(1.0f, 0.0f, 0.0f),
+			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),
+			glm::vec2(0.5f + 0.5f * cosTheta, 0.5f + 0.5f * sinTheta)});
+	}
+
+	for (uint32_t slice = 0; slice < slices; ++slice)
+	{
+		meshData.indices.push_back(positiveCapCenter);
+		meshData.indices.push_back(positiveCapRim + slice);
+		meshData.indices.push_back(positiveCapRim + slice + 1U);
+	}
+
+	const uint32_t negativeCapCenter = static_cast<uint32_t>(meshData.vertices.size());
+	meshData.vertices.push_back(Vertex{glm::vec3(-half_length, 0.0f, 0.0f),
+		glm::vec3(-1.0f, 0.0f, 0.0f),
+		glm::vec4(0.0f, -1.0f, 0.0f, 1.0f),
+		glm::vec2(0.5f, 0.5f)});
+	const uint32_t negativeCapRim = static_cast<uint32_t>(meshData.vertices.size());
+	for (uint32_t slice = 0; slice <= slices; ++slice)
+	{
+		const float u = static_cast<float>(slice) / static_cast<float>(slices);
+		const float theta = u * kTwoPi;
+		const float sinTheta = std::sin(theta);
+		const float cosTheta = std::cos(theta);
+
+		meshData.vertices.push_back(Vertex{glm::vec3(-half_length, radius * cosTheta, radius * sinTheta),
+			glm::vec3(-1.0f, 0.0f, 0.0f),
+			glm::vec4(0.0f, -1.0f, 0.0f, 1.0f),
+			glm::vec2(0.5f + 0.5f * cosTheta, 0.5f + 0.5f * sinTheta)});
+	}
+
+	for (uint32_t slice = 0; slice < slices; ++slice)
+	{
+		meshData.indices.push_back(negativeCapCenter);
+		meshData.indices.push_back(negativeCapRim + slice + 1U);
+		meshData.indices.push_back(negativeCapRim + slice);
+	}
+
+	return meshData;
+}
 } // namespace virasa
 
 #endif

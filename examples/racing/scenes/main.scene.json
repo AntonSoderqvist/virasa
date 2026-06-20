@@ -19,18 +19,18 @@
       "name": "Car",
       "parent": null,
       "components": {
-        "Transform": {"translation": [0.0, 0.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "Transform": {"translation": [0.0, 0.0, 0.96], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
         "RigidBody": {"bodyType": 2, "mass": 1200.0, "friction": 0.8, "restitution": 0.0, "linearDamping": 0.1, "angularDamping": 0.5},
-        "Collider": {"shape": 0, "halfExtents": [0.45, 0.8, 0.2]},
+        "Collider": {"shape": 0, "halfExtents": [0.8, 1.5, 0.4]},
         "Vehicle": {
           "wheels": {"frontRight": 5, "frontLeft": 6, "backRight": 7, "backLeft": 8},
           "suspensionRestLength": 0.6,
-          "suspensionStiffness": 30000.0,
+          "suspensionStiffness": 12000.0,
           "suspensionDamping": 4000.0,
           "maxSteerAngle": 0.5235987755982988,
-          "enginePower": 15000.0,
+          "enginePower": 6000.0,
           "brakeForce": 10000.0,
-          "tireGrip": 8000.0,
+          "tireGrip": 4000.0,
           "throttleAction": 0,
           "steerAction": 1,
           "brakeAction": 2,
@@ -61,7 +61,7 @@
       "name": "CarBody",
       "parent": 1,
       "components": {
-        "Transform": {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.9, 1.6, 0.4]},
+        "Transform": {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.6, 3.0, 0.8]},
         "Mesh": {"meshId": "builtin:cube"},
         "Visual": {"materialId": "builtin:default"}
       }
@@ -71,8 +71,8 @@
       "name": "WheelFrontRight",
       "parent": 1,
       "components": {
-        "Transform": {"translation": [0.7, 1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
-        "Mesh": {"meshId": "builtin:cube"},
+        "Transform": {"translation": [0.9, 1.1, -0.2], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.3, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cylinder"},
         "Visual": {"materialId": "builtin:default"},
         "Wheel": {"steered": true, "driven": true, "radiusFactor": 1.0}
       }
@@ -82,8 +82,8 @@
       "name": "WheelFrontLeft",
       "parent": 1,
       "components": {
-        "Transform": {"translation": [-0.7, 1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
-        "Mesh": {"meshId": "builtin:cube"},
+        "Transform": {"translation": [-0.9, 1.1, -0.2], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.3, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cylinder"},
         "Visual": {"materialId": "builtin:default"},
         "Wheel": {"steered": true, "driven": true, "radiusFactor": 1.0}
       }
@@ -93,8 +93,8 @@
       "name": "WheelBackRight",
       "parent": 1,
       "components": {
-        "Transform": {"translation": [0.7, -1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
-        "Mesh": {"meshId": "builtin:cube"},
+        "Transform": {"translation": [0.9, -1.1, -0.2], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.3, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cylinder"},
         "Visual": {"materialId": "builtin:default"},
         "Wheel": {"steered": false, "driven": true, "radiusFactor": 1.0}
       }
@@ -104,8 +104,8 @@
       "name": "WheelBackLeft",
       "parent": 1,
       "components": {
-        "Transform": {"translation": [-0.7, -1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
-        "Mesh": {"meshId": "builtin:cube"},
+        "Transform": {"translation": [-0.9, -1.1, -0.2], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.3, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cylinder"},
         "Visual": {"materialId": "builtin:default"},
         "Wheel": {"steered": false, "driven": true, "radiusFactor": 1.0}
       }

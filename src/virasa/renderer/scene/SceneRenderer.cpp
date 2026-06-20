@@ -831,6 +831,24 @@ uint32_t SceneRenderer::CreateDefaultCubeMesh()
 }
 
 // ---------------------------------------------------------------------------
+// CreateDefaultCylinderMesh
+// ---------------------------------------------------------------------------
+uint32_t SceneRenderer::CreateDefaultCylinderMesh()
+{
+	virasa::MeshData meshData = virasa::CreateCylinder();
+
+	virasa::Mesh mesh;
+	auto err = mesh.Initialize(*_device, *_context, meshData);
+	if (err != virasa::RenderError::None)
+	{
+		return 0xFFFFFFFFu;
+	}
+
+	uint32_t id = _meshRegistry.Allocate(std::move(mesh));
+	return id;
+}
+
+// ---------------------------------------------------------------------------
 // CreateDefaultMaterial
 // ---------------------------------------------------------------------------
 uint32_t SceneRenderer::CreateDefaultMaterial()

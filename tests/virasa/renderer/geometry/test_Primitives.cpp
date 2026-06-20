@@ -8,6 +8,7 @@
 #include "glm/vec3.hpp"
 #include "glm/vec4.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -332,4 +333,51 @@ TEST(Primitives, test_create_sphere_generates_uv_sphere_geometry)
 		const glm::vec3 center = (a.position + b.position + c.position) / 3.0f;
 		EXPECT_GT(glm::dot(faceCross, center), 0.0f);
 	}
+}
+
+TEST(Primitives, test_create_cylinder_generates_cylinder_geometry)
+{
+	const auto expectCylinderGeometry =
+		[](const virasa::MeshData& cylinder, float radius, float halfLength, uint32_t slices)
+	{
+		ASSERT_EQ(cylinder.vertices.size(),
+			static_cast<std::size_t>(4U * (slices + 1U) + 2U));
+		ASSERT_EQ(cylinder.indices.size(), static_cast<std::size_t>(12U * slices));
+		EXPECT_EQ(cylinder.indices.size() % 3U, 0U);
+
+		float minX = cylinder.vertices.front().position.x;
+		float maxX = cylinder.vertices.front().position.x;
+		float maxRadius = 0.0f;
+
+		for (const virasa::Vertex& vertex : cylinder.vertices)
+		{
+			EXPECT_NEAR(glm::length(vertex.normal), 1.0f, 1e-5f);
+			EXPECT_NEAR(glm::length(glm::vec3(vertex.tangent)), 1.0f, 1e-5f);
+			EXPECT_FLOAT_EQ(vertex.tangent.w, 1.0f);
+
+			minX = std::min(minX, vertex.position.x);
+			maxX = std::max(maxX, vertex.position.x);
+
+			const float radialDistance =
+				std::sqrt(vertex.position.y * vertex.position.y + vertex.position.z * vertex.position.z);
+			maxRadius = std::max(maxRadius, radialDistance);
+
+			EXPECT_LE(std::fabs(vertex.position.x), halfLength + 1e-5f);
+			EXPECT_LE(radialDistance, radius + 1e-5f);
+		}
+
+		EXPECT_NEAR(minX, -halfLength, 1e-5f);
+		EXPECT_NEAR(maxX, halfLength, 1e-5f);
+		EXPECT_NEAR(maxRadius, radius, 1e-5f);
+	};
+
+	constexpr uint32_t kDefaultSlices = 16;
+	const virasa::MeshData defaultCylinder = virasa::CreateCylinder();
+	expectCylinderGeometry(defaultCylinder, 0.5f, 0.5f, kDefaultSlices);
+
+	constexpr float kRadius = 2.0f;
+	constexpr float kHalfLength = 3.0f;
+	constexpr uint32_t kSlices = 8;
+	const virasa::MeshData customCylinder = virasa::CreateCylinder(kRadius, kHalfLength, kSlices);
+	expectCylinderGeometry(customCylinder, kRadius, kHalfLength, kSlices);
 }
