@@ -407,3 +407,229 @@ TEST(PhysicsWorld, test_physics_world_sync_to_world_writes_dynamic_transforms)
 	EXPECT_FALSE(world.Transforms().Has(skippedEntity));
 	EXPECT_EQ(world.GetEntityCount(), 2u);
 }
+
+TEST(PhysicsWorld, test_physics_world_maintains_reverse_body_entity_map)
+{
+	virasa::physics::PhysicsWorld physics(virasa::physics::PhysicsConfig{});
+	virasa::ecs::Entity floorEntity = MakeEntity(30u);
+	virasa::ecs::Entity replacementEntity = MakeEntity(31u);
+
+	physics.AddBody(
+		floorEntity,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		MakeBox(virasa::math::Vec3(4.0f, 4.0f, 0.1f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, -0.1f)));
+
+	virasa::physics::CastHit firstHit = physics.RayCast(
+		virasa::math::Vec3(0.0f, 0.0f, 4.0f),
+		virasa::math::Vec3(0.0f, 0.0f, -2.0f),
+		8.0f,
+		virasa::ecs::Entity::Invalid());
+	ASSERT_TRUE(firstHit.hit);
+	EXPECT_EQ(firstHit.entity, floorEntity);
+
+	physics.RemoveBody(floorEntity);
+	virasa::physics::CastHit removedHit = physics.RayCast(
+		virasa::math::Vec3(0.0f, 0.0f, 4.0f),
+		virasa::math::Vec3(0.0f, 0.0f, -1.0f),
+		8.0f,
+		virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(removedHit.hit);
+	EXPECT_EQ(removedHit.entity, virasa::ecs::Entity::Invalid());
+
+	physics.AddBody(
+		replacementEntity,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		MakeBox(virasa::math::Vec3(4.0f, 4.0f, 0.1f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, -0.1f)));
+
+	virasa::physics::CastHit replacementHit = physics.SphereCast(
+		virasa::math::Vec3(0.0f, 0.0f, 4.0f),
+		0.25f,
+		virasa::math::Vec3(0.0f, 0.0f, -3.0f),
+		8.0f,
+		virasa::ecs::Entity::Invalid());
+	ASSERT_TRUE(replacementHit.hit);
+	EXPECT_EQ(replacementHit.entity, replacementEntity);
+}
+
+TEST(PhysicsWorld, test_physics_world_cast_reports_closest_blocking_hit)
+{
+	EXPECT_TRUE(std::is_default_constructible_v<virasa::physics::CastHit>);
+	EXPECT_TRUE(std::is_copy_constructible_v<virasa::physics::CastHit>);
+	EXPECT_TRUE(std::is_copy_assignable_v<virasa::physics::CastHit>);
+	EXPECT_TRUE(std::is_move_constructible_v<virasa::physics::CastHit>);
+	EXPECT_TRUE(std::is_move_assignable_v<virasa::physics::CastHit>);
+
+	virasa::physics::CastHit miss;
+	EXPECT_FALSE(miss.hit);
+	EXPECT_EQ(miss.entity, virasa::ecs::Entity::Invalid());
+	ExpectVec3Near(miss.point, virasa::math::Vec3(0.0f, 0.0f, 0.0f), kEps);
+	ExpectVec3Near(miss.normal, virasa::math::Vec3(0.0f, 0.0f, 1.0f), kEps);
+	EXPECT_FLOAT_EQ(miss.fraction, 0.0f);
+
+	virasa::physics::PhysicsWorld physics(virasa::physics::PhysicsConfig{});
+	virasa::ecs::Entity highFloor = MakeEntity(40u);
+	virasa::ecs::Entity lowFloor = MakeEntity(41u);
+	virasa::ecs::Entity selfEntity = MakeEntity(42u);
+
+	physics.AddBody(
+		highFloor,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		MakeBox(virasa::math::Vec3(3.0f, 3.0f, 0.1f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 1.9f)));
+	physics.AddBody(
+		lowFloor,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		MakeBox(virasa::math::Vec3(3.0f, 3.0f, 0.1f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, -0.1f)));
+	physics.AddBody(
+		selfEntity,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		MakeBox(virasa::math::Vec3(0.5f, 0.5f, 0.5f)),
+		MakeTransform(virasa::math::Vec3(6.0f, 0.0f, 2.0f)));
+
+	virasa::physics::CastHit rayHit = physics.RayCast(
+		virasa::math::Vec3(0.0f, 0.0f, 5.0f),
+		virasa::math::Vec3(0.0f, 0.0f, -2.0f),
+		10.0f,
+		virasa::ecs::Entity::Invalid());
+	ASSERT_TRUE(rayHit.hit);
+	EXPECT_EQ(rayHit.entity, highFloor);
+	EXPECT_GE(rayHit.fraction, 0.0f);
+	EXPECT_LE(rayHit.fraction, 1.0f);
+	EXPECT_NEAR(rayHit.point.z, 2.0f, kPhysicsTolerance);
+	EXPECT_GT(rayHit.normal.z, 0.75f);
+
+	virasa::physics::CastHit ignoredHighFloor = physics.RayCast(
+		virasa::math::Vec3(0.0f, 0.0f, 5.0f),
+		virasa::math::Vec3(0.0f, 0.0f, -1.0f),
+		10.0f,
+		highFloor);
+	ASSERT_TRUE(ignoredHighFloor.hit);
+	EXPECT_EQ(ignoredHighFloor.entity, lowFloor);
+
+	virasa::physics::CastHit sphereHit = physics.SphereCast(
+		virasa::math::Vec3(0.0f, 0.0f, 5.0f),
+		0.25f,
+		virasa::math::Vec3(0.0f, 0.0f, -3.0f),
+		10.0f,
+		virasa::ecs::Entity::Invalid());
+	ASSERT_TRUE(sphereHit.hit);
+	EXPECT_EQ(sphereHit.entity, highFloor);
+	EXPECT_GE(sphereHit.fraction, 0.0f);
+	EXPECT_LE(sphereHit.fraction, 1.0f);
+	EXPECT_GT(sphereHit.normal.z, 0.75f);
+
+	virasa::physics::CastHit ignoredSelf = physics.RayCast(
+		virasa::math::Vec3(6.0f, 0.0f, 3.0f),
+		virasa::math::Vec3(0.0f, 0.0f, -1.0f),
+		4.0f,
+		selfEntity);
+	EXPECT_FALSE(ignoredSelf.hit);
+
+	virasa::physics::CastHit emptyHit = physics.RayCast(
+		virasa::math::Vec3(0.0f, 0.0f, 5.0f),
+		virasa::math::Vec3(0.0f, 0.0f, 1.0f),
+		10.0f,
+		virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(emptyHit.hit);
+	EXPECT_EQ(emptyHit.entity, virasa::ecs::Entity::Invalid());
+
+	virasa::physics::CastHit zeroDistanceHit = physics.SphereCast(
+		virasa::math::Vec3(0.0f, 0.0f, 5.0f),
+		0.25f,
+		virasa::math::Vec3(0.0f, 0.0f, -1.0f),
+		0.0f,
+		virasa::ecs::Entity::Invalid());
+	EXPECT_FALSE(zeroDistanceHit.hit);
+}
+
+TEST(PhysicsWorld, test_physics_world_applies_external_forces_to_bodies)
+{
+	virasa::physics::PhysicsConfig config;
+	config.gravity = virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+	virasa::physics::PhysicsWorld physics(config);
+
+	virasa::ecs::Entity bodyEntity = MakeEntity(50u);
+	virasa::ecs::Entity missingEntity = MakeEntity(51u);
+
+	virasa::physics::RigidBodyComponent body = MakeRigidBody(virasa::physics::BodyType::Dynamic);
+	body.mass = 2.0f;
+	body.linearDamping = 0.0f;
+	body.angularDamping = 0.0f;
+	body.gravityFactor = 0.0f;
+
+	physics.AddBody(
+		bodyEntity,
+		body,
+		MakeBox(virasa::math::Vec3(0.5f, 0.5f, 0.5f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 0.0f)));
+
+	physics.AddForceAtPoint(
+		bodyEntity,
+		virasa::math::Vec3(20.0f, 0.0f, 0.0f),
+		virasa::math::Vec3(0.0f, 0.0f, 0.0f));
+	physics.AddForce(missingEntity, virasa::math::Vec3(1000.0f, 0.0f, 0.0f));
+	physics.AddForceAtPoint(
+		missingEntity,
+		virasa::math::Vec3(0.0f, 1000.0f, 0.0f),
+		virasa::math::Vec3(0.0f, 0.0f, 0.0f));
+	physics.AddTorque(missingEntity, virasa::math::Vec3(0.0f, 0.0f, 1000.0f));
+
+	physics.Step(0.1f);
+
+	const virasa::math::Vec3 velocity = physics.GetLinearVelocity(bodyEntity);
+	EXPECT_GT(velocity.x, 0.5f);
+	EXPECT_NEAR(velocity.y, 0.0f, kPhysicsTolerance);
+	EXPECT_NEAR(velocity.z, 0.0f, kPhysicsTolerance);
+
+	const virasa::math::Vec3 velocityAfterFirstStep = velocity;
+	physics.Step(0.1f);
+	const virasa::math::Vec3 velocityAfterSecondStep =
+		physics.GetLinearVelocity(bodyEntity);
+	ExpectVec3Near(velocityAfterSecondStep, velocityAfterFirstStep, kPhysicsTolerance);
+}
+
+TEST(PhysicsWorld, test_physics_world_velocity_queries_report_body_motion)
+{
+	virasa::physics::PhysicsConfig config;
+	config.gravity = virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+	virasa::physics::PhysicsWorld physics(config);
+
+	virasa::ecs::Entity bodyEntity = MakeEntity(60u);
+	virasa::ecs::Entity missingEntity = MakeEntity(61u);
+
+	virasa::physics::RigidBodyComponent body = MakeRigidBody(virasa::physics::BodyType::Dynamic);
+	body.mass = 1.0f;
+	body.linearDamping = 0.0f;
+	body.angularDamping = 0.0f;
+	body.gravityFactor = 0.0f;
+
+	physics.AddBody(
+		bodyEntity,
+		body,
+		MakeBox(virasa::math::Vec3(0.5f, 0.5f, 0.5f)),
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 0.0f)));
+
+	ExpectVec3Near(
+		physics.GetLinearVelocity(missingEntity),
+		virasa::math::Vec3(0.0f, 0.0f, 0.0f),
+		kEps);
+	ExpectVec3Near(
+		physics.GetPointVelocity(missingEntity, virasa::math::Vec3(1.0f, 2.0f, 3.0f)),
+		virasa::math::Vec3(0.0f, 0.0f, 0.0f),
+		kEps);
+
+	physics.AddForce(bodyEntity, virasa::math::Vec3(0.0f, 12.0f, 0.0f));
+	physics.Step(0.25f);
+
+	const virasa::math::Vec3 linearVelocity = physics.GetLinearVelocity(bodyEntity);
+	EXPECT_NEAR(linearVelocity.x, 0.0f, kPhysicsTolerance);
+	EXPECT_GT(linearVelocity.y, 1.0f);
+	EXPECT_NEAR(linearVelocity.z, 0.0f, kPhysicsTolerance);
+
+	const virasa::math::Vec3 pointVelocity =
+		physics.GetPointVelocity(bodyEntity, virasa::math::Vec3(0.0f, 0.0f, 0.0f));
+	ExpectVec3Near(pointVelocity, linearVelocity, kPhysicsTolerance);
+}

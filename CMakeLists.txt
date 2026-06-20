@@ -117,4 +117,5 @@ target_link_libraries(virasa_editor
 )
 
 # --- Examples ---
-add_subdirectory(examples/box-drop)
+# Examples (box-stack, dreidel) are now data-driven projects (project.json +
+# scenes) loaded by virasa_editor at runtime, not built C++ subdirectories.

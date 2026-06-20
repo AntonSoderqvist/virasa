@@ -2,8 +2,10 @@
 #define VIRASA_SIM_COMPONENTCODEC_H
 
 #include "json.hpp"
+#include "virasa/ecs/Types.h"
 #include "virasa/sim/AssetCatalog.h"
 
+#include <cstdint>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -12,6 +14,52 @@
 
 namespace virasa::sim
 {
+
+/**
+ * @brief Resolves transient entity handles to stable serialized ids and back.
+ */
+class EntityResolver
+{
+public:
+	EntityResolver() = default;
+	virtual ~EntityResolver() noexcept = default;
+
+	EntityResolver(const EntityResolver&) = delete;
+	EntityResolver& operator=(const EntityResolver&) = delete;
+
+	EntityResolver(EntityResolver&&) = delete;
+	EntityResolver& operator=(EntityResolver&&) = delete;
+
+	[[nodiscard]] virtual int32_t StableIdForEntity(virasa::ecs::Entity entity) const = 0;
+	[[nodiscard]] virtual virasa::ecs::Entity EntityForStableId(int32_t stableId) const = 0;
+};
+
+/**
+ * @brief Shared lookup context used while translating components to or from JSON.
+ */
+struct SerializationContext
+{
+public:
+	SerializationContext(
+		const virasa::sim::AssetCatalog& catalog,
+		const virasa::sim::EntityResolver& entities)
+		: catalog(catalog)
+		, entities(entities)
+	{
+	}
+
+	SerializationContext() = delete;
+	~SerializationContext() = default;
+
+	SerializationContext(const SerializationContext&) = delete;
+	SerializationContext& operator=(const SerializationContext&) = delete;
+
+	SerializationContext(SerializationContext&&) = delete;
+	SerializationContext& operator=(SerializationContext&&) = delete;
+
+	const virasa::sim::AssetCatalog& catalog;
+	const virasa::sim::EntityResolver& entities;
+};
 
 /**
  * @brief Type-erased translator between component bytes and JSON fields.
@@ -43,23 +91,23 @@ public:
 	/**
 	 * @brief Convert one component value to JSON.
 	 * @param component Pointer to a component value of ElementSize() bytes.
-	 * @param catalog Asset catalog used by codecs with external asset references.
+	 * @param context Serialization lookup context.
 	 * @return JSON object describing the component.
 	 */
 	[[nodiscard]] virtual nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& catalog) const = 0;
+		const virasa::sim::SerializationContext& context) const = 0;
 
 	/**
 	 * @brief Decode one component value from JSON.
 	 * @param json JSON object describing the component.
-	 * @param catalog Asset catalog used by codecs with external asset references.
+	 * @param context Serialization lookup context.
 	 * @param dst Destination buffer of at least ElementSize() bytes.
 	 * @return True when the JSON was readable.
 	 */
 	virtual bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& catalog,
+		const virasa::sim::SerializationContext& context,
 		void* dst) const = 0;
 };
 

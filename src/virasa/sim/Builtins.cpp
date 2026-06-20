@@ -6,8 +6,12 @@
 #include "virasa/physics/PhysicsComponents.h"
 #include "virasa/sim/BehaviorRegistry.h"
 #include "virasa/sim/GameplayComponents.h"
+#include "virasa/sim/VehicleComponent.h"
+#include "virasa/sim/WheelComponent.h"
+#include "virasa/sim/behaviors/ChaseCameraBehavior.h"
 #include "virasa/sim/behaviors/PhysicsBehavior.h"
 #include "virasa/sim/behaviors/SpinBehavior.h"
+#include "virasa/sim/behaviors/VehicleBehavior.h"
 
 #include <memory>
 
@@ -39,6 +43,30 @@ void RegisterGameplayComponents(virasa::ecs::World& world)
 			"Collider",
 			sizeof(virasa::physics::ColliderComponent)));
 	}
+
+	if (world.GetSystemId("Vehicle") == virasa::ecs::kInvalidComponentId)
+	{
+		(void)world.RegisterSystem(std::make_unique<virasa::ecs::SparseComponentSystem>(
+			virasa::ecs::kInvalidComponentId,
+			"Vehicle",
+			sizeof(virasa::sim::VehicleComponent)));
+	}
+
+	if (world.GetSystemId("Wheel") == virasa::ecs::kInvalidComponentId)
+	{
+		(void)world.RegisterSystem(std::make_unique<virasa::ecs::SparseComponentSystem>(
+			virasa::ecs::kInvalidComponentId,
+			"Wheel",
+			sizeof(virasa::sim::WheelComponent)));
+	}
+
+	if (world.GetSystemId("ChaseCamera") == virasa::ecs::kInvalidComponentId)
+	{
+		(void)world.RegisterSystem(std::make_unique<virasa::ecs::SparseComponentSystem>(
+			virasa::ecs::kInvalidComponentId,
+			"ChaseCamera",
+			sizeof(virasa::sim::behaviors::ChaseCameraComponent)));
+	}
 }
 
 void RegisterBuiltinBehaviors(virasa::sim::BehaviorRegistry& registry)
@@ -51,6 +79,16 @@ void RegisterBuiltinBehaviors(virasa::sim::BehaviorRegistry& registry)
 	registry.Register("Physics", virasa::ecs::Phase::Step, []()
 	{
 		return std::make_unique<virasa::sim::behaviors::PhysicsBehavior>();
+	});
+
+	registry.Register("Vehicle", virasa::ecs::Phase::PreStep, []()
+	{
+		return std::make_unique<virasa::sim::behaviors::VehicleBehavior>();
+	});
+
+	registry.Register("ChaseCamera", virasa::ecs::Phase::PostStep, []()
+	{
+		return std::make_unique<virasa::sim::behaviors::ChaseCameraBehavior>();
 	});
 }
 

@@ -10,6 +10,8 @@
 #include "virasa/sim/Tick.h"
 
 #include <memory>
+#include <typeindex>
+#include <typeinfo>
 #include <vector>
 
 namespace virasa::sim::behaviors
@@ -34,6 +36,10 @@ void PhysicsBehavior::Step(
 	virasa::ecs::CommandBuffer& commands)
 {
 	(void)commands;
+
+	world.SetResource(
+		std::type_index(typeid(virasa::physics::PhysicsWorld)),
+		_physicsWorld.get());
 
 	if (!_populated)
 	{

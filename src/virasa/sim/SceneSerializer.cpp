@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,6 +31,77 @@ struct EntityRecord
 {
 	uint32_t id = 0u;
 	virasa::ecs::Entity entity = virasa::ecs::Entity::Invalid();
+};
+
+[[nodiscard]] const uint32_t* FindSerializedId(
+	virasa::ecs::Entity entity,
+	const std::vector<std::pair<virasa::ecs::Entity, uint32_t>>& entityToId);
+
+[[nodiscard]] virasa::ecs::Entity FindEntityBySerializedId(
+	uint32_t id,
+	const std::vector<EntityRecord>& idToEntity);
+
+class SaveEntityResolver final : public virasa::sim::EntityResolver
+{
+public:
+	explicit SaveEntityResolver(
+		const std::vector<std::pair<virasa::ecs::Entity, uint32_t>>& entityToId)
+		: _entityToId(entityToId)
+	{
+	}
+
+	[[nodiscard]] int32_t StableIdForEntity(virasa::ecs::Entity entity) const override
+	{
+		if (entity == virasa::ecs::Entity::Invalid())
+		{
+			return -1;
+		}
+
+		const uint32_t* id = FindSerializedId(entity, _entityToId);
+		if (id == nullptr || *id > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
+		{
+			return -1;
+		}
+
+		return static_cast<int32_t>(*id);
+	}
+
+	[[nodiscard]] virasa::ecs::Entity EntityForStableId(int32_t stableId) const override
+	{
+		(void)stableId;
+		return virasa::ecs::Entity::Invalid();
+	}
+
+private:
+	const std::vector<std::pair<virasa::ecs::Entity, uint32_t>>& _entityToId;
+};
+
+class LoadEntityResolver final : public virasa::sim::EntityResolver
+{
+public:
+	explicit LoadEntityResolver(const std::vector<EntityRecord>& idToEntity)
+		: _idToEntity(idToEntity)
+	{
+	}
+
+	[[nodiscard]] int32_t StableIdForEntity(virasa::ecs::Entity entity) const override
+	{
+		(void)entity;
+		return -1;
+	}
+
+	[[nodiscard]] virasa::ecs::Entity EntityForStableId(int32_t stableId) const override
+	{
+		if (stableId < 0)
+		{
+			return virasa::ecs::Entity::Invalid();
+		}
+
+		return FindEntityBySerializedId(static_cast<uint32_t>(stableId), _idToEntity);
+	}
+
+private:
+	const std::vector<EntityRecord>& _idToEntity;
 };
 
 void EmitEntity(
@@ -261,6 +333,8 @@ nlohmann::json SerializeSceneToJson(
 	{
 		entityToId.emplace_back(entities[i], static_cast<uint32_t>(i));
 	}
+	const SaveEntityResolver entityResolver(entityToId);
+	const virasa::sim::SerializationContext context(catalog, entityResolver);
 
 	nlohmann::json document = nlohmann::json::object();
 	document[kFormatVersionField] = kSceneSerializerFormatVersion;
@@ -325,7 +399,7 @@ nlohmann::json SerializeSceneToJson(
 				continue;
 			}
 
-			components[componentName] = codec->ToJson(system.GetRaw(entity), catalog);
+			components[componentName] = codec->ToJson(system.GetRaw(entity), context);
 		}
 
 		entityJson[kEntityComponentsField] = std::move(components);
@@ -403,6 +477,9 @@ std::optional<virasa::sim::Scene> DeserializeSceneFromJson(
 		}
 	}
 
+	const LoadEntityResolver entityResolver(idToEntity);
+	const virasa::sim::SerializationContext context(catalog, entityResolver);
+
 	for (const nlohmann::json& entityJson : entitiesJson)
 	{
 		uint32_t id = 0u;
@@ -426,20 +503,13 @@ std::optional<virasa::sim::Scene> DeserializeSceneFromJson(
 			}
 
 			std::vector<std::byte> scratch(codec->ElementSize());
-			if (!codec->FromJson(*it, catalog, scratch.data()))
+			if (!codec->FromJson(*it, context, scratch.data()))
 			{
 				continue;
 			}
 
 			virasa::ecs::ComponentSystem& system = world.GetSystem(systemId);
-			if (system.Has(entity))
-			{
-				system.SetRaw(entity, scratch.data());
-			}
-			else
-			{
-				(void)system.AddRaw(entity, scratch.data());
-			}
+			(void)system.AddRaw(entity, scratch.data());
 		}
 	}
 

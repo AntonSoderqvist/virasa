@@ -9,12 +9,15 @@
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
 #include "virasa/physics/PhysicsComponents.h"
+#include "virasa/physics/PhysicsWorld.h"
 #include "virasa/sim/Tick.h"
 
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <typeindex>
+#include <typeinfo>
 
 using namespace virasa::ecs;
 using namespace virasa::math;
@@ -212,4 +215,33 @@ TEST(PhysicsBehavior, test_physics_behavior_steps_and_syncs_each_tick)
 
 	EXPECT_TRUE(secondCommands.IsEmpty());
 	EXPECT_LT(world.Transforms().GetLocal(boxEntity).translation.z, afterZeroStepZ);
+}
+
+TEST(PhysicsBehavior, test_physics_behavior_publishes_world_to_resource_store)
+{
+	PhysicsBehavior behavior;
+	TickContext tick;
+	tick.deltaTime = 1.0f / 60.0f;
+
+	World world;
+	RegisterPhysicsSystems(world);
+
+	Entity entity = world.CreateEntity("PublishedPhysicsBody");
+	world.Transforms().Add(entity, MakeTransform(Vec3(0.0f, 0.0f, 1.0f)));
+	AddPhysicsComponents(
+		world,
+		entity,
+		MakeRigidBody(BodyType::Dynamic),
+		MakeBox(Vec3(0.5f, 0.5f, 0.5f)));
+
+	const auto resourceKey = std::type_index(typeid(PhysicsWorld));
+	EXPECT_EQ(world.GetResource(resourceKey), nullptr);
+
+	CommandBuffer commands;
+	behavior.Step(world, tick, commands);
+
+	void* published = world.GetResource(resourceKey);
+	ASSERT_NE(published, nullptr);
+	EXPECT_NE(static_cast<PhysicsWorld*>(published), nullptr);
+	EXPECT_TRUE(commands.IsEmpty());
 }

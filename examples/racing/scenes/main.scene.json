@@ -1,0 +1,116 @@
+{
+  "behaviors": ["Physics", "Vehicle", "ChaseCamera"],
+  "defaultCamera": 3,
+  "entities": [
+    {
+      "id": 0,
+      "name": "Ground",
+      "parent": null,
+      "components": {
+        "Transform": {"translation": [0.0, 0.0, -0.25], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [40.0, 40.0, 0.5]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"},
+        "RigidBody": {"bodyType": 0, "friction": 0.9, "restitution": 0.0},
+        "Collider": {"shape": 0, "halfExtents": [0.5, 0.5, 0.5]}
+      }
+    },
+    {
+      "id": 1,
+      "name": "Car",
+      "parent": null,
+      "components": {
+        "Transform": {"translation": [0.0, 0.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "RigidBody": {"bodyType": 2, "mass": 1200.0, "friction": 0.8, "restitution": 0.0, "linearDamping": 0.1, "angularDamping": 0.5},
+        "Collider": {"shape": 0, "halfExtents": [0.45, 0.8, 0.2]},
+        "Vehicle": {
+          "wheels": {"frontRight": 5, "frontLeft": 6, "backRight": 7, "backLeft": 8},
+          "suspensionRestLength": 0.6,
+          "suspensionStiffness": 30000.0,
+          "suspensionDamping": 4000.0,
+          "maxSteerAngle": 0.5235987755982988,
+          "enginePower": 15000.0,
+          "brakeForce": 10000.0,
+          "tireGrip": 8000.0,
+          "throttleAction": 0,
+          "steerAction": 1,
+          "brakeAction": 2,
+          "handbrakeAction": 3
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "DirectionalLight",
+      "parent": null,
+      "components": {
+        "DirectionalLight": {"castsShadows": true, "color": [1.0, 1.0, 1.0], "direction": [-0.4, -0.6, -1.0], "intensity": 1.0}
+      }
+    },
+    {
+      "id": 3,
+      "name": "ChaseCamera",
+      "parent": null,
+      "components": {
+        "Transform": {"translation": [0.0, -12.0, 5.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "Camera": {"aspect": 0.0, "domain": 0, "farPlane": 500.0, "fovY": 0.7853982, "nearPlane": 0.1},
+        "ChaseCamera": {"distance": 10.0, "height": 4.0, "lookAtHeight": 1.0, "positionSmoothing": 6.0}
+      }
+    },
+    {
+      "id": 4,
+      "name": "CarBody",
+      "parent": 1,
+      "components": {
+        "Transform": {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.9, 1.6, 0.4]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"}
+      }
+    },
+    {
+      "id": 5,
+      "name": "WheelFrontRight",
+      "parent": 1,
+      "components": {
+        "Transform": {"translation": [0.7, 1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"},
+        "Wheel": {"steered": true, "driven": true, "radiusFactor": 1.0}
+      }
+    },
+    {
+      "id": 6,
+      "name": "WheelFrontLeft",
+      "parent": 1,
+      "components": {
+        "Transform": {"translation": [-0.7, 1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"},
+        "Wheel": {"steered": true, "driven": true, "radiusFactor": 1.0}
+      }
+    },
+    {
+      "id": 7,
+      "name": "WheelBackRight",
+      "parent": 1,
+      "components": {
+        "Transform": {"translation": [0.7, -1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"},
+        "Wheel": {"steered": false, "driven": true, "radiusFactor": 1.0}
+      }
+    },
+    {
+      "id": 8,
+      "name": "WheelBackLeft",
+      "parent": 1,
+      "components": {
+        "Transform": {"translation": [-0.7, -1.2, -0.35], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.4, 0.8, 0.8]},
+        "Mesh": {"meshId": "builtin:cube"},
+        "Visual": {"materialId": "builtin:default"},
+        "Wheel": {"steered": false, "driven": true, "radiusFactor": 1.0}
+      }
+    }
+  ],
+  "formatVersion": 1,
+  "name": "Racing"
+}

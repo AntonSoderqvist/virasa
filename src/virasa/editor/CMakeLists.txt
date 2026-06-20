@@ -26,6 +26,7 @@ target_link_libraries(virasa_editor_lib
         virasa_renderer_lib
         virasa_renderer_scene_lib
     PRIVATE
+        virasa_input_lib
         virasa_vendor_stb
         virasa_vendor_tinygltf
 )

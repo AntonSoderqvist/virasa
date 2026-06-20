@@ -7,15 +7,25 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+
+#include "glm/geometric.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -53,6 +63,31 @@ struct EntityHash
 			(static_cast<uint64_t>(entity.index) << 32u) | entity.generation;
 		return std::hash<uint64_t>{}(packed);
 	}
+};
+
+struct BodyIDHash
+{
+	size_t operator()(JPH::BodyID bodyId) const noexcept
+	{
+		return std::hash<JPH::uint32>{}(bodyId.GetIndexAndSequenceNumber());
+	}
+};
+
+class OptionalIgnoreBodyFilter final : public JPH::BodyFilter
+{
+public:
+	explicit OptionalIgnoreBodyFilter(JPH::BodyID ignoredBody) noexcept
+		: _ignoredBody(ignoredBody)
+	{
+	}
+
+	bool ShouldCollide(const JPH::BodyID& bodyId) const override
+	{
+		return _ignoredBody.IsInvalid() || bodyId != _ignoredBody;
+	}
+
+private:
+	JPH::BodyID _ignoredBody;
 };
 
 class ObjectLayerPairFilterImpl final : public JPH::ObjectLayerPairFilter
@@ -173,9 +208,26 @@ virasa::math::Vec3 FromJoltRVec3(const JPH::RVec3& value)
 		static_cast<float>(value.GetZ()));
 }
 
+virasa::math::Vec3 FromJoltVec3(const JPH::Vec3& value)
+{
+	return virasa::math::Vec3(value.GetX(), value.GetY(), value.GetZ());
+}
+
 virasa::math::Quat FromJoltQuat(const JPH::Quat& value)
 {
 	return virasa::math::Quat(value.GetW(), value.GetX(), value.GetY(), value.GetZ());
+}
+
+bool NormalizeDirection(
+	const virasa::math::Vec3& direction,
+	virasa::math::Vec3& outNormalizedDirection)
+{
+	const float length = glm::length(direction);
+	if (length <= 0.0f)
+		return false;
+
+	outNormalizedDirection = direction / length;
+	return true;
 }
 
 JPH::EMotionType ToJoltMotionType(virasa::physics::BodyType bodyType)
@@ -206,7 +258,14 @@ bool HasOffset(const virasa::math::Vec3& offset)
 	return offset.x != 0.0f || offset.y != 0.0f || offset.z != 0.0f;
 }
 
-JPH::ShapeRefC CreateShape(const virasa::physics::ColliderComponent& collider)
+bool HasUnitScale(const virasa::math::Vec3& scale)
+{
+	return scale.x == 1.0f && scale.y == 1.0f && scale.z == 1.0f;
+}
+
+JPH::ShapeRefC CreateShape(
+	const virasa::physics::ColliderComponent& collider,
+	const virasa::math::Vec3& scale)
 {
 	JPH::ShapeRefC shape;
 	switch (collider.shape)
@@ -234,6 +293,9 @@ JPH::ShapeRefC CreateShape(const virasa::physics::ColliderComponent& collider)
 		break;
 	}
 
+	if (!HasUnitScale(scale))
+		shape = new JPH::ScaledShape(shape, ToJoltVec3(scale));
+
 	if (HasOffset(collider.offset))
 	{
 		shape = new JPH::RotatedTranslatedShape(
@@ -251,6 +313,24 @@ JPH::uint ThreadCount()
 	if (hardwareThreads <= 1u)
 		return 1u;
 	return static_cast<JPH::uint>(hardwareThreads - 1u);
+}
+
+JPH::BodyID BodyToIgnore(
+	const std::unordered_map<virasa::ecs::Entity, JPH::BodyID, EntityHash>& bodies,
+	virasa::ecs::Entity ignore)
+{
+	auto iter = bodies.find(ignore);
+	return iter != bodies.end() ? iter->second : JPH::BodyID();
+}
+
+virasa::ecs::Entity EntityForBody(
+	const std::unordered_map<JPH::BodyID, virasa::ecs::Entity, BodyIDHash>& entitiesByBody,
+	JPH::BodyID bodyId)
+{
+	auto iter = entitiesByBody.find(bodyId);
+	return iter != entitiesByBody.end()
+		? iter->second
+		: virasa::ecs::Entity::Invalid();
 }
 
 } // namespace
@@ -287,6 +367,7 @@ struct PhysicsWorld::Impl
 			bodyInterface.DestroyBody(entry.second);
 		}
 		bodies.clear();
+		entitiesByBody.clear();
 	}
 
 	BPLayerInterfaceImpl broadPhaseLayerInterface;
@@ -296,6 +377,7 @@ struct PhysicsWorld::Impl
 	JPH::TempAllocatorImpl tempAllocator;
 	JPH::JobSystemThreadPool jobSystem;
 	std::unordered_map<virasa::ecs::Entity, JPH::BodyID, EntityHash> bodies;
+	std::unordered_map<JPH::BodyID, virasa::ecs::Entity, BodyIDHash> entitiesByBody;
 };
 
 PhysicsWorld::PhysicsWorld(const virasa::physics::PhysicsConfig& config)
@@ -315,8 +397,9 @@ void PhysicsWorld::AddBody(
 	assert(entity != virasa::ecs::Entity::Invalid());
 	assert(!HasBody(entity));
 
+	const virasa::math::Vec3 shapeScale = transform.scale * collider.scaleFactor;
 	JPH::BodyCreationSettings settings(
-		CreateShape(collider),
+		CreateShape(collider, shapeScale),
 		ToJoltRVec3(transform.translation),
 		ToJoltQuat(transform.rotation),
 		ToJoltMotionType(body.bodyType),
@@ -342,6 +425,7 @@ void PhysicsWorld::AddBody(
 	JPH::BodyID bodyId = bodyInterface.CreateAndAddBody(settings, activation);
 	assert(!bodyId.IsInvalid());
 	_impl->bodies.emplace(entity, bodyId);
+	_impl->entitiesByBody.emplace(bodyId, entity);
 }
 
 void PhysicsWorld::RemoveBody(virasa::ecs::Entity entity)
@@ -353,6 +437,7 @@ void PhysicsWorld::RemoveBody(virasa::ecs::Entity entity)
 	JPH::BodyInterface& bodyInterface = _impl->physicsSystem.GetBodyInterface();
 	bodyInterface.RemoveBody(iter->second);
 	bodyInterface.DestroyBody(iter->second);
+	_impl->entitiesByBody.erase(iter->second);
 	_impl->bodies.erase(iter);
 }
 
@@ -422,6 +507,149 @@ void PhysicsWorld::SyncToWorld(virasa::ecs::World& world) const
 		local.rotation = bodyTransform.rotation;
 		transforms.SetLocal(entry.first, local);
 	}
+}
+
+virasa::physics::CastHit PhysicsWorld::RayCast(
+	const virasa::math::Vec3& origin,
+	const virasa::math::Vec3& direction,
+	float maxDistance,
+	virasa::ecs::Entity ignore) const
+{
+	virasa::math::Vec3 normalizedDirection;
+	if (maxDistance <= 0.0f || !NormalizeDirection(direction, normalizedDirection))
+		return virasa::physics::CastHit{};
+
+	const JPH::RRayCast ray(
+		ToJoltRVec3(origin),
+		maxDistance * ToJoltVec3(normalizedDirection));
+	const OptionalIgnoreBodyFilter bodyFilter(BodyToIgnore(_impl->bodies, ignore));
+
+	JPH::RayCastResult hit;
+	if (!_impl->physicsSystem.GetNarrowPhaseQuery().CastRay(ray, hit, {}, {}, bodyFilter))
+		return virasa::physics::CastHit{};
+
+	virasa::physics::CastHit result;
+	result.hit = true;
+	result.entity = EntityForBody(_impl->entitiesByBody, hit.mBodyID);
+	result.fraction = hit.mFraction;
+	result.point = FromJoltRVec3(ray.GetPointOnRay(hit.mFraction));
+
+	JPH::BodyLockRead lock(_impl->physicsSystem.GetBodyLockInterface(), hit.mBodyID);
+	if (lock.Succeeded())
+	{
+		result.normal = FromJoltVec3(
+			lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ToJoltRVec3(result.point)));
+	}
+
+	return result;
+}
+
+virasa::physics::CastHit PhysicsWorld::SphereCast(
+	const virasa::math::Vec3& origin,
+	float radius,
+	const virasa::math::Vec3& direction,
+	float maxDistance,
+	virasa::ecs::Entity ignore) const
+{
+	virasa::math::Vec3 normalizedDirection;
+	if (maxDistance <= 0.0f || !NormalizeDirection(direction, normalizedDirection))
+		return virasa::physics::CastHit{};
+
+	JPH::ShapeRefC sphere = new JPH::SphereShape(radius);
+	const JPH::RShapeCast shapeCast(
+		sphere,
+		JPH::Vec3::sOne(),
+		JPH::RMat44::sTranslation(ToJoltRVec3(origin)),
+		maxDistance * ToJoltVec3(normalizedDirection));
+	const OptionalIgnoreBodyFilter bodyFilter(BodyToIgnore(_impl->bodies, ignore));
+
+	JPH::ShapeCastSettings settings;
+	JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+	_impl->physicsSystem.GetNarrowPhaseQuery().CastShape(
+		shapeCast,
+		settings,
+		JPH::RVec3::sZero(),
+		collector,
+		{},
+		{},
+		bodyFilter);
+
+	if (!collector.HadHit())
+		return virasa::physics::CastHit{};
+
+	const JPH::ShapeCastResult& hit = collector.mHit;
+	virasa::physics::CastHit result;
+	result.hit = true;
+	result.entity = EntityForBody(_impl->entitiesByBody, hit.mBodyID2);
+	result.fraction = hit.mFraction;
+	result.point = FromJoltVec3(hit.mContactPointOn2);
+
+	if (hit.mPenetrationAxis.LengthSq() > 0.0f)
+		result.normal = FromJoltVec3(-hit.mPenetrationAxis.Normalized());
+	else
+		result.normal = -normalizedDirection;
+
+	return result;
+}
+
+void PhysicsWorld::AddForce(
+	virasa::ecs::Entity entity,
+	const virasa::math::Vec3& force)
+{
+	auto iter = _impl->bodies.find(entity);
+	if (iter == _impl->bodies.end())
+		return;
+
+	_impl->physicsSystem.GetBodyInterface().AddForce(iter->second, ToJoltVec3(force));
+}
+
+void PhysicsWorld::AddForceAtPoint(
+	virasa::ecs::Entity entity,
+	const virasa::math::Vec3& force,
+	const virasa::math::Vec3& worldPoint)
+{
+	auto iter = _impl->bodies.find(entity);
+	if (iter == _impl->bodies.end())
+		return;
+
+	_impl->physicsSystem.GetBodyInterface().AddForce(
+		iter->second,
+		ToJoltVec3(force),
+		ToJoltRVec3(worldPoint));
+}
+
+void PhysicsWorld::AddTorque(
+	virasa::ecs::Entity entity,
+	const virasa::math::Vec3& torque)
+{
+	auto iter = _impl->bodies.find(entity);
+	if (iter == _impl->bodies.end())
+		return;
+
+	_impl->physicsSystem.GetBodyInterface().AddTorque(iter->second, ToJoltVec3(torque));
+}
+
+virasa::math::Vec3 PhysicsWorld::GetLinearVelocity(virasa::ecs::Entity entity) const
+{
+	auto iter = _impl->bodies.find(entity);
+	if (iter == _impl->bodies.end())
+		return virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+
+	return FromJoltVec3(_impl->physicsSystem.GetBodyInterface().GetLinearVelocity(iter->second));
+}
+
+virasa::math::Vec3 PhysicsWorld::GetPointVelocity(
+	virasa::ecs::Entity entity,
+	const virasa::math::Vec3& worldPoint) const
+{
+	auto iter = _impl->bodies.find(entity);
+	if (iter == _impl->bodies.end())
+		return virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+
+	return FromJoltVec3(
+		_impl->physicsSystem.GetBodyInterface().GetPointVelocity(
+			iter->second,
+			ToJoltRVec3(worldPoint)));
 }
 
 } // namespace virasa::physics

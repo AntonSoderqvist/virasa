@@ -7,6 +7,9 @@
 #include "virasa/ecs/Scheduler.h"
 #include "virasa/ecs/World.h"
 #include "virasa/editor/ViewManager.h"
+#include "virasa/input/Bindings.h"
+#include "virasa/input/Resolver.h"
+#include "virasa/input/StepBridge.h"
 #include "virasa/math/Transform.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/sim/AssetCatalog.h"
@@ -17,6 +20,8 @@
 #include "virasa/sim/Scene.h"
 #include "virasa/sim/SceneSerializer.h"
 #include "virasa/sim/Tick.h"
+#include "virasa/window/Events.h"
+#include "virasa/window/InputState.h"
 
 #include "glm/gtc/quaternion.hpp"
 
@@ -742,4 +747,139 @@ TEST(EditorApp, test_editor_app_is_not_thread_safe_per_instance)
 
 	const int result = app.Run(1, argv);
 	EXPECT_TRUE(result == 0 || result == -1);
+}
+
+TEST(EditorApp, test_editor_app_resolves_and_publishes_input_to_simulation)
+{
+	const auto makeKeyDown = [](virasa::window::KeyCode key)
+	{
+		virasa::Event event{};
+		event.type = virasa::EventType::KeyDown;
+		event.keyboard.key = key;
+		event.keyboard.repeat = false;
+		return event;
+	};
+
+	virasa::input::Bindings bindings;
+	bindings.BindAxis(
+		0, virasa::window::KeyCode::W, virasa::window::KeyCode::S, 1.0f);
+	bindings.BindAxis(
+		1, virasa::window::KeyCode::D, virasa::window::KeyCode::A, 1.0f);
+	bindings.BindDigital(2, virasa::window::KeyCode::Space);
+	bindings.BindDigital(3, virasa::window::KeyCode::LShift);
+
+	virasa::window::InputState input;
+	const virasa::Event events[] = {
+		makeKeyDown(virasa::window::KeyCode::W),
+		makeKeyDown(virasa::window::KeyCode::D),
+		makeKeyDown(virasa::window::KeyCode::Space),
+		makeKeyDown(virasa::window::KeyCode::LShift),
+	};
+	input.Update(events);
+
+	const virasa::input::Resolver resolver;
+	const virasa::input::ActionState actions = resolver.Resolve(input, bindings);
+	EXPECT_NEAR(actions.Axis(0), 1.0f, kEps);
+	EXPECT_NEAR(actions.Axis(1), 1.0f, kEps);
+	EXPECT_TRUE(actions.Held(2));
+	EXPECT_TRUE(actions.Held(3));
+
+	virasa::window::InputState negativeInput;
+	const virasa::Event negativeEvents[] = {makeKeyDown(virasa::window::KeyCode::A)};
+	negativeInput.Update(negativeEvents);
+	const virasa::input::ActionState negativeActions =
+		resolver.Resolve(negativeInput, bindings);
+	EXPECT_NEAR(negativeActions.Axis(1), -1.0f, kEps);
+
+	virasa::ecs::World freshWorld;
+	EXPECT_EQ(virasa::input::StepBridge::GetActions(freshWorld), nullptr);
+
+	virasa::ecs::World world;
+	virasa::input::StepBridge bridge;
+	bridge.LatchFrame(actions);
+	bridge.Publish(world, true);
+
+	const virasa::input::ActionState* firstStep =
+		virasa::input::StepBridge::GetActions(world);
+	ASSERT_NE(firstStep, nullptr);
+	EXPECT_NEAR(firstStep->Axis(0), actions.Axis(0), kEps);
+	EXPECT_NEAR(firstStep->Axis(1), actions.Axis(1), kEps);
+	EXPECT_EQ(firstStep->Held(2), actions.Held(2));
+	EXPECT_EQ(firstStep->Held(3), actions.Held(3));
+	EXPECT_EQ(firstStep->Pressed(2), actions.Pressed(2));
+	EXPECT_EQ(firstStep->Pressed(3), actions.Pressed(3));
+
+	bridge.Publish(world, false);
+	const virasa::input::ActionState* laterStep =
+		virasa::input::StepBridge::GetActions(world);
+	ASSERT_NE(laterStep, nullptr);
+	EXPECT_NEAR(laterStep->Axis(0), actions.Axis(0), kEps);
+	EXPECT_NEAR(laterStep->Axis(1), actions.Axis(1), kEps);
+	EXPECT_EQ(laterStep->Held(2), actions.Held(2));
+	EXPECT_EQ(laterStep->Held(3), actions.Held(3));
+	EXPECT_FALSE(laterStep->Pressed(2));
+	EXPECT_FALSE(laterStep->Pressed(3));
+}
+
+TEST(EditorApp, test_editor_app_renders_play_mode_main_camera)
+{
+	virasa::ecs::World world;
+
+	const virasa::ecs::Entity editorCamera = world.CreateEntity("EditorCamera");
+	virasa::ecs::CameraComponent editorCameraComponent;
+	editorCameraComponent.domain = virasa::CameraDomain::Editor;
+	world.GetSystem(world.GetSystemId("Camera")).AddRaw(
+		editorCamera, &editorCameraComponent);
+
+	const virasa::ecs::Entity mainCamera = world.CreateEntity("MainCamera");
+	virasa::ecs::CameraComponent mainCameraComponent;
+	mainCameraComponent.domain = virasa::CameraDomain::Main;
+	world.GetSystem(world.GetSystemId("Camera")).AddRaw(
+		mainCamera, &mainCameraComponent);
+
+	virasa::ecs::Entity selectedMainCamera = virasa::ecs::Entity::Invalid();
+	const virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
+	ASSERT_NE(camSysId, virasa::ecs::kInvalidComponentId);
+	const auto& camEntities = world.GetSystem(camSysId).Entities();
+	for (virasa::ecs::Entity entity : camEntities)
+	{
+		const auto* camera = static_cast<const virasa::ecs::CameraComponent*>(
+			world.GetSystem(camSysId).GetRaw(entity));
+		if (camera != nullptr && camera->domain == virasa::CameraDomain::Main)
+		{
+			selectedMainCamera = entity;
+			break;
+		}
+	}
+
+	EXPECT_EQ(selectedMainCamera, mainCamera);
+	EXPECT_NE(selectedMainCamera, editorCamera);
+
+	virasa::ecs::World editorOnlyWorld;
+	const virasa::ecs::Entity fallbackEditorCamera =
+		editorOnlyWorld.CreateEntity("FallbackEditorCamera");
+	virasa::ecs::CameraComponent fallbackEditorCameraComponent;
+	fallbackEditorCameraComponent.domain = virasa::CameraDomain::Editor;
+	editorOnlyWorld.GetSystem(editorOnlyWorld.GetSystemId("Camera")).AddRaw(
+		fallbackEditorCamera, &fallbackEditorCameraComponent);
+
+	virasa::ecs::Entity editorOnlyMainCamera = virasa::ecs::Entity::Invalid();
+	const virasa::ecs::ComponentId editorOnlyCamSysId =
+		editorOnlyWorld.GetSystemId("Camera");
+	ASSERT_NE(editorOnlyCamSysId, virasa::ecs::kInvalidComponentId);
+	const auto& editorOnlyCamEntities =
+		editorOnlyWorld.GetSystem(editorOnlyCamSysId).Entities();
+	for (virasa::ecs::Entity entity : editorOnlyCamEntities)
+	{
+		const auto* camera = static_cast<const virasa::ecs::CameraComponent*>(
+			editorOnlyWorld.GetSystem(editorOnlyCamSysId).GetRaw(entity));
+		if (camera != nullptr && camera->domain == virasa::CameraDomain::Main)
+		{
+			editorOnlyMainCamera = entity;
+			break;
+		}
+	}
+
+	EXPECT_EQ(editorOnlyMainCamera, virasa::ecs::Entity::Invalid());
+	EXPECT_NE(fallbackEditorCamera, virasa::ecs::Entity::Invalid());
 }

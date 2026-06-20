@@ -41,6 +41,31 @@ public:
 };
 
 /**
+ * @brief Reports the closest hit from a ray or swept-shape cast.
+ *
+ * A default-constructed CastHit denotes a miss. The remaining fields are
+ * meaningful only when hit is true.
+ */
+struct CastHit
+{
+public:
+	/// @brief True when the cast struck a body.
+	bool hit = false;
+
+	/// @brief Entity that owns the hit body, or Entity::Invalid() when unresolved.
+	virasa::ecs::Entity entity = virasa::ecs::Entity::Invalid();
+
+	/// @brief World-space contact position.
+	virasa::math::Vec3 point = virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+
+	/// @brief World-space contact normal pointing back toward the cast origin.
+	virasa::math::Vec3 normal = virasa::math::Vec3(0.0f, 0.0f, 1.0f);
+
+	/// @brief Hit distance as a fraction of the requested cast distance.
+	float fraction = 0.0f;
+};
+
+/**
  * @brief Owns one rigid-body simulation and maps ECS entities to bodies.
  *
  * PhysicsWorld keeps all third-party physics types behind an opaque implementation
@@ -123,6 +148,79 @@ public:
 	 * @param world ECS world whose TransformSystem receives the simulated poses.
 	 */
 	void SyncToWorld(virasa::ecs::World& world) const;
+
+	/**
+	 * @brief Casts a ray and returns the closest blocking hit.
+	 * @param origin World-space ray start.
+	 * @param direction Ray direction; it does not need to be normalized.
+	 * @param maxDistance Maximum cast distance in world units.
+	 * @param ignore Entity whose body should be excluded from the cast.
+	 * @return Closest hit, or a default miss result when nothing is struck.
+	 */
+	[[nodiscard]] virasa::physics::CastHit RayCast(
+		const virasa::math::Vec3& origin,
+		const virasa::math::Vec3& direction,
+		float maxDistance,
+		virasa::ecs::Entity ignore) const;
+
+	/**
+	 * @brief Sweeps a sphere and returns the closest blocking hit.
+	 * @param origin World-space sphere centre at the start of the cast.
+	 * @param radius Sphere radius in world units.
+	 * @param direction Cast direction; it does not need to be normalized.
+	 * @param maxDistance Maximum cast distance in world units.
+	 * @param ignore Entity whose body should be excluded from the cast.
+	 * @return Closest hit, or a default miss result when nothing is struck.
+	 */
+	[[nodiscard]] virasa::physics::CastHit SphereCast(
+		const virasa::math::Vec3& origin,
+		float radius,
+		const virasa::math::Vec3& direction,
+		float maxDistance,
+		virasa::ecs::Entity ignore) const;
+
+	/**
+	 * @brief Applies a world-space force through a body's centre of mass.
+	 * @param entity Entity whose body receives the force.
+	 * @param force Force in newtons.
+	 */
+	void AddForce(virasa::ecs::Entity entity, const virasa::math::Vec3& force);
+
+	/**
+	 * @brief Applies a world-space force at a world-space point.
+	 * @param entity Entity whose body receives the force.
+	 * @param force Force in newtons.
+	 * @param worldPoint World-space point where the force is applied.
+	 */
+	void AddForceAtPoint(
+		virasa::ecs::Entity entity,
+		const virasa::math::Vec3& force,
+		const virasa::math::Vec3& worldPoint);
+
+	/**
+	 * @brief Applies a world-space torque about a body's centre of mass.
+	 * @param entity Entity whose body receives the torque.
+	 * @param torque Torque in newton-metres.
+	 */
+	void AddTorque(virasa::ecs::Entity entity, const virasa::math::Vec3& torque);
+
+	/**
+	 * @brief Returns a body's world-space linear velocity.
+	 * @param entity Entity whose body should be queried.
+	 * @return Linear velocity in metres per second, or zero when no body exists.
+	 */
+	[[nodiscard]] virasa::math::Vec3 GetLinearVelocity(
+		virasa::ecs::Entity entity) const;
+
+	/**
+	 * @brief Returns the world-space velocity of a material point on a body.
+	 * @param entity Entity whose body should be queried.
+	 * @param worldPoint World-space point on or relative to the body.
+	 * @return Point velocity in metres per second, or zero when no body exists.
+	 */
+	[[nodiscard]] virasa::math::Vec3 GetPointVelocity(
+		virasa::ecs::Entity entity,
+		const virasa::math::Vec3& worldPoint) const;
 
 private:
 	struct Impl;

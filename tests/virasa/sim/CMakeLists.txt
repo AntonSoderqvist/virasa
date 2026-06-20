@@ -14,11 +14,15 @@ add_executable(virasa_scene_tests
     test_BehaviorRegistry.cpp
     test_Scene.cpp
     test_GameplayComponents.cpp
+    test_VehicleComponent.cpp
+    test_WheelComponent.cpp
     test_ComponentCodec.cpp
     test_ProjectLoader.cpp
     test_SceneSerializer.cpp
     behaviors/test_SpinBehavior.cpp
     behaviors/test_PhysicsBehavior.cpp
+    behaviors/test_VehicleBehavior.cpp
+    behaviors/test_ChaseCameraBehavior.cpp
     test_Builtins.cpp
 )
 

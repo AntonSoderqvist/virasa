@@ -27,6 +27,9 @@
 #include "virasa/ecs/World.h"
 #include "virasa/editor/ViewManager.h"
 #include "virasa/editor/io/GltfLoader.h"
+#include "virasa/input/Bindings.h"
+#include "virasa/input/Resolver.h"
+#include "virasa/input/StepBridge.h"
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
 #include "virasa/renderer/Types.h"
@@ -327,6 +330,15 @@ int EditorApp::Run(int argc, char** argv)
 	// Stage 8: Input state
 	// -------------------------------------------------------------------------
 	virasa::InputState inputState;
+	virasa::input::Bindings inputBindings;
+	inputBindings.BindAxis(
+		0, virasa::window::KeyCode::W, virasa::window::KeyCode::S, 1.0f);
+	inputBindings.BindAxis(
+		1, virasa::window::KeyCode::D, virasa::window::KeyCode::A, 1.0f);
+	inputBindings.BindDigital(2, virasa::window::KeyCode::Space);
+	inputBindings.BindDigital(3, virasa::window::KeyCode::LShift);
+	virasa::input::Resolver inputResolver;
+	virasa::input::StepBridge stepBridge;
 	virasa::sim::Clock simClock;
 	virasa::sim::Stepper simStepper(1.0f / 60.0f, 5u);
 	virasa::ecs::Scheduler scheduler;
@@ -609,6 +621,9 @@ int EditorApp::Run(int argc, char** argv)
 		// Step 2: Input state
 		// ------------------------------------------------------------------
 		inputState.Update(events);
+		const virasa::input::ActionState frameActions =
+			inputResolver.Resolve(inputState, inputBindings);
+		stepBridge.LatchFrame(frameActions);
 
 		if (_touchpadScrollLatch > 0)
 			--_touchpadScrollLatch;
@@ -731,7 +746,8 @@ int EditorApp::Run(int argc, char** argv)
 							 (wheelDollyY * kZoomSensitivity);
 			}
 
-			if (world.IsValid(cameraEntity) && world.Transforms().Has(cameraEntity))
+			if (!playing && world.IsValid(cameraEntity) &&
+				world.Transforms().Has(cameraEntity))
 			{
 				virasa::math::Transform camTransform =
 					world.Transforms().GetLocal(cameraEntity);
@@ -749,6 +765,7 @@ int EditorApp::Run(int argc, char** argv)
 			const uint32_t simSteps = simStepper.Advance(rawDelta);
 			for (uint32_t i = 0u; i < simSteps; ++i)
 			{
+				stepBridge.Publish(world, i == 0u);
 				scheduler.Step(world, simStepper.NextStep());
 			}
 		}
@@ -1019,7 +1036,26 @@ int EditorApp::Run(int argc, char** argv)
 		// SceneRenderer::RenderWorld consumes TransformSystem's world cache
 		// and no longer walks the hierarchy itself.
 		world.UpdateTransforms();
-		uint32_t sceneSlot = sceneRenderer.RenderWorld(world, cameraEntity);
+		virasa::ecs::Entity renderCamera = cameraEntity;
+		if (playing)
+		{
+			virasa::ecs::ComponentId camSysId = world.GetSystemId("Camera");
+			if (camSysId != virasa::ecs::kInvalidComponentId)
+			{
+				const auto& camEntities = world.GetSystem(camSysId).Entities();
+				for (virasa::ecs::Entity e : camEntities)
+				{
+					const auto* cam = static_cast<const virasa::ecs::CameraComponent*>(
+						world.GetSystem(camSysId).GetRaw(e));
+					if (cam != nullptr && cam->domain == virasa::CameraDomain::Main)
+					{
+						renderCamera = e;
+						break;
+					}
+				}
+			}
+		}
+		uint32_t sceneSlot = sceneRenderer.RenderWorld(world, renderCamera);
 		if (sceneSlot == 0xFFFFFFFFu)
 		{
 			LOG_ERROR(logger, "RenderWorld returned invalid scene slot.");

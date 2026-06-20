@@ -88,6 +88,9 @@ public:
 
 	/// @brief Local-space translation of the shape relative to the body origin.
 	virasa::math::Vec3 offset = virasa::math::Vec3(0.0f, 0.0f, 0.0f);
+
+	/// @brief Dimensionless per-axis multiplier applied on top of the entity's Transform scale when PhysicsWorld sizes the shape.
+	virasa::math::Vec3 scaleFactor = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
 };
 
 } // namespace virasa::physics

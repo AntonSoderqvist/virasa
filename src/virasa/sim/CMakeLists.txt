@@ -27,6 +27,8 @@ add_library(virasa_scene_lib STATIC
     SceneSerializer.cpp
     behaviors/SpinBehavior.cpp
     behaviors/PhysicsBehavior.cpp
+    behaviors/VehicleBehavior.cpp
+    behaviors/ChaseCameraBehavior.cpp
     Builtins.cpp
 )
 
@@ -41,5 +43,6 @@ target_link_libraries(virasa_scene_lib
         virasa_sim_lib
         virasa_math_lib
         virasa_physics_lib
+        virasa_input_lib
         virasa_vendor_tinygltf
 )

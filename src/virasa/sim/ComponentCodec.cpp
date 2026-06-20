@@ -6,6 +6,9 @@
 #include "virasa/physics/PhysicsComponents.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/sim/GameplayComponents.h"
+#include "virasa/sim/VehicleComponent.h"
+#include "virasa/sim/WheelComponent.h"
+#include "virasa/sim/behaviors/ChaseCameraBehavior.h"
 
 #include <cstdint>
 #include <utility>
@@ -170,6 +173,40 @@ void WriteAssetField(
 	json[name] = std::string(key);
 }
 
+[[nodiscard]] nlohmann::json EntityToJson(
+	virasa::ecs::Entity entity,
+	const virasa::sim::EntityResolver& entities)
+{
+	const int32_t stableId = entities.StableIdForEntity(entity);
+	if (stableId == -1)
+	{
+		return nullptr;
+	}
+
+	return stableId;
+}
+
+[[nodiscard]] bool ReadEntityField(
+	const nlohmann::json& json,
+	const char* name,
+	const virasa::sim::EntityResolver& entities,
+	virasa::ecs::Entity& entity)
+{
+	const auto it = json.find(name);
+	if (it == json.end() || it->is_null())
+	{
+		entity = virasa::ecs::Entity::Invalid();
+		return true;
+	}
+	if (!it->is_number_integer())
+	{
+		return false;
+	}
+
+	entity = entities.EntityForStableId(it->get<int32_t>());
+	return true;
+}
+
 template<typename ComponentType>
 class ConcreteComponentCodec : public virasa::sim::ComponentCodec
 {
@@ -203,7 +240,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& transform = *static_cast<const virasa::math::Transform*>(component);
 		return {
@@ -215,7 +252,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::math::Transform transform{};
@@ -243,17 +280,22 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& catalog) const override
+		const virasa::sim::SerializationContext& context) const override
 	{
 		const auto& mesh = *static_cast<const virasa::ecs::MeshComponent*>(component);
 		nlohmann::json json = nlohmann::json::object();
-		WriteAssetField(json, "meshId", virasa::sim::AssetKind::Mesh, mesh.meshId, catalog);
+		WriteAssetField(
+			json,
+			"meshId",
+			virasa::sim::AssetKind::Mesh,
+			mesh.meshId,
+			context.catalog);
 		return json;
 	}
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& catalog,
+		const virasa::sim::SerializationContext& context,
 		void* dst) const override
 	{
 		virasa::ecs::MeshComponent mesh{};
@@ -263,7 +305,12 @@ public:
 			return false;
 		}
 
-		if (!ReadAssetField(json, "meshId", virasa::sim::AssetKind::Mesh, catalog, mesh.meshId))
+		if (!ReadAssetField(
+			json,
+			"meshId",
+			virasa::sim::AssetKind::Mesh,
+			context.catalog,
+			mesh.meshId))
 		{
 			*static_cast<virasa::ecs::MeshComponent*>(dst) = virasa::ecs::MeshComponent{};
 			return false;
@@ -284,7 +331,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& catalog) const override
+		const virasa::sim::SerializationContext& context) const override
 	{
 		const auto& visual = *static_cast<const virasa::ecs::VisualComponent*>(component);
 		nlohmann::json json = nlohmann::json::object();
@@ -293,13 +340,13 @@ public:
 			"materialId",
 			virasa::sim::AssetKind::Material,
 			visual.materialId,
-			catalog);
+			context.catalog);
 		return json;
 	}
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& catalog,
+		const virasa::sim::SerializationContext& context,
 		void* dst) const override
 	{
 		virasa::ecs::VisualComponent visual{};
@@ -313,7 +360,7 @@ public:
 			json,
 			"materialId",
 			virasa::sim::AssetKind::Material,
-			catalog,
+			context.catalog,
 			visual.materialId))
 		{
 			*static_cast<virasa::ecs::VisualComponent*>(dst) =
@@ -337,7 +384,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& light =
 			*static_cast<const virasa::ecs::DirectionalLightComponent*>(component);
@@ -351,7 +398,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::ecs::DirectionalLightComponent light{};
@@ -381,7 +428,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& light = *static_cast<const virasa::ecs::PointLightComponent*>(component);
 		return {
@@ -393,7 +440,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::ecs::PointLightComponent light{};
@@ -422,7 +469,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& light = *static_cast<const virasa::ecs::SpotLightComponent*>(component);
 		return {
@@ -437,7 +484,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::ecs::SpotLightComponent light{};
@@ -469,7 +516,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& camera = *static_cast<const virasa::ecs::CameraComponent*>(component);
 		return {
@@ -483,7 +530,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::ecs::CameraComponent camera{};
@@ -516,7 +563,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& highlight =
 			*static_cast<const virasa::ecs::HighlightComponent*>(component);
@@ -529,7 +576,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::ecs::HighlightComponent highlight{};
@@ -558,7 +605,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& spin = *static_cast<const virasa::sim::SpinComponent*>(component);
 		return {
@@ -568,7 +615,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::sim::SpinComponent spin{};
@@ -595,7 +642,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& body =
 			*static_cast<const virasa::physics::RigidBodyComponent*>(component);
@@ -612,7 +659,7 @@ public:
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::physics::RigidBodyComponent body{};
@@ -648,7 +695,7 @@ public:
 
 	[[nodiscard]] nlohmann::json ToJson(
 		const void* component,
-		const virasa::sim::AssetCatalog& /*catalog*/) const override
+		const virasa::sim::SerializationContext& /*context*/) const override
 	{
 		const auto& collider =
 			*static_cast<const virasa::physics::ColliderComponent*>(component);
@@ -658,12 +705,13 @@ public:
 			{"radius", collider.radius},
 			{"halfHeight", collider.halfHeight},
 			{"offset", Vec3ToJson(collider.offset)},
+			{"scaleFactor", Vec3ToJson(collider.scaleFactor)},
 		};
 	}
 
 	bool FromJson(
 		const nlohmann::json& json,
-		const virasa::sim::AssetCatalog& /*catalog*/,
+		const virasa::sim::SerializationContext& /*context*/,
 		void* dst) const override
 	{
 		virasa::physics::ColliderComponent collider{};
@@ -673,7 +721,8 @@ public:
 			!ReadField(json, "halfExtents", collider.halfExtents) ||
 			!ReadField(json, "radius", collider.radius) ||
 			!ReadField(json, "halfHeight", collider.halfHeight) ||
-			!ReadField(json, "offset", collider.offset))
+			!ReadField(json, "offset", collider.offset) ||
+			!ReadField(json, "scaleFactor", collider.scaleFactor))
 		{
 			*static_cast<virasa::physics::ColliderComponent*>(dst) =
 				virasa::physics::ColliderComponent{};
@@ -682,6 +731,202 @@ public:
 
 		collider.shape = static_cast<virasa::physics::ColliderShape>(shape);
 		*static_cast<virasa::physics::ColliderComponent*>(dst) = collider;
+		return true;
+	}
+};
+
+class WheelCodec final : public ConcreteComponentCodec<virasa::sim::WheelComponent>
+{
+public:
+	WheelCodec()
+		: ConcreteComponentCodec("Wheel")
+	{
+	}
+
+	[[nodiscard]] nlohmann::json ToJson(
+		const void* component,
+		const virasa::sim::SerializationContext& /*context*/) const override
+	{
+		const auto& wheel = *static_cast<const virasa::sim::WheelComponent*>(component);
+		return {
+			{"steered", wheel.steered},
+			{"driven", wheel.driven},
+			{"radiusFactor", wheel.radiusFactor},
+		};
+	}
+
+	bool FromJson(
+		const nlohmann::json& json,
+		const virasa::sim::SerializationContext& /*context*/,
+		void* dst) const override
+	{
+		virasa::sim::WheelComponent wheel{};
+		if (!json.is_object() ||
+			!ReadField(json, "steered", wheel.steered) ||
+			!ReadField(json, "driven", wheel.driven) ||
+			!ReadField(json, "radiusFactor", wheel.radiusFactor))
+		{
+			*static_cast<virasa::sim::WheelComponent*>(dst) =
+				virasa::sim::WheelComponent{};
+			return false;
+		}
+
+		*static_cast<virasa::sim::WheelComponent*>(dst) = wheel;
+		return true;
+	}
+};
+
+class VehicleCodec final : public ConcreteComponentCodec<virasa::sim::VehicleComponent>
+{
+public:
+	VehicleCodec()
+		: ConcreteComponentCodec("Vehicle")
+	{
+	}
+
+	[[nodiscard]] nlohmann::json ToJson(
+		const void* component,
+		const virasa::sim::SerializationContext& context) const override
+	{
+		const auto& vehicle = *static_cast<const virasa::sim::VehicleComponent*>(component);
+		nlohmann::json wheels = {
+			{"frontRight", EntityToJson(vehicle.wheels.frontRight, context.entities)},
+			{"frontLeft", EntityToJson(vehicle.wheels.frontLeft, context.entities)},
+			{"backRight", EntityToJson(vehicle.wheels.backRight, context.entities)},
+			{"backLeft", EntityToJson(vehicle.wheels.backLeft, context.entities)},
+		};
+
+		return {
+			{"wheels", std::move(wheels)},
+			{"suspensionRestLength", vehicle.suspensionRestLength},
+			{"suspensionStiffness", vehicle.suspensionStiffness},
+			{"suspensionDamping", vehicle.suspensionDamping},
+			{"maxSteerAngle", vehicle.maxSteerAngle},
+			{"enginePower", vehicle.enginePower},
+			{"brakeForce", vehicle.brakeForce},
+			{"tireGrip", vehicle.tireGrip},
+			{"throttleAction", static_cast<int32_t>(vehicle.throttleAction)},
+			{"steerAction", static_cast<int32_t>(vehicle.steerAction)},
+			{"brakeAction", static_cast<int32_t>(vehicle.brakeAction)},
+			{"handbrakeAction", static_cast<int32_t>(vehicle.handbrakeAction)},
+		};
+	}
+
+	bool FromJson(
+		const nlohmann::json& json,
+		const virasa::sim::SerializationContext& context,
+		void* dst) const override
+	{
+		virasa::sim::VehicleComponent vehicle{};
+		int32_t throttleAction = static_cast<int32_t>(vehicle.throttleAction);
+		int32_t steerAction = static_cast<int32_t>(vehicle.steerAction);
+		int32_t brakeAction = static_cast<int32_t>(vehicle.brakeAction);
+		int32_t handbrakeAction = static_cast<int32_t>(vehicle.handbrakeAction);
+		if (!json.is_object())
+		{
+			*static_cast<virasa::sim::VehicleComponent*>(dst) =
+				virasa::sim::VehicleComponent{};
+			return false;
+		}
+
+		const auto wheelsIt = json.find("wheels");
+		if (wheelsIt != json.end())
+		{
+			if (!wheelsIt->is_object() ||
+				!ReadEntityField(
+					*wheelsIt,
+					"frontRight",
+					context.entities,
+					vehicle.wheels.frontRight) ||
+				!ReadEntityField(
+					*wheelsIt,
+					"frontLeft",
+					context.entities,
+					vehicle.wheels.frontLeft) ||
+				!ReadEntityField(
+					*wheelsIt,
+					"backRight",
+					context.entities,
+					vehicle.wheels.backRight) ||
+				!ReadEntityField(
+					*wheelsIt,
+					"backLeft",
+					context.entities,
+					vehicle.wheels.backLeft))
+			{
+				*static_cast<virasa::sim::VehicleComponent*>(dst) =
+					virasa::sim::VehicleComponent{};
+				return false;
+			}
+		}
+
+		if (!ReadField(json, "suspensionRestLength", vehicle.suspensionRestLength) ||
+			!ReadField(json, "suspensionStiffness", vehicle.suspensionStiffness) ||
+			!ReadField(json, "suspensionDamping", vehicle.suspensionDamping) ||
+			!ReadField(json, "maxSteerAngle", vehicle.maxSteerAngle) ||
+			!ReadField(json, "enginePower", vehicle.enginePower) ||
+			!ReadField(json, "brakeForce", vehicle.brakeForce) ||
+			!ReadField(json, "tireGrip", vehicle.tireGrip) ||
+			!ReadField(json, "throttleAction", throttleAction) ||
+			!ReadField(json, "steerAction", steerAction) ||
+			!ReadField(json, "brakeAction", brakeAction) ||
+			!ReadField(json, "handbrakeAction", handbrakeAction))
+		{
+			*static_cast<virasa::sim::VehicleComponent*>(dst) =
+				virasa::sim::VehicleComponent{};
+			return false;
+		}
+
+		vehicle.throttleAction = static_cast<virasa::input::ActionId>(throttleAction);
+		vehicle.steerAction = static_cast<virasa::input::ActionId>(steerAction);
+		vehicle.brakeAction = static_cast<virasa::input::ActionId>(brakeAction);
+		vehicle.handbrakeAction = static_cast<virasa::input::ActionId>(handbrakeAction);
+		*static_cast<virasa::sim::VehicleComponent*>(dst) = vehicle;
+		return true;
+	}
+};
+
+class ChaseCameraCodec final :
+	public ConcreteComponentCodec<virasa::sim::behaviors::ChaseCameraComponent>
+{
+public:
+	ChaseCameraCodec()
+		: ConcreteComponentCodec("ChaseCamera")
+	{
+	}
+
+	[[nodiscard]] nlohmann::json ToJson(
+		const void* component,
+		const virasa::sim::SerializationContext& /*context*/) const override
+	{
+		const auto& chaseCamera =
+			*static_cast<const virasa::sim::behaviors::ChaseCameraComponent*>(component);
+		return {
+			{"distance", chaseCamera.distance},
+			{"height", chaseCamera.height},
+			{"lookAtHeight", chaseCamera.lookAtHeight},
+			{"positionSmoothing", chaseCamera.positionSmoothing},
+		};
+	}
+
+	bool FromJson(
+		const nlohmann::json& json,
+		const virasa::sim::SerializationContext& /*context*/,
+		void* dst) const override
+	{
+		virasa::sim::behaviors::ChaseCameraComponent chaseCamera{};
+		if (!json.is_object() ||
+			!ReadField(json, "distance", chaseCamera.distance) ||
+			!ReadField(json, "height", chaseCamera.height) ||
+			!ReadField(json, "lookAtHeight", chaseCamera.lookAtHeight) ||
+			!ReadField(json, "positionSmoothing", chaseCamera.positionSmoothing))
+		{
+			*static_cast<virasa::sim::behaviors::ChaseCameraComponent*>(dst) =
+				virasa::sim::behaviors::ChaseCameraComponent{};
+			return false;
+		}
+
+		*static_cast<virasa::sim::behaviors::ChaseCameraComponent*>(dst) = chaseCamera;
 		return true;
 	}
 };
@@ -741,6 +986,9 @@ void RegisterBuiltinComponentCodecs(virasa::sim::ComponentCodecRegistry& registr
 	registry.Register(std::make_unique<SpinCodec>());
 	registry.Register(std::make_unique<RigidBodyCodec>());
 	registry.Register(std::make_unique<ColliderCodec>());
+	registry.Register(std::make_unique<WheelCodec>());
+	registry.Register(std::make_unique<VehicleCodec>());
+	registry.Register(std::make_unique<ChaseCameraCodec>());
 }
 
 } // namespace virasa::sim
