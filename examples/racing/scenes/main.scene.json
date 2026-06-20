@@ -3,23 +3,11 @@
   "defaultCamera": 3,
   "entities": [
     {
-      "id": 0,
-      "name": "Ground",
-      "parent": null,
-      "components": {
-        "Transform": {"translation": [0.0, 0.0, -0.25], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [40.0, 40.0, 0.5]},
-        "Mesh": {"meshId": "builtin:cube"},
-        "Visual": {"materialId": "builtin:default"},
-        "RigidBody": {"bodyType": 0, "friction": 0.9, "restitution": 0.0},
-        "Collider": {"shape": 0, "halfExtents": [0.5, 0.5, 0.5]}
-      }
-    },
-    {
       "id": 1,
       "name": "Car",
       "parent": null,
       "components": {
-        "Transform": {"translation": [0.0, 0.0, 0.96], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "Transform": {"translation": [18.0, 0.0, 0.96], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
         "RigidBody": {"bodyType": 2, "mass": 1200.0, "friction": 0.8, "restitution": 0.0, "linearDamping": 0.1, "angularDamping": 0.5},
         "Collider": {"shape": 0, "halfExtents": [0.8, 1.5, 0.4]},
         "Vehicle": {
@@ -108,6 +96,18 @@
         "Mesh": {"meshId": "builtin:cylinder"},
         "Visual": {"materialId": "builtin:default"},
         "Wheel": {"steered": false, "driven": true, "radiusFactor": 1.0}
+      }
+    },
+    {
+      "id": 9,
+      "name": "Track",
+      "parent": null,
+      "components": {
+        "Transform": {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "Mesh": {"meshId": "builtin:track"},
+        "Visual": {"materialId": "builtin:default"},
+        "RigidBody": {"bodyType": 0, "friction": 0.9, "restitution": 0.0},
+        "Collider": {"shape": 3, "meshId": 0}
       }
     }
   ],

@@ -32,6 +32,7 @@ enum class ColliderShape : uint8_t
 	Box = 0,	 ///< Axis-aligned local box using ColliderComponent::halfExtents.
 	Sphere = 1,	 ///< Sphere using ColliderComponent::radius.
 	Capsule = 2, ///< Z-axis capsule using ColliderComponent::radius and halfHeight.
+	Mesh = 3,	 ///< Triangle mesh geometry identified by ColliderComponent::meshId.
 };
 
 /**
@@ -91,6 +92,9 @@ public:
 
 	/// @brief Dimensionless per-axis multiplier applied on top of the entity's Transform scale when PhysicsWorld sizes the shape.
 	virasa::math::Vec3 scaleFactor = virasa::math::Vec3(1.0f, 1.0f, 1.0f);
+
+	/// @brief CollisionMeshRegistry triangle geometry id used only when shape is Mesh; 0xFFFFFFFF means no mesh.
+	uint32_t meshId = 0xFFFFFFFFu;
 };
 
 } // namespace virasa::physics

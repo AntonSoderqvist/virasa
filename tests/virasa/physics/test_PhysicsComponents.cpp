@@ -28,6 +28,7 @@ TEST(PhysicsComponents, test_collider_shape_selects_primitive_geometry)
 	EXPECT_EQ(static_cast<uint8_t>(virasa::physics::ColliderShape::Box), uint8_t{0});
 	EXPECT_EQ(static_cast<uint8_t>(virasa::physics::ColliderShape::Sphere), uint8_t{1});
 	EXPECT_EQ(static_cast<uint8_t>(virasa::physics::ColliderShape::Capsule), uint8_t{2});
+	EXPECT_EQ(static_cast<uint8_t>(virasa::physics::ColliderShape::Mesh), uint8_t{3});
 
 	EXPECT_NE(virasa::physics::ColliderShape::Box, virasa::physics::ColliderShape::Sphere);
 	EXPECT_NE(virasa::physics::ColliderShape::Box, virasa::physics::ColliderShape::Capsule);
@@ -111,6 +112,7 @@ TEST(PhysicsComponents, test_collider_component_describes_local_collision_volume
 	EXPECT_FLOAT_EQ(defaultComp.offset.x, 0.0f);
 	EXPECT_FLOAT_EQ(defaultComp.offset.y, 0.0f);
 	EXPECT_FLOAT_EQ(defaultComp.offset.z, 0.0f);
+	EXPECT_EQ(defaultComp.meshId, 0xFFFFFFFFu);
 
 	virasa::physics::ColliderComponent comp;
 	comp.shape = virasa::physics::ColliderShape::Capsule;
@@ -170,4 +172,5 @@ TEST(PhysicsComponents, test_collider_component_describes_local_collision_volume
 	EXPECT_TRUE(std::is_move_assignable_v<virasa::physics::ColliderComponent>);
 	EXPECT_TRUE(std::is_trivially_destructible_v<virasa::physics::ColliderComponent>);
 	EXPECT_TRUE(std::is_trivially_copyable_v<virasa::physics::ColliderComponent>);
+	static_assert(std::is_trivially_copyable_v<virasa::physics::ColliderComponent>);
 }

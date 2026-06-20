@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <vector>
 
 namespace
 {
@@ -185,6 +186,74 @@ TEST(PhysicsWorld, test_physics_world_add_body_creates_and_maps_body)
 	ExpectVec3Near(storedBox.translation, boxTransform.translation, kEps);
 	ExpectQuatNear(storedBox.rotation, boxTransform.rotation, kEps);
 	ExpectVec3Near(storedBox.scale, virasa::math::Vec3(1.0f, 1.0f, 1.0f), kEps);
+}
+
+TEST(PhysicsWorld, test_physics_world_register_collision_mesh_stores_geometry)
+{
+	virasa::physics::PhysicsWorld physics(virasa::physics::PhysicsConfig{});
+
+	constexpr uint32_t meshId = 7u;
+	constexpr float meshPlaneZ = 0.0f;
+	const std::vector<virasa::math::Vec3> vertices = {
+		virasa::math::Vec3(-8.0f, -8.0f, meshPlaneZ),
+		virasa::math::Vec3(8.0f, -8.0f, meshPlaneZ),
+		virasa::math::Vec3(8.0f, 8.0f, meshPlaneZ),
+		virasa::math::Vec3(-8.0f, 8.0f, meshPlaneZ),
+	};
+	const std::vector<uint32_t> indices = {
+		0u, 1u, 2u,
+		0u, 2u, 3u,
+	};
+
+	physics.RegisterCollisionMesh(meshId, vertices, indices);
+	EXPECT_EQ(physics.BodyCount(), size_t{0});
+
+	virasa::ecs::Entity meshEntity = MakeEntity(70u);
+	virasa::physics::ColliderComponent meshCollider;
+	meshCollider.shape = virasa::physics::ColliderShape::Mesh;
+	meshCollider.meshId = meshId;
+	physics.AddBody(
+		meshEntity,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		meshCollider,
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 0.0f)));
+	EXPECT_TRUE(physics.HasBody(meshEntity));
+	EXPECT_EQ(physics.BodyCount(), size_t{1});
+
+	virasa::ecs::Entity sphereEntity = MakeEntity(71u);
+	constexpr float sphereRadius = 0.5f;
+	virasa::physics::ColliderComponent sphere;
+	sphere.shape = virasa::physics::ColliderShape::Sphere;
+	sphere.radius = sphereRadius;
+	physics.AddBody(
+		sphereEntity,
+		MakeRigidBody(virasa::physics::BodyType::Dynamic),
+		sphere,
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 4.0f)));
+	ASSERT_TRUE(physics.HasBody(sphereEntity));
+	EXPECT_EQ(physics.BodyCount(), size_t{2});
+
+	const float fixedDelta = 1.0f / 60.0f;
+	for (int i = 0; i < 240; ++i)
+	{
+		physics.Step(fixedDelta);
+	}
+
+	const virasa::math::Transform settledSphere = physics.GetBodyTransform(sphereEntity);
+	EXPECT_GE(settledSphere.translation.z, meshPlaneZ - kPhysicsTolerance);
+	EXPECT_NEAR(settledSphere.translation.z, meshPlaneZ + sphereRadius, kPhysicsTolerance);
+
+	virasa::ecs::Entity missingMeshEntity = MakeEntity(72u);
+	virasa::physics::ColliderComponent missingMeshCollider;
+	missingMeshCollider.shape = virasa::physics::ColliderShape::Mesh;
+	missingMeshCollider.meshId = 999u;
+	physics.AddBody(
+		missingMeshEntity,
+		MakeRigidBody(virasa::physics::BodyType::Static),
+		missingMeshCollider,
+		MakeTransform(virasa::math::Vec3(0.0f, 0.0f, 0.0f)));
+	EXPECT_FALSE(physics.HasBody(missingMeshEntity));
+	EXPECT_EQ(physics.BodyCount(), size_t{2});
 }
 
 TEST(PhysicsWorld, test_physics_world_remove_body_unmaps_and_destroys)

@@ -706,6 +706,7 @@ public:
 			{"halfHeight", collider.halfHeight},
 			{"offset", Vec3ToJson(collider.offset)},
 			{"scaleFactor", Vec3ToJson(collider.scaleFactor)},
+			{"meshId", collider.meshId},
 		};
 	}
 
@@ -722,7 +723,8 @@ public:
 			!ReadField(json, "radius", collider.radius) ||
 			!ReadField(json, "halfHeight", collider.halfHeight) ||
 			!ReadField(json, "offset", collider.offset) ||
-			!ReadField(json, "scaleFactor", collider.scaleFactor))
+			!ReadField(json, "scaleFactor", collider.scaleFactor) ||
+			!ReadField(json, "meshId", collider.meshId))
 		{
 			*static_cast<virasa::physics::ColliderComponent*>(dst) =
 				virasa::physics::ColliderComponent{};

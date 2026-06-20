@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace virasa::ecs
 {
@@ -100,6 +101,17 @@ public:
 		const virasa::physics::RigidBodyComponent& body,
 		const virasa::physics::ColliderComponent& collider,
 		const virasa::math::Transform& transform);
+
+	/**
+	 * @brief Registers triangle mesh geometry available to Mesh colliders.
+	 * @param meshId Stable identifier referenced by ColliderComponent::meshId.
+	 * @param vertices Local-space triangle vertices.
+	 * @param indices Triangle indices, consumed as consecutive triples.
+	 */
+	void RegisterCollisionMesh(
+		uint32_t meshId,
+		std::vector<virasa::math::Vec3> vertices,
+		std::vector<uint32_t> indices);
 
 	/**
 	 * @brief Removes and destroys the body associated with an entity if present.

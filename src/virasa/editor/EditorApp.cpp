@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <typeindex>
 #include <vector>
 
 #include "virasa/core/Logger.h"
@@ -37,7 +38,10 @@
 #include "virasa/renderer/scene/SceneRenderer.h"
 #include "virasa/sim/AssetCatalog.h"
 #include "virasa/sim/BehaviorRegistry.h"
+#include "virasa/physics/CollisionMeshRegistry.h"
 #include "virasa/sim/Builtins.h"
+#include "virasa/sim/TrackMesh.h"
+#include "virasa/sim/TrackSpline.h"
 #include "virasa/sim/ComponentCodec.h"
 #include "virasa/sim/GameplayComponents.h"
 #include "virasa/sim/ProjectLoader.h"
@@ -154,6 +158,12 @@ int EditorApp::Run(int argc, char** argv)
 
 	virasa::sim::AssetCatalog assetCatalog;
 
+	// Host-owned triangle geometry for static mesh colliders (e.g. the track
+	// surface). Published into each play-mode World's resource store so the
+	// physics behavior can build Jolt mesh shapes from it. Outlives play
+	// sessions.
+	virasa::physics::CollisionMeshRegistry collisionMeshRegistry;
+
 	uint32_t cubeMeshId = sceneRenderer.CreateDefaultCubeMesh();
 	assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:cube", cubeMeshId);
 	if (cubeMeshId == 0xFFFFFFFFu)
@@ -168,6 +178,60 @@ int EditorApp::Run(int argc, char** argv)
 	{
 		LOG_ERROR(logger, "CreateDefaultCylinderMesh failed.");
 		return -1;
+	}
+
+	// Procedurally generate a closed oval track from an authored centerline
+	// spline and register it as the "builtin:track" mesh. The spline lies just
+	// above the ground plane (whose top surface sits at z = 0).
+	{
+		virasa::sim::TrackSpline trackSpline;
+		trackSpline.closed = true;
+		constexpr float kTrackZ = 0.02f;
+		constexpr float kTrackWidth = 8.0f;
+		// Oval loop: 8 control points, radii 18 (X) by 26 (Y).
+		const float radiusX = 18.0f;
+		const float radiusY = 26.0f;
+		const uint32_t kKnots = 8u;
+		for (uint32_t i = 0; i < kKnots; ++i)
+		{
+			const float angle =
+				(static_cast<float>(i) / static_cast<float>(kKnots)) *
+				2.0f * glm::pi<float>();
+			virasa::sim::ControlPoint cp;
+			cp.position = virasa::math::Vec3(
+				radiusX * std::cos(angle), radiusY * std::sin(angle), kTrackZ);
+			cp.width = kTrackWidth;
+			cp.bank = 0.0f;
+			trackSpline.controlPoints.push_back(cp);
+		}
+
+		virasa::MeshData trackMeshData =
+			virasa::sim::GenerateTrackMesh(trackSpline, 24u);
+
+		uint32_t trackMeshId = 0xFFFFFFFFu;
+		virasa::RegisterError trackErr =
+			sceneRenderer.RegisterMesh(trackMeshData, trackMeshId);
+		if (trackErr != virasa::RegisterError::None)
+		{
+			LOG_ERROR(logger, "RegisterMesh for builtin:track failed.");
+			return -1;
+		}
+		assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:track", trackMeshId);
+
+		// Register the same geometry (positions + indices) as a static
+		// collision mesh so the car drives on the track surface. This is the
+		// first registry entry, so its id is 0 — the Track entity's Collider
+		// references meshId 0 in the scene file.
+		std::vector<virasa::math::Vec3> collisionVertices;
+		collisionVertices.reserve(trackMeshData.vertices.size());
+		for (const virasa::Vertex& v : trackMeshData.vertices)
+		{
+			collisionVertices.push_back(v.position);
+		}
+		const uint32_t trackCollisionMeshId = collisionMeshRegistry.Register(
+			std::move(collisionVertices), trackMeshData.indices);
+		LOG_INFO(logger, "Registered track collision mesh id {}.",
+			trackCollisionMeshId);
 	}
 
 	constexpr uint32_t kDefaultMaterialId = 0u;
@@ -543,6 +607,13 @@ int EditorApp::Run(int argc, char** argv)
 					if (!playing)
 					{
 						runtimeScene = authoredScene.Instantiate();
+						// Publish the host-owned collision geometry so the
+						// physics behavior can build static mesh colliders
+						// (e.g. the track surface) from it during population.
+						runtimeScene->GetWorld().SetResource(
+							std::type_index(
+								typeid(virasa::physics::CollisionMeshRegistry)),
+							&collisionMeshRegistry);
 						if (!runtimeScene->BuildScheduler(behaviorRegistry, scheduler))
 						{
 							LOG_ERROR(logger,

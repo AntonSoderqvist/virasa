@@ -8,6 +8,7 @@
 #include "virasa/ecs/World.h"
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
+#include "virasa/physics/CollisionMeshRegistry.h"
 #include "virasa/physics/PhysicsComponents.h"
 #include "virasa/physics/PhysicsWorld.h"
 #include "virasa/sim/Tick.h"
@@ -18,6 +19,7 @@
 #include <type_traits>
 #include <typeindex>
 #include <typeinfo>
+#include <vector>
 
 using namespace virasa::ecs;
 using namespace virasa::math;
@@ -61,6 +63,22 @@ ColliderComponent MakeBox(const Vec3& halfExtents)
 	ColliderComponent collider;
 	collider.shape = ColliderShape::Box;
 	collider.halfExtents = halfExtents;
+	return collider;
+}
+
+ColliderComponent MakeSphere(float radius)
+{
+	ColliderComponent collider;
+	collider.shape = ColliderShape::Sphere;
+	collider.radius = radius;
+	return collider;
+}
+
+ColliderComponent MakeMesh(uint32_t meshId)
+{
+	ColliderComponent collider;
+	collider.shape = ColliderShape::Mesh;
+	collider.meshId = meshId;
 	return collider;
 }
 
@@ -153,6 +171,72 @@ TEST(PhysicsBehavior, test_physics_behavior_lazily_populates_bodies_on_first_ste
 		world.Transforms().GetLocal(lateEntity).translation,
 		lateInitial.translation,
 		kEps);
+}
+
+TEST(PhysicsBehavior, test_physics_behavior_lazily_populates_mesh_colliders_on_first_step)
+{
+	constexpr float meshPlaneZ = 0.0f;
+	constexpr float sphereRadius = 0.5f;
+	constexpr float fixedDelta = 1.0f / 60.0f;
+	const std::vector<Vec3> vertices = {
+		Vec3(-8.0f, -8.0f, meshPlaneZ),
+		Vec3(8.0f, -8.0f, meshPlaneZ),
+		Vec3(8.0f, 8.0f, meshPlaneZ),
+		Vec3(-8.0f, 8.0f, meshPlaneZ),
+	};
+	const std::vector<uint32_t> indices = {
+		0u, 1u, 2u,
+		0u, 2u, 3u,
+	};
+
+	auto runMeshScenario = [&](bool bindRegistry) {
+		TickContext tick;
+		tick.deltaTime = fixedDelta;
+		Scheduler scheduler;
+		scheduler.Register(Phase::Step, std::make_unique<PhysicsBehavior>());
+
+		World world;
+		RegisterPhysicsSystems(world);
+
+		CollisionMeshRegistry registry;
+		const uint32_t meshId = registry.Register(vertices, indices);
+		if (bindRegistry)
+		{
+			world.SetResource(
+				std::type_index(typeid(CollisionMeshRegistry)),
+				&registry);
+		}
+
+		Entity floorEntity = world.CreateEntity("MeshFloor");
+		world.Transforms().Add(floorEntity, MakeTransform(Vec3(0.0f, 0.0f, 0.0f)));
+		AddPhysicsComponents(
+			world,
+			floorEntity,
+			MakeRigidBody(BodyType::Static),
+			MakeMesh(meshId));
+
+		Entity sphereEntity = world.CreateEntity("MeshSphere");
+		world.Transforms().Add(sphereEntity, MakeTransform(Vec3(0.0f, 0.0f, 4.0f)));
+		AddPhysicsComponents(
+			world,
+			sphereEntity,
+			MakeRigidBody(BodyType::Dynamic),
+			MakeSphere(sphereRadius));
+
+		for (int i = 0; i < 240; ++i)
+		{
+			scheduler.Step(world, tick);
+		}
+
+		return world.Transforms().GetLocal(sphereEntity).translation.z;
+	};
+
+	const float registeredMeshZ = runMeshScenario(true);
+	EXPECT_GE(registeredMeshZ, meshPlaneZ - 0.05f);
+	EXPECT_NEAR(registeredMeshZ, meshPlaneZ + sphereRadius, 0.15f);
+
+	const float missingRegistryZ = runMeshScenario(false);
+	EXPECT_LT(missingRegistryZ, meshPlaneZ - 2.0f);
 }
 
 TEST(PhysicsBehavior, test_physics_behavior_steps_and_syncs_each_tick)

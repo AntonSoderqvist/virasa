@@ -453,20 +453,25 @@ TEST(ComponentCodec, test_register_builtin_component_codecs_covers_serializable_
 
 	const ComponentCodec& collider = RequireCodec(registry, "Collider");
 	virasa::physics::ColliderComponent colliderComponent;
-	colliderComponent.shape = virasa::physics::ColliderShape::Capsule;
+	colliderComponent.shape = virasa::physics::ColliderShape::Mesh;
 	colliderComponent.halfExtents = virasa::math::Vec3(1.0f, 2.0f, 3.0f);
 	colliderComponent.radius = 0.75f;
 	colliderComponent.halfHeight = 2.5f;
 	colliderComponent.offset = virasa::math::Vec3(-1.0f, 0.5f, 4.0f);
 	colliderComponent.scaleFactor = virasa::math::Vec3(1.25f, 0.75f, 2.0f);
+	colliderComponent.meshId = 42u;
 	virasa::physics::ColliderComponent decodedCollider;
 	const nlohmann::json colliderJson = collider.ToJson(&colliderComponent, context);
 	EXPECT_EQ(collider.ComponentName(), std::string_view("Collider"));
 	EXPECT_EQ(collider.ElementSize(), sizeof(virasa::physics::ColliderComponent));
-	EXPECT_EQ(colliderJson["shape"].get<uint32_t>(), 2u);
+	EXPECT_EQ(colliderJson["shape"].get<uint32_t>(), 3u);
 	ExpectJsonVec3Eq(colliderJson["halfExtents"], colliderComponent.halfExtents);
+	EXPECT_FLOAT_EQ(colliderJson["radius"].get<float>(), colliderComponent.radius);
+	EXPECT_FLOAT_EQ(colliderJson["halfHeight"].get<float>(), colliderComponent.halfHeight);
 	ExpectJsonVec3Eq(colliderJson["offset"], colliderComponent.offset);
 	ExpectJsonVec3Eq(colliderJson["scaleFactor"], colliderComponent.scaleFactor);
+	ASSERT_TRUE(colliderJson.contains("meshId"));
+	EXPECT_EQ(colliderJson["meshId"].get<uint32_t>(), colliderComponent.meshId);
 	ASSERT_TRUE(collider.FromJson(colliderJson, context, &decodedCollider));
 	EXPECT_EQ(decodedCollider.shape, colliderComponent.shape);
 	ExpectVec3Eq(decodedCollider.halfExtents, colliderComponent.halfExtents);
@@ -474,11 +479,29 @@ TEST(ComponentCodec, test_register_builtin_component_codecs_covers_serializable_
 	EXPECT_FLOAT_EQ(decodedCollider.halfHeight, colliderComponent.halfHeight);
 	ExpectVec3Eq(decodedCollider.offset, colliderComponent.offset);
 	ExpectVec3Eq(decodedCollider.scaleFactor, colliderComponent.scaleFactor);
+	EXPECT_EQ(decodedCollider.meshId, colliderComponent.meshId);
 
 	nlohmann::json colliderJsonWithoutScale = colliderJson;
 	colliderJsonWithoutScale.erase("scaleFactor");
 	ASSERT_TRUE(collider.FromJson(colliderJsonWithoutScale, context, &decodedCollider));
 	ExpectVec3Eq(decodedCollider.scaleFactor, virasa::physics::ColliderComponent{}.scaleFactor);
+
+	const nlohmann::json colliderJsonWithoutMeshId{
+		{"shape", static_cast<uint32_t>(virasa::physics::ColliderShape::Mesh)},
+		{"halfExtents", nlohmann::json::array({1.0f, 2.0f, 3.0f})},
+		{"radius", 0.75f},
+		{"halfHeight", 2.5f},
+		{"offset", nlohmann::json::array({-1.0f, 0.5f, 4.0f})},
+		{"scaleFactor", nlohmann::json::array({1.25f, 0.75f, 2.0f})},
+	};
+	ASSERT_TRUE(collider.FromJson(colliderJsonWithoutMeshId, context, &decodedCollider));
+	EXPECT_EQ(decodedCollider.shape, virasa::physics::ColliderShape::Mesh);
+	ExpectVec3Eq(decodedCollider.halfExtents, colliderComponent.halfExtents);
+	EXPECT_FLOAT_EQ(decodedCollider.radius, colliderComponent.radius);
+	EXPECT_FLOAT_EQ(decodedCollider.halfHeight, colliderComponent.halfHeight);
+	ExpectVec3Eq(decodedCollider.offset, colliderComponent.offset);
+	ExpectVec3Eq(decodedCollider.scaleFactor, colliderComponent.scaleFactor);
+	EXPECT_EQ(decodedCollider.meshId, virasa::physics::ColliderComponent{}.meshId);
 
 	const ComponentCodec& wheel = RequireCodec(registry, "Wheel");
 	virasa::sim::WheelComponent wheelComponent;

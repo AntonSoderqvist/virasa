@@ -20,6 +20,7 @@
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
@@ -34,6 +35,8 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace virasa::physics
 {
@@ -71,6 +74,12 @@ struct BodyIDHash
 	{
 		return std::hash<JPH::uint32>{}(bodyId.GetIndexAndSequenceNumber());
 	}
+};
+
+struct CollisionMeshGeometry
+{
+	std::vector<virasa::math::Vec3> vertices;
+	std::vector<uint32_t> indices;
 };
 
 class OptionalIgnoreBodyFilter final : public JPH::BodyFilter
@@ -265,7 +274,8 @@ bool HasUnitScale(const virasa::math::Vec3& scale)
 
 JPH::ShapeRefC CreateShape(
 	const virasa::physics::ColliderComponent& collider,
-	const virasa::math::Vec3& scale)
+	const virasa::math::Vec3& scale,
+	const std::unordered_map<uint32_t, CollisionMeshGeometry>& collisionMeshes)
 {
 	JPH::ShapeRefC shape;
 	switch (collider.shape)
@@ -285,6 +295,33 @@ JPH::ShapeRefC CreateShape(
 			JPH::Vec3::sZero(),
 			yToZ,
 			capsule);
+		break;
+	}
+	case virasa::physics::ColliderShape::Mesh:
+	{
+		const auto meshIter = collisionMeshes.find(collider.meshId);
+		if (meshIter == collisionMeshes.end())
+			return {};
+
+		const CollisionMeshGeometry& geometry = meshIter->second;
+		JPH::VertexList vertices;
+		vertices.reserve(geometry.vertices.size());
+		for (const virasa::math::Vec3& vertex : geometry.vertices)
+			vertices.push_back(JPH::Float3(vertex.x, vertex.y, vertex.z));
+
+		JPH::IndexedTriangleList triangles;
+		triangles.reserve(geometry.indices.size() / 3u);
+		for (size_t i = 0; i + 2u < geometry.indices.size(); i += 3u)
+		{
+			triangles.push_back(JPH::IndexedTriangle(
+				geometry.indices[i],
+				geometry.indices[i + 1u],
+				geometry.indices[i + 2u],
+				0u));
+		}
+
+		JPH::MeshShapeSettings settings(std::move(vertices), std::move(triangles));
+		shape = settings.Create().Get();
 		break;
 	}
 	default:
@@ -378,6 +415,7 @@ struct PhysicsWorld::Impl
 	JPH::JobSystemThreadPool jobSystem;
 	std::unordered_map<virasa::ecs::Entity, JPH::BodyID, EntityHash> bodies;
 	std::unordered_map<JPH::BodyID, virasa::ecs::Entity, BodyIDHash> entitiesByBody;
+	std::unordered_map<uint32_t, CollisionMeshGeometry> collisionMeshes;
 };
 
 PhysicsWorld::PhysicsWorld(const virasa::physics::PhysicsConfig& config)
@@ -398,8 +436,12 @@ void PhysicsWorld::AddBody(
 	assert(!HasBody(entity));
 
 	const virasa::math::Vec3 shapeScale = transform.scale * collider.scaleFactor;
+	JPH::ShapeRefC shape = CreateShape(collider, shapeScale, _impl->collisionMeshes);
+	if (shape.GetPtr() == nullptr)
+		return;
+
 	JPH::BodyCreationSettings settings(
-		CreateShape(collider, shapeScale),
+		shape,
 		ToJoltRVec3(transform.translation),
 		ToJoltQuat(transform.rotation),
 		ToJoltMotionType(body.bodyType),
@@ -426,6 +468,16 @@ void PhysicsWorld::AddBody(
 	assert(!bodyId.IsInvalid());
 	_impl->bodies.emplace(entity, bodyId);
 	_impl->entitiesByBody.emplace(bodyId, entity);
+}
+
+void PhysicsWorld::RegisterCollisionMesh(
+	uint32_t meshId,
+	std::vector<virasa::math::Vec3> vertices,
+	std::vector<uint32_t> indices)
+{
+	_impl->collisionMeshes[meshId] = CollisionMeshGeometry{
+		std::move(vertices),
+		std::move(indices)};
 }
 
 void PhysicsWorld::RemoveBody(virasa::ecs::Entity entity)

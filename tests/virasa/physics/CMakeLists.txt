@@ -1,6 +1,7 @@
 add_executable(virasa_physics_tests
     test_PhysicsComponents.cpp
     test_PhysicsWorld.cpp
+    test_CollisionMeshRegistry.cpp
 )
 
 target_link_libraries(virasa_physics_tests
