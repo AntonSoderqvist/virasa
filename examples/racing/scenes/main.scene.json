@@ -109,6 +109,16 @@
         "RigidBody": {"bodyType": 0, "friction": 0.9, "restitution": 0.0},
         "Collider": {"shape": 3, "meshId": 0}
       }
+    },
+    {
+      "id": 10,
+      "name": "Terrain",
+      "parent": null,
+      "components": {
+        "Transform": {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+        "Mesh": {"meshId": "builtin:terrain"},
+        "Visual": {"materialId": "builtin:terrain"}
+      }
     }
   ],
   "formatVersion": 1,

@@ -40,6 +40,8 @@
 #include "virasa/sim/BehaviorRegistry.h"
 #include "virasa/physics/CollisionMeshRegistry.h"
 #include "virasa/sim/Builtins.h"
+#include "virasa/sim/TerrainHeightField.h"
+#include "virasa/sim/TerrainMesh.h"
 #include "virasa/sim/TrackMesh.h"
 #include "virasa/sim/TrackSpline.h"
 #include "virasa/sim/ComponentCodec.h"
@@ -232,6 +234,77 @@ int EditorApp::Run(int argc, char** argv)
 			std::move(collisionVertices), trackMeshData.indices);
 		LOG_INFO(logger, "Registered track collision mesh id {}.",
 			trackCollisionMeshId);
+	}
+
+	// Procedurally generate a surrounding landscape terrain. The heightfield is
+	// flat (z = 0) beneath the oval track so the car keeps driving on the
+	// builtin:track collision surface, and rises into green/white hills outside
+	// the track footprint. Registered as the "builtin:terrain" mesh with a
+	// dedicated TerrainHeight material; it is visual scenery only (no collider).
+	{
+		virasa::sim::TerrainHeightField terrain;
+		terrain.cols = 121u;
+		terrain.rows = 121u;
+		terrain.cellSize = 2.0f;
+		terrain.origin = virasa::math::Vec2(-120.0f, -120.0f);
+		terrain.heights.assign(
+			static_cast<size_t>(terrain.cols) * terrain.rows, 0.0f);
+
+		// Flat ellipse enclosing the oval track (radii 18 x 26) plus its width
+		// and a margin, so the drivable ribbon sits on level ground. Outside it,
+		// elevation ramps up with distance and adds rolling hills that climb
+		// through the shader's green midslope into the white peak band (z > 10).
+		constexpr float kFlatRadiusX = 30.0f;
+		constexpr float kFlatRadiusY = 38.0f;
+		for (uint32_t r = 0; r < terrain.rows; ++r)
+		{
+			for (uint32_t c = 0; c < terrain.cols; ++c)
+			{
+				const float x = terrain.origin.x +
+					static_cast<float>(c) * terrain.cellSize;
+				const float y = terrain.origin.y +
+					static_cast<float>(r) * terrain.cellSize;
+				const float ex = x / kFlatRadiusX;
+				const float ey = y / kFlatRadiusY;
+				// 0 inside the flat ellipse, ramping to 1 by ~3x its radius.
+				const float e = std::sqrt(ex * ex + ey * ey);
+				const float t = std::clamp((e - 1.0f) / 2.0f, 0.0f, 1.0f);
+				const float rolling =
+					std::sin(x * 0.08f) * std::sin(y * 0.07f) * 4.0f;
+				const float h = t * t * 16.0f + t * rolling;
+				terrain.heights[static_cast<size_t>(r) * terrain.cols + c] = h;
+			}
+		}
+
+		virasa::MeshData terrainMeshData =
+			virasa::sim::GenerateTerrainMesh(terrain);
+
+		uint32_t terrainMeshId = 0xFFFFFFFFu;
+		virasa::RegisterError terrainErr =
+			sceneRenderer.RegisterMesh(terrainMeshData, terrainMeshId);
+		if (terrainErr != virasa::RegisterError::None)
+		{
+			LOG_ERROR(logger, "RegisterMesh for builtin:terrain failed.");
+			return -1;
+		}
+		assetCatalog.Bind(
+			virasa::sim::AssetKind::Mesh, "builtin:terrain", terrainMeshId);
+
+		// Height-banded terrain material: the TerrainHeight shading model
+		// derives albedo from world-space elevation, so the texture indices and
+		// PBR factors of the default-constructed material are irrelevant.
+		virasa::VisualMaterial terrainMaterial{};
+		terrainMaterial.materialModel = virasa::MaterialModel::TerrainHeight;
+		uint32_t terrainMaterialId = 0xFFFFFFFFu;
+		virasa::RegisterError terrainMatErr =
+			sceneRenderer.RegisterMaterial(terrainMaterial, terrainMaterialId);
+		if (terrainMatErr != virasa::RegisterError::None)
+		{
+			LOG_ERROR(logger, "RegisterMaterial for builtin:terrain failed.");
+			return -1;
+		}
+		assetCatalog.Bind(virasa::sim::AssetKind::Material, "builtin:terrain",
+			terrainMaterialId);
 	}
 
 	constexpr uint32_t kDefaultMaterialId = 0u;
