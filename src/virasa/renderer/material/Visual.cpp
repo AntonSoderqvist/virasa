@@ -170,7 +170,8 @@ uint32_t VisualMaterialTable::Allocate(const VisualMaterial& material)
 		sizeof(VisualMaterialGPU));
 
 	// Write raster state.
-	_rasterStates[id] = VisualMaterialRasterState{material.alphaMode, material.doubleSided};
+	_rasterStates[id] =
+		VisualMaterialRasterState{material.alphaMode, material.doubleSided, material.materialModel};
 
 	return id;
 }
@@ -189,7 +190,8 @@ RenderError VisualMaterialTable::Update(uint32_t id, const VisualMaterial& mater
 		sizeof(VisualMaterialGPU));
 
 	// Overwrite raster state.
-	_rasterStates[id] = VisualMaterialRasterState{material.alphaMode, material.doubleSided};
+	_rasterStates[id] =
+		VisualMaterialRasterState{material.alphaMode, material.doubleSided, material.materialModel};
 
 	return RenderError::None;
 }

@@ -27,6 +27,12 @@ enum class AlphaMode : uint32_t
 	Blend
 };
 
+enum class MaterialModel : uint32_t
+{
+	PBR = 0,
+	TerrainHeight
+};
+
 /**
  * @brief Scalar PBR material parameters matching the 64-byte GPU layout.
  *
@@ -90,6 +96,7 @@ struct VisualMaterial
 	uint32_t emissiveTexture = 0u;
 	AlphaMode alphaMode = AlphaMode::Opaque;
 	bool doubleSided = false;
+	MaterialModel materialModel = MaterialModel::PBR;
 };
 
 /**
@@ -104,6 +111,7 @@ struct VisualMaterialRasterState
 	public:
 	AlphaMode alphaMode = AlphaMode::Opaque;
 	bool doubleSided = false;
+	MaterialModel materialModel = MaterialModel::PBR;
 };
 
 /**

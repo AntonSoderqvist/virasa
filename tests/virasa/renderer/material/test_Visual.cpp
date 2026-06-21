@@ -81,6 +81,17 @@ TEST(VisualTests, test_alpha_mode_enum_values_in_declared_order)
 	EXPECT_LT(static_cast<uint32_t>(AlphaMode::Mask), static_cast<uint32_t>(AlphaMode::Blend));
 }
 
+TEST(VisualTests, test_material_model_enum_values_in_declared_order)
+{
+	static_assert(std::is_enum_v<MaterialModel>);
+	static_assert(std::is_same_v<std::underlying_type_t<MaterialModel>, uint32_t>);
+
+	EXPECT_EQ(static_cast<uint32_t>(MaterialModel::PBR), 0u);
+	EXPECT_EQ(static_cast<uint32_t>(MaterialModel::TerrainHeight), 1u);
+	EXPECT_LT(static_cast<uint32_t>(MaterialModel::PBR),
+			  static_cast<uint32_t>(MaterialModel::TerrainHeight));
+}
+
 TEST(VisualTests, test_pbr_factors_layout_is_64_bytes_scalar_compatible)
 {
 	static_assert(std::is_default_constructible_v<PBRFactors>);
@@ -185,6 +196,7 @@ TEST(VisualTests, test_visual_material_describes_cpu_authoring_state)
 	EXPECT_EQ(material.emissiveTexture, 0u);
 	EXPECT_EQ(material.alphaMode, AlphaMode::Opaque);
 	EXPECT_FALSE(material.doubleSided);
+	EXPECT_EQ(material.materialModel, MaterialModel::PBR);
 }
 
 TEST(VisualTests, test_visual_material_raster_state_holds_pipeline_keys)
@@ -200,16 +212,20 @@ TEST(VisualTests, test_visual_material_raster_state_holds_pipeline_keys)
 	const VisualMaterialRasterState defaultState;
 	EXPECT_EQ(defaultState.alphaMode, AlphaMode::Opaque);
 	EXPECT_FALSE(defaultState.doubleSided);
+	EXPECT_EQ(defaultState.materialModel, MaterialModel::PBR);
 
 	const VisualMaterialRasterState sameState{};
 	EXPECT_EQ(defaultState.alphaMode, sameState.alphaMode);
 	EXPECT_EQ(defaultState.doubleSided, sameState.doubleSided);
+	EXPECT_EQ(defaultState.materialModel, sameState.materialModel);
 
 	VisualMaterialRasterState differentState;
 	differentState.alphaMode = AlphaMode::Blend;
 	differentState.doubleSided = true;
+	differentState.materialModel = MaterialModel::TerrainHeight;
 	EXPECT_NE(defaultState.alphaMode, differentState.alphaMode);
 	EXPECT_NE(defaultState.doubleSided, differentState.doubleSided);
+	EXPECT_NE(defaultState.materialModel, differentState.materialModel);
 }
 
 TEST(VisualTests, test_visual_material_table_is_raii_movable_non_copyable)
@@ -292,6 +308,7 @@ TEST(VisualTests, test_visual_material_table_allocate_claims_id_and_writes_recor
 	VisualMaterial mat;
 	mat.alphaMode = AlphaMode::Mask;
 	mat.doubleSided = true;
+	mat.materialModel = MaterialModel::TerrainHeight;
 	mat.factors.baseColorFactor = math::Vec4(0.25f, 0.5f, 0.75f, 1.0f);
 	mat.baseColorTexture = 7u;
 
@@ -302,6 +319,7 @@ TEST(VisualTests, test_visual_material_table_allocate_claims_id_and_writes_recor
 	VisualMaterialRasterState rs = table.GetRasterState(id0);
 	EXPECT_EQ(rs.alphaMode, AlphaMode::Mask);
 	EXPECT_TRUE(rs.doubleSided);
+	EXPECT_EQ(rs.materialModel, MaterialModel::TerrainHeight);
 
 	// Allocate remaining slots, then exhaust.
 	uint32_t id1 = table.Allocate(VisualMaterial{});
@@ -338,15 +356,18 @@ TEST(VisualTests, test_visual_material_table_update_rewrites_record_and_raster)
 	VisualMaterialRasterState rs0 = table.GetRasterState(id);
 	EXPECT_EQ(rs0.alphaMode, AlphaMode::Opaque);
 	EXPECT_FALSE(rs0.doubleSided);
+	EXPECT_EQ(rs0.materialModel, MaterialModel::PBR);
 
 	VisualMaterial updated;
 	updated.alphaMode = AlphaMode::Blend;
 	updated.doubleSided = true;
+	updated.materialModel = MaterialModel::TerrainHeight;
 	EXPECT_EQ(table.Update(id, updated), RenderError::None);
 
 	VisualMaterialRasterState rs1 = table.GetRasterState(id);
 	EXPECT_EQ(rs1.alphaMode, AlphaMode::Blend);
 	EXPECT_TRUE(rs1.doubleSided);
+	EXPECT_EQ(rs1.materialModel, MaterialModel::TerrainHeight);
 
 	ctx.device.WaitIdle();
 }

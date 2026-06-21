@@ -182,9 +182,11 @@ private:
 
 	virasa::ShaderModule _forwardVertexShader = {};
 	virasa::ShaderModule _forwardFragmentShader = {};
+	virasa::ShaderModule _terrainFragmentShader = {};
 	virasa::ShaderModule _shadowVertexShader = {};
 	virasa::ShaderModule _shadowFragmentShader = {};
 	virasa::Pipeline _opaquePipeline = {};
+	virasa::Pipeline _terrainPipeline = {};
 	virasa::Pipeline _opaqueDoubleSidedPipeline = {};
 	virasa::Pipeline _blendPipeline = {};
 	virasa::Pipeline _blendDoubleSidedPipeline = {};

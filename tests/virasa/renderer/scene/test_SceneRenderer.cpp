@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <cstdint>
@@ -9,6 +12,7 @@
 #include <tuple>
 
 #include "virasa/renderer/scene/SceneRenderer.h"
+#include "virasa/core/Logger.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/resources/MeshRegistry.h"
 #include "virasa/renderer/material/Visual.h"
@@ -21,6 +25,7 @@
 #include "virasa/ecs/Components.h"
 #include "virasa/ui/Types.h"
 #include "virasa/ui/FontAtlas.h"
+#include "virasa/window/Platform.h"
 #include "vulkan/vulkan.h"
 
 namespace
@@ -30,6 +35,150 @@ using virasa::RegisterError;
 using virasa::RenderError;
 using virasa::SwapchainStatus;
 using virasa::renderer::scene::SceneRenderer;
+
+struct SceneRendererVulkanContext
+{
+	virasa::window::Platform platform;
+	virasa::Context context;
+	bool valid = false;
+
+	SceneRendererVulkanContext()
+	{
+		virasa::Logger::Initialize();
+
+		if (platform.Initialize("SceneRendererTest", 128u, 128u) != virasa::ErrorCode::None)
+		{
+			return;
+		}
+
+		virasa::RendererConfig config{};
+		config.applicationName = "SceneRendererTest";
+		config.enableValidation = false;
+		config.maxFramesInFlight = 2u;
+		uint32_t extCount = 0;
+		config.requiredInstanceExtensions =
+			virasa::window::Platform::GetRequiredVulkanExtensions(&extCount);
+		config.requiredInstanceExtensionCount = extCount;
+
+		if (context.Initialize(platform, config) != RenderError::None)
+		{
+			return;
+		}
+
+		valid = true;
+	}
+
+	~SceneRendererVulkanContext()
+	{
+		context.Shutdown();
+		platform.Shutdown();
+		virasa::Logger::Shutdown();
+	}
+
+	SceneRendererVulkanContext(const SceneRendererVulkanContext&) = delete;
+	SceneRendererVulkanContext& operator=(const SceneRendererVulkanContext&) = delete;
+};
+
+class ScopedWorkingDirectory final
+{
+	public:
+	explicit ScopedWorkingDirectory(const std::filesystem::path& path)
+	{
+		std::error_code ec;
+		_previous = std::filesystem::current_path(ec);
+		if (ec)
+		{
+			return;
+		}
+
+		std::filesystem::current_path(path, ec);
+		_valid = !ec;
+	}
+
+	~ScopedWorkingDirectory()
+	{
+		if (_valid)
+		{
+			std::error_code ec;
+			std::filesystem::current_path(_previous, ec);
+		}
+	}
+
+	[[nodiscard]] bool IsValid() const noexcept
+	{
+		return _valid;
+	}
+
+	ScopedWorkingDirectory(const ScopedWorkingDirectory&) = delete;
+	ScopedWorkingDirectory& operator=(const ScopedWorkingDirectory&) = delete;
+
+	private:
+	std::filesystem::path _previous;
+	bool _valid = false;
+};
+
+std::string FindReadableTestFontPath()
+{
+	static const char* kCandidates[] = {
+		"build/fonts/JetBrainsMono-Regular.ttf",
+		"fonts/JetBrainsMono-Regular.ttf",
+		"../fonts/JetBrainsMono-Regular.ttf",
+		"../../fonts/JetBrainsMono-Regular.ttf",
+		"../../../fonts/JetBrainsMono-Regular.ttf",
+		"../../../../fonts/JetBrainsMono-Regular.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
+	};
+
+	for (const char* candidate : kCandidates)
+	{
+		std::error_code ec;
+		if (std::filesystem::exists(candidate, ec) && std::filesystem::is_regular_file(candidate, ec))
+		{
+			std::ifstream stream(candidate, std::ios::binary);
+			if (stream.good())
+			{
+				return std::string(candidate);
+			}
+		}
+	}
+
+	return {};
+}
+
+std::filesystem::path FindShaderWorkingDirectory()
+{
+	std::error_code ec;
+	std::filesystem::path dir = std::filesystem::current_path(ec);
+	if (ec)
+	{
+		return {};
+	}
+
+	while (!dir.empty())
+	{
+		if (std::filesystem::is_regular_file(dir / "build" / "shaders" / "cube.vert.spv", ec))
+		{
+			return dir / "build";
+		}
+		if (std::filesystem::is_regular_file(dir / "shaders" / "cube.vert.spv", ec))
+		{
+			return dir;
+		}
+
+		const std::filesystem::path parent = dir.parent_path();
+		if (parent == dir)
+		{
+			break;
+		}
+		dir = parent;
+	}
+
+	return {};
+}
 
 } // namespace
 
@@ -167,6 +316,49 @@ TEST(SceneRenderer, test_register_material_allocates_and_returns_id)
 	EXPECT_TRUE(std::is_default_constructible_v<virasa::VisualMaterial>);
 	EXPECT_EQ(static_cast<uint8_t>(RegisterError::None), 0u);
 	EXPECT_NE(static_cast<uint8_t>(RegisterError::OutOfSlots), 0u);
+}
+
+TEST(SceneRenderer, test_register_material_preserves_material_model)
+{
+	SceneRendererVulkanContext ctx;
+	if (!ctx.valid)
+	{
+		GTEST_SKIP() << "Vulkan device unavailable";
+	}
+
+	const std::string fontPath = FindReadableTestFontPath();
+	if (fontPath.empty())
+	{
+		GTEST_SKIP() << "Test font unavailable";
+	}
+
+	const std::filesystem::path shaderWorkingDirectory = FindShaderWorkingDirectory();
+	if (shaderWorkingDirectory.empty())
+	{
+		GTEST_SKIP() << "Shader working directory unavailable";
+	}
+
+	virasa::ui::FontAtlas atlas;
+	ASSERT_EQ(atlas.Initialize(fontPath, 16u), virasa::ui::FontAtlasError::None);
+
+	ScopedWorkingDirectory workingDirectory(shaderWorkingDirectory);
+	ASSERT_TRUE(workingDirectory.IsValid());
+
+	SceneRenderer renderer;
+	ASSERT_EQ(renderer.Initialize(ctx.context.GetDevice(), ctx.context, atlas), RenderError::None);
+
+	virasa::VisualMaterial pbrMaterial;
+	uint32_t pbrId = 0xFFFFFFFFu;
+	ASSERT_EQ(renderer.RegisterMaterial(pbrMaterial, pbrId), RegisterError::None);
+	EXPECT_EQ(renderer.GetMaterialTable().GetRasterState(pbrId).materialModel,
+		virasa::MaterialModel::PBR);
+
+	virasa::VisualMaterial terrainMaterial;
+	terrainMaterial.materialModel = virasa::MaterialModel::TerrainHeight;
+	uint32_t terrainId = 0xFFFFFFFFu;
+	ASSERT_EQ(renderer.RegisterMaterial(terrainMaterial, terrainId), RegisterError::None);
+	EXPECT_EQ(renderer.GetMaterialTable().GetRasterState(terrainId).materialModel,
+		virasa::MaterialModel::TerrainHeight);
 }
 
 TEST(SceneRenderer, test_register_texture_uploads_image_and_returns_bindless_slot)

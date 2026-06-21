@@ -480,6 +480,12 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			_initialized = false;
 			return err;
 		}
+		err = _terrainFragmentShader.Initialize(device, "shaders/terrain.frag.spv");
+		if (err != virasa::RenderError::None)
+		{
+			_initialized = false;
+			return err;
+		}
 		err = _shadowVertexShader.Initialize(device, "shaders/shadow_depth.vert.spv");
 		if (err != virasa::RenderError::None)
 		{
@@ -567,6 +573,28 @@ virasa::RenderError SceneRenderer::Initialize(const virasa::Device& device,
 			auto b = makeBase();
 			b.SetCullMode(VK_CULL_MODE_BACK_BIT).SetDepthWrite(true).SetBlendEnabled(false);
 			auto err = b.Build(device, _opaquePipeline);
+			if (err != virasa::RenderError::None)
+			{
+				_initialized = false;
+				return err;
+			}
+		}
+
+		// _terrainPipeline: back-face cull, depth write on, blend off
+		{
+			virasa::PipelineBuilder b;
+			b.SetVertexShader(_forwardVertexShader)
+				.SetFragmentShader(_terrainFragmentShader)
+				.SetColorFormat(context.GetSwapchainFormat())
+				.SetDepthFormat(context.GetDepthFormat())
+				.SetFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+				.SetDepthTest(true)
+				.SetDepthCompareOp(VK_COMPARE_OP_LESS)
+				.AddPushConstantRange(
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 192)
+				.AddDescriptorSetLayout(_bindlessTextures.GetLayout());
+			b.SetCullMode(VK_CULL_MODE_BACK_BIT).SetDepthWrite(true).SetBlendEnabled(false);
+			auto err = b.Build(device, _terrainPipeline);
 			if (err != virasa::RenderError::None)
 			{
 				_initialized = false;
@@ -1173,6 +1201,7 @@ uint32_t SceneRenderer::RenderWorld(
 		uint32_t meshId;
 		uint32_t materialId;
 		virasa::AlphaMode alphaMode;
+		virasa::MaterialModel materialModel;
 		bool doubleSided;
 		float eyeDistance;	  // used for blend bucket sorting
 		virasa::math::Mat4 model; // cached world matrix for push constants
@@ -1217,6 +1246,7 @@ uint32_t SceneRenderer::RenderWorld(
 				d.meshId = meshCompPtr->meshId;
 				d.materialId = visualCompPtr->materialId;
 				d.alphaMode = rasterState.alphaMode;
+				d.materialModel = rasterState.materialModel;
 				d.doubleSided = rasterState.doubleSided;
 				d.model = transforms.GetWorld(entity);
 
@@ -1633,6 +1663,7 @@ uint32_t SceneRenderer::RenderWorld(
 
 	// Capture pointers to owned resources for the lambda
 	virasa::Pipeline* opaquePipeline = &_opaquePipeline;
+	virasa::Pipeline* terrainPipeline = &_terrainPipeline;
 	virasa::Pipeline* opaqueDoubleSidedPipeline = &_opaqueDoubleSidedPipeline;
 	virasa::Pipeline* blendPipeline = &_blendPipeline;
 	virasa::Pipeline* blendDoubleSidedPipeline = &_blendDoubleSidedPipeline;
@@ -1664,6 +1695,7 @@ uint32_t SceneRenderer::RenderWorld(
 
 	forwardPass.Record(
 		[opaquePipeline,
+			terrainPipeline,
 			opaqueDoubleSidedPipeline,
 			blendPipeline,
 			blendDoubleSidedPipeline,
@@ -1710,7 +1742,11 @@ uint32_t SceneRenderer::RenderWorld(
 
 				// Select pipeline
 				virasa::Pipeline* selectedPipeline = nullptr;
-				if (d.alphaMode == virasa::AlphaMode::Blend)
+				if (d.materialModel == virasa::MaterialModel::TerrainHeight)
+				{
+					selectedPipeline = terrainPipeline;
+				}
+				else if (d.alphaMode == virasa::AlphaMode::Blend)
 				{
 					selectedPipeline =
 						d.doubleSided ? blendDoubleSidedPipeline : blendPipeline;
@@ -1824,6 +1860,7 @@ uint32_t SceneRenderer::RenderWorld(
 				const virasa::VisualMaterialRasterState rs =
 					_materialTable.GetRasterState(visualCompPtr->materialId);
 				d.alphaMode = rs.alphaMode;
+				d.materialModel = rs.materialModel;
 				d.doubleSided = rs.doubleSided;
 				// Embed highlight vec4
 				// (stored separately via the HighlightComponent pointer above)

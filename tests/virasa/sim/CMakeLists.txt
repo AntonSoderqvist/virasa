@@ -18,6 +18,8 @@ add_executable(virasa_scene_tests
     test_WheelComponent.cpp
     test_TrackSpline.cpp
     test_TrackMesh.cpp
+    test_TerrainHeightField.cpp
+    test_TerrainMesh.cpp
     test_ComponentCodec.cpp
     test_ProjectLoader.cpp
     test_SceneSerializer.cpp
