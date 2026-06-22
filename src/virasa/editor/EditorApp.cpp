@@ -33,23 +33,23 @@
 #include "virasa/input/StepBridge.h"
 #include "virasa/math/Transform.h"
 #include "virasa/math/Types.h"
+#include "virasa/physics/CollisionMeshRegistry.h"
 #include "virasa/renderer/Types.h"
 #include "virasa/renderer/core/Context.h"
 #include "virasa/renderer/scene/SceneRenderer.h"
 #include "virasa/sim/AssetCatalog.h"
 #include "virasa/sim/BehaviorRegistry.h"
-#include "virasa/physics/CollisionMeshRegistry.h"
 #include "virasa/sim/Builtins.h"
-#include "virasa/sim/TerrainHeightField.h"
-#include "virasa/sim/TerrainMesh.h"
-#include "virasa/sim/TrackMesh.h"
-#include "virasa/sim/TrackSpline.h"
 #include "virasa/sim/ComponentCodec.h"
 #include "virasa/sim/GameplayComponents.h"
 #include "virasa/sim/ProjectLoader.h"
 #include "virasa/sim/Scene.h"
 #include "virasa/sim/SceneSerializer.h"
+#include "virasa/sim/TerrainHeightField.h"
+#include "virasa/sim/TerrainMesh.h"
 #include "virasa/sim/Tick.h"
+#include "virasa/sim/TrackMesh.h"
+#include "virasa/sim/TrackSpline.h"
 #include "virasa/ui/CommandBar.h"
 #include "virasa/ui/FontAtlas.h"
 #include "virasa/ui/Types.h"
@@ -196,9 +196,8 @@ int EditorApp::Run(int argc, char** argv)
 		const uint32_t kKnots = 8u;
 		for (uint32_t i = 0; i < kKnots; ++i)
 		{
-			const float angle =
-				(static_cast<float>(i) / static_cast<float>(kKnots)) *
-				2.0f * glm::pi<float>();
+			const float angle = (static_cast<float>(i) / static_cast<float>(kKnots)) * 2.0f *
+						  glm::pi<float>();
 			virasa::sim::ControlPoint cp;
 			cp.position = virasa::math::Vec3(
 				radiusX * std::cos(angle), radiusY * std::sin(angle), kTrackZ);
@@ -207,12 +206,10 @@ int EditorApp::Run(int argc, char** argv)
 			trackSpline.controlPoints.push_back(cp);
 		}
 
-		virasa::MeshData trackMeshData =
-			virasa::sim::GenerateTrackMesh(trackSpline, 24u);
+		virasa::MeshData trackMeshData = virasa::sim::GenerateTrackMesh(trackSpline, 24u);
 
 		uint32_t trackMeshId = 0xFFFFFFFFu;
-		virasa::RegisterError trackErr =
-			sceneRenderer.RegisterMesh(trackMeshData, trackMeshId);
+		virasa::RegisterError trackErr = sceneRenderer.RegisterMesh(trackMeshData, trackMeshId);
 		if (trackErr != virasa::RegisterError::None)
 		{
 			LOG_ERROR(logger, "RegisterMesh for builtin:track failed.");
@@ -232,23 +229,21 @@ int EditorApp::Run(int argc, char** argv)
 		}
 		const uint32_t trackCollisionMeshId = collisionMeshRegistry.Register(
 			std::move(collisionVertices), trackMeshData.indices);
-		LOG_INFO(logger, "Registered track collision mesh id {}.",
-			trackCollisionMeshId);
+		LOG_INFO(logger, "Registered track collision mesh id {}.", trackCollisionMeshId);
 	}
 
 	// Procedurally generate a surrounding landscape terrain. The heightfield is
 	// flat (z = 0) beneath the oval track so the car keeps driving on the
 	// builtin:track collision surface, and rises into green/white hills outside
-	// the track footprint. Registered as the "builtin:terrain" mesh with a
-	// dedicated TerrainHeight material; it is visual scenery only (no collider).
+	// the track footprint. Registered as the "builtin:terrain" mesh (collision
+	// mesh id 1) and a dedicated TerrainHeight material.
 	{
 		virasa::sim::TerrainHeightField terrain;
 		terrain.cols = 121u;
 		terrain.rows = 121u;
 		terrain.cellSize = 2.0f;
 		terrain.origin = virasa::math::Vec2(-120.0f, -120.0f);
-		terrain.heights.assign(
-			static_cast<size_t>(terrain.cols) * terrain.rows, 0.0f);
+		terrain.heights.assign(static_cast<size_t>(terrain.cols) * terrain.rows, 0.0f);
 
 		// Flat ellipse enclosing the oval track (radii 18 x 26) plus its width
 		// and a margin, so the drivable ribbon sits on level ground. Outside it,
@@ -260,24 +255,20 @@ int EditorApp::Run(int argc, char** argv)
 		{
 			for (uint32_t c = 0; c < terrain.cols; ++c)
 			{
-				const float x = terrain.origin.x +
-					static_cast<float>(c) * terrain.cellSize;
-				const float y = terrain.origin.y +
-					static_cast<float>(r) * terrain.cellSize;
+				const float x = terrain.origin.x + static_cast<float>(c) * terrain.cellSize;
+				const float y = terrain.origin.y + static_cast<float>(r) * terrain.cellSize;
 				const float ex = x / kFlatRadiusX;
 				const float ey = y / kFlatRadiusY;
 				// 0 inside the flat ellipse, ramping to 1 by ~3x its radius.
 				const float e = std::sqrt(ex * ex + ey * ey);
 				const float t = std::clamp((e - 1.0f) / 2.0f, 0.0f, 1.0f);
-				const float rolling =
-					std::sin(x * 0.08f) * std::sin(y * 0.07f) * 4.0f;
+				const float rolling = std::sin(x * 0.08f) * std::sin(y * 0.07f) * 4.0f;
 				const float h = t * t * 16.0f + t * rolling;
 				terrain.heights[static_cast<size_t>(r) * terrain.cols + c] = h;
 			}
 		}
 
-		virasa::MeshData terrainMeshData =
-			virasa::sim::GenerateTerrainMesh(terrain);
+		virasa::MeshData terrainMeshData = virasa::sim::GenerateTerrainMesh(terrain);
 
 		uint32_t terrainMeshId = 0xFFFFFFFFu;
 		virasa::RegisterError terrainErr =
@@ -287,8 +278,19 @@ int EditorApp::Run(int argc, char** argv)
 			LOG_ERROR(logger, "RegisterMesh for builtin:terrain failed.");
 			return -1;
 		}
-		assetCatalog.Bind(
-			virasa::sim::AssetKind::Mesh, "builtin:terrain", terrainMeshId);
+		assetCatalog.Bind(virasa::sim::AssetKind::Mesh, "builtin:terrain", terrainMeshId);
+
+		// Register the generated terrain geometry (positions + indices) as a
+		// static collision mesh so terrain entities can reference it for physics.
+		std::vector<virasa::math::Vec3> terrainCollisionVertices;
+		terrainCollisionVertices.reserve(terrainMeshData.vertices.size());
+		for (const virasa::Vertex& v : terrainMeshData.vertices)
+		{
+			terrainCollisionVertices.push_back(v.position);
+		}
+		const uint32_t terrainCollisionMeshId = collisionMeshRegistry.Register(
+			std::move(terrainCollisionVertices), terrainMeshData.indices);
+		LOG_INFO(logger, "Registered terrain collision mesh id {}.", terrainCollisionMeshId);
 
 		// Height-banded terrain material: the TerrainHeight shading model
 		// derives albedo from world-space elevation, so the texture indices and
@@ -303,8 +305,8 @@ int EditorApp::Run(int argc, char** argv)
 			LOG_ERROR(logger, "RegisterMaterial for builtin:terrain failed.");
 			return -1;
 		}
-		assetCatalog.Bind(virasa::sim::AssetKind::Material, "builtin:terrain",
-			terrainMaterialId);
+		assetCatalog.Bind(
+			virasa::sim::AssetKind::Material, "builtin:terrain", terrainMaterialId);
 	}
 
 	constexpr uint32_t kDefaultMaterialId = 0u;
@@ -476,10 +478,8 @@ int EditorApp::Run(int argc, char** argv)
 	// -------------------------------------------------------------------------
 	virasa::InputState inputState;
 	virasa::input::Bindings inputBindings;
-	inputBindings.BindAxis(
-		0, virasa::window::KeyCode::W, virasa::window::KeyCode::S, 1.0f);
-	inputBindings.BindAxis(
-		1, virasa::window::KeyCode::D, virasa::window::KeyCode::A, 1.0f);
+	inputBindings.BindAxis(0, virasa::window::KeyCode::W, virasa::window::KeyCode::S, 1.0f);
+	inputBindings.BindAxis(1, virasa::window::KeyCode::D, virasa::window::KeyCode::A, 1.0f);
 	inputBindings.BindDigital(2, virasa::window::KeyCode::Space);
 	inputBindings.BindDigital(3, virasa::window::KeyCode::LShift);
 	virasa::input::Resolver inputResolver;
