@@ -64,6 +64,10 @@ public:
 	/// @brief Lateral grip force scale resisting sideways sliding.
 	float tireGrip = 8000.0f;
 
+	/// @brief Fraction in [0,1] of the contact-to-centre-of-mass height at which
+	/// lateral grip is applied; higher values reduce body roll and rollover.
+	float rollCoupleFactor = 0.35f;
+
 	/// @brief Input action id for forward and reverse throttle.
 	virasa::input::ActionId throttleAction = static_cast<virasa::input::ActionId>(0);
 

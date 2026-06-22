@@ -807,6 +807,7 @@ public:
 			{"enginePower", vehicle.enginePower},
 			{"brakeForce", vehicle.brakeForce},
 			{"tireGrip", vehicle.tireGrip},
+			{"rollCoupleFactor", vehicle.rollCoupleFactor},
 			{"throttleAction", static_cast<int32_t>(vehicle.throttleAction)},
 			{"steerAction", static_cast<int32_t>(vehicle.steerAction)},
 			{"brakeAction", static_cast<int32_t>(vehicle.brakeAction)},
@@ -869,6 +870,7 @@ public:
 			!ReadField(json, "enginePower", vehicle.enginePower) ||
 			!ReadField(json, "brakeForce", vehicle.brakeForce) ||
 			!ReadField(json, "tireGrip", vehicle.tireGrip) ||
+			!ReadField(json, "rollCoupleFactor", vehicle.rollCoupleFactor) ||
 			!ReadField(json, "throttleAction", throttleAction) ||
 			!ReadField(json, "steerAction", steerAction) ||
 			!ReadField(json, "brakeAction", brakeAction) ||

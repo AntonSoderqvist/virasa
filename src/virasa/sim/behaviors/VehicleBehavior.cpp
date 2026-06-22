@@ -269,9 +269,25 @@ void VehicleBehavior::Step(
 
 				const float friction = SurfaceFriction(rigidBodySystem, hit.entity);
 				const float lateralSpeed = glm::dot(pointVelocity, wheelRight);
-				const virasa::math::Vec3 lateralForce =
-					-wheelRight * lateralSpeed * vehicle->tireGrip * friction;
-				physicsWorld->AddForceAtPoint(entity, lateralForce, hit.point);
+
+				// Clamp lateral grip to a friction-circle limit tied to the
+				// wheel's current normal load. Unbounded grip grows with sideways
+				// speed and exceeds what the contact can physically supply, which
+				// is what rolls the chassis. friction acts as the surface mu.
+				float lateralMagnitude = -lateralSpeed * vehicle->tireGrip * friction;
+				const float gripLimit = friction * suspensionMagnitude;
+				lateralMagnitude = std::clamp(lateralMagnitude, -gripLimit, gripLimit);
+				const virasa::math::Vec3 lateralForce = wheelRight * lateralMagnitude;
+
+				// Apply lateral grip above the contact patch, partway toward the
+				// chassis centre-of-mass plane, to tame the rollover couple while
+				// preserving body lean. 0.0 applies at the contact (flip-prone),
+				// 1.0 applies through the COM plane (no roll).
+				const float comHeight =
+					glm::dot(chassisPose.translation - hit.point, up);
+				const virasa::math::Vec3 rollCenter =
+					hit.point + up * (vehicle->rollCoupleFactor * comHeight);
+				physicsWorld->AddForceAtPoint(entity, lateralForce, rollCenter);
 
 				constexpr float kRadiusEpsilon = 0.0001f;
 				_wheelRollAngles[wheel.entity.index] +=

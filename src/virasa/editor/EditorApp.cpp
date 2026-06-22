@@ -478,8 +478,8 @@ int EditorApp::Run(int argc, char** argv)
 	// -------------------------------------------------------------------------
 	virasa::InputState inputState;
 	virasa::input::Bindings inputBindings;
-	inputBindings.BindAxis(0, virasa::window::KeyCode::W, virasa::window::KeyCode::S, 1.0f);
-	inputBindings.BindAxis(1, virasa::window::KeyCode::D, virasa::window::KeyCode::A, 1.0f);
+	inputBindings.BindAxis(0, virasa::window::KeyCode::K, virasa::window::KeyCode::J, 1.0f);
+	inputBindings.BindAxis(1, virasa::window::KeyCode::H, virasa::window::KeyCode::L, 1.0f);
 	inputBindings.BindDigital(2, virasa::window::KeyCode::Space);
 	inputBindings.BindDigital(3, virasa::window::KeyCode::LShift);
 	virasa::input::Resolver inputResolver;
